@@ -1,0 +1,45 @@
+# Large / re-downloadable (not source)
+# node-binaries: prebuilt Tari node binaries (re-downloadable from official releases)
+# wasm-template: reference clone of the official template repo (has its own .git)
+node-binaries/
+wasm-template/
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pnp.*
+.yarn/
+
+# Build output
+target/
+dist/
+build/
+*.wasm
+.vite/
+.next/
+out/
+
+# Tari / runtime state
+.tari/
+*.pid
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Logs & temp
+*.log
+tmp/
+.cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

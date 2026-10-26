@@ -1,0 +1,26 @@
+{
+  "name": "@agentpay/client",
+  "version": "0.1.0",
+  "description": "TypeScript/JS client for AgentPay — the on-chain budget wallet for AI agents on Tari Ootle. A thin JSON-RPC + transaction-manifest layer; no client-side signing or crypto deps.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "demo": "node dist/demo.js",
+    "demo:ts": "ts-node src/demo.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "@types/node": "^18.19.0"
+  }
+}

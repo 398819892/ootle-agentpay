@@ -1,0 +1,438 @@
+//   Copyright 2026 The Tari Project
+//   SPDX-License-Identifier: BSD-3-Clause
+
+//! Integration tests for the `AgentBudget` template. Covers the Phase-2 checklist: over the
+//! per-transaction cap, over the daily cap, the daily-window reset, a non-whitelisted merchant,
+//! paying after revoke, and the agent attempting an owner-only method — all of which must fail —
+//! plus the happy paths.
+
+use tari_template_lib::prelude::*;
+use tari_template_test_tooling::support::assert_error::assert_reject_reason;
+use tari_template_test_tooling::transaction::args;
+use tari_template_test_tooling::engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId};
+use tari_template_test_tooling::byte_type::ToByteType;
+use tari_template_test_tooling::crypto::{PublicKey as _, RistrettoPublicKey, RistrettoSecretKey};
+use tari_template_test_tooling::TemplateTest;
+
+fn pubkey(key: &RistrettoSecretKey) -> RistrettoPublicKeyBytes {
+    RistrettoPublicKey::from_secret_key(key).to_byte_type()
+}
+
+#[derive(Clone)]
+struct Account {
+    component: ComponentAddress,
+    owner_token: NonFungibleAddress,
+    key: RistrettoSecretKey,
+}
+
+struct Ctx {
+    test: TemplateTest,
+    template: TemplateAddress,
+}
+
+fn setup() -> Ctx {
+    let mut test = TemplateTest::my_crate();
+    let template = test.get_template_address("AgentBudget");
+    Ctx { test, template }
+}
+
+fn funded(test: &mut TemplateTest) -> Account {
+    let (component, owner_token, key) = test.create_funded_account();
+    Account { component, owner_token, key }
+}
+
+fn empty(test: &mut TemplateTest) -> Account {
+    let (component, owner_token, key) = test.create_empty_account();
+    Account { component, owner_token, key }
+}
+
+fn tari_balance(test: &mut TemplateTest, account: &Account) -> Amount {
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(account.component, "balance", args![XTR])
+            .build_and_seal(&account.key),
+        vec![account.owner_token.clone()],
+    );
+    test.expect_return::<Amount>(0)
+}
+
+fn set_epoch(test: &mut TemplateTest, epoch: u64) {
+    test.set_virtual_substate(
+        VirtualSubstateId::CurrentEpoch,
+        VirtualSubstate::CurrentEpoch(epoch),
+    );
+}
+
+struct Budget {
+    component: ComponentAddress,
+    owner_badge: ResourceAddress,
+    agent_badge: ResourceAddress,
+}
+
+/// Creates a budget funded by `owner`, depositing the owner badge back to `owner` and the agent
+/// badge into `agent`'s account.
+fn create_budget(
+    ctx: &mut Ctx,
+    owner: &Account,
+    agent: &Account,
+    whitelist: Vec<ComponentAddress>,
+    fund: Amount,
+    per_tx: Amount,
+    daily: Amount,
+    epochs_per_window: u64,
+) -> Budget {
+    ctx.test.execute_expect_success(
+        ctx.test
+            .transaction()
+            .call_method(owner.component, "withdraw", args![XTR, fund])
+            .put_last_instruction_output_on_workspace("funds")
+            .call_function(
+                ctx.template,
+                "new",
+                args![Workspace("funds"), per_tx, daily, epochs_per_window, whitelist],
+            )
+            .put_last_instruction_output_on_workspace("ret")
+            .call_method(owner.component, "deposit", args![Workspace("ret.1")])
+            .call_method(agent.component, "deposit", args![Workspace("ret.2")])
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    // instructions: 0 withdraw, 1 put, 2 new -> (Component, Bucket, Bucket)
+    let component = ctx.test.expect_return::<(ComponentAddress, Bucket, Bucket)>(2).0;
+
+    ctx.test.execute_expect_success(
+        ctx.test
+            .transaction()
+            .call_method(component, "get_badges", args![])
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    let (owner_badge, agent_badge) = ctx.test.expect_return::<(ResourceAddress, ResourceAddress)>(0);
+
+    Budget { component, owner_badge, agent_badge }
+}
+
+/// Builds a `pay` transaction authorized with the agent badge, expecting success.
+fn pay_ok(ctx: &mut Ctx, agent: &Account, b: &Budget, merchant: ComponentAddress, amount: Amount) {
+    ctx.test.execute_expect_success(
+        ctx.test
+            .transaction()
+            .create_proof(agent.component, b.agent_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .call_method(b.component, "pay", args![merchant, amount, "memo".to_string()])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&agent.key),
+        vec![agent.owner_token.clone()],
+    );
+}
+
+/// Builds a `pay` transaction authorized with the agent badge, expecting failure; returns the reason.
+fn pay_fail(
+    ctx: &mut Ctx,
+    agent: &Account,
+    b: &Budget,
+    merchant: ComponentAddress,
+    amount: Amount,
+) -> tari_template_test_tooling::engine_types::commit_result::RejectReason {
+    ctx.test.execute_expect_failure(
+        ctx.test
+            .transaction()
+            .create_proof(agent.component, b.agent_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .call_method(b.component, "pay", args![merchant, amount, "memo".to_string()])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&agent.key),
+        vec![agent.owner_token.clone()],
+    )
+}
+
+// --------------------------------------------------------------------------------------------
+
+#[test]
+fn agent_pays_whitelisted_merchant() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![1000], amount![3000], 10,
+    );
+
+    pay_ok(&mut ctx, &agent, &b, merchant.component, amount![500]);
+    assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![500]);
+}
+
+#[test]
+fn over_per_tx_cap_fails() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![1000], amount![5000], 10,
+    );
+
+    let reason = pay_fail(&mut ctx, &agent, &b, merchant.component, amount![1500]);
+    assert_reject_reason(reason, "Amount exceeds the per-transaction cap");
+}
+
+#[test]
+fn over_daily_cap_fails() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![2000], amount![3000], 10,
+    );
+
+    pay_ok(&mut ctx, &agent, &b, merchant.component, amount![2000]); // spent 2000
+    let reason = pay_fail(&mut ctx, &agent, &b, merchant.component, amount![2000]); // 4000 > 3000
+    assert_reject_reason(reason, "Amount exceeds the daily cap");
+}
+
+#[test]
+fn daily_window_resets() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![2000], amount![3000], 10,
+    );
+
+    pay_ok(&mut ctx, &agent, &b, merchant.component, amount![2000]); // spent 2000 in window
+    // advance past the window (window was created at epoch 0, length 10)
+    set_epoch(&mut ctx.test, 11);
+    // the window resets, so another 2000 is allowed
+    pay_ok(&mut ctx, &agent, &b, merchant.component, amount![2000]);
+    assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![4000]);
+}
+
+#[test]
+fn non_whitelisted_merchant_fails() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+    let stranger = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![1000], amount![3000], 10,
+    );
+
+    let reason = pay_fail(&mut ctx, &agent, &b, stranger.component, amount![100]);
+    assert_reject_reason(reason, "Merchant is not whitelisted");
+}
+
+#[test]
+fn pay_after_revoke_fails() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![1000], amount![3000], 10,
+    );
+
+    // owner revokes (owner badge)
+    ctx.test.execute_expect_success(
+        ctx.test
+            .transaction()
+            .create_proof(owner.component, b.owner_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .call_method(b.component, "revoke", args![])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+
+    let reason = pay_fail(&mut ctx, &agent, &b, merchant.component, amount![100]);
+    assert_reject_reason(reason, "Agent has been revoked");
+}
+
+#[test]
+fn agent_cannot_call_owner_method() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![1000], amount![3000], 10,
+    );
+
+    // agent presents the AGENT badge and tries an owner-only method
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test
+            .transaction()
+            .create_proof(agent.component, b.agent_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .call_method(b.component, "set_limits", args![amount![999999], amount![999999]])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&agent.key),
+        vec![agent.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Access Denied");
+}
+
+#[test]
+fn owner_can_raise_limits_then_agent_pays_more() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![1000], amount![3000], 10,
+    );
+
+    // initially 1500 is over the per-tx cap
+    let reason = pay_fail(&mut ctx, &agent, &b, merchant.component, amount![1500]);
+    assert_reject_reason(reason, "Amount exceeds the per-transaction cap");
+
+    // owner raises the caps
+    ctx.test.execute_expect_success(
+        ctx.test
+            .transaction()
+            .create_proof(owner.component, b.owner_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .call_method(b.component, "set_limits", args![amount![2000], amount![5000]])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+
+    // now 1500 is fine
+    pay_ok(&mut ctx, &agent, &b, merchant.component, amount![1500]);
+    assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![1500]);
+}
+
+#[test]
+fn owner_can_withdraw_remaining() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![1000], amount![3000], 10,
+    );
+
+    let owner_before = tari_balance(&mut ctx.test, &owner);
+    // owner withdraws 4000 back to their account
+    ctx.test.execute_expect_success(
+        ctx.test
+            .transaction()
+            .create_proof(owner.component, b.owner_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .call_method(b.component, "withdraw", args![amount![4000]])
+            .put_last_instruction_output_on_workspace("coins")
+            .call_method(owner.component, "deposit", args![Workspace("coins")])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    assert_eq!(tari_balance(&mut ctx.test, &owner), owner_before + amount![4000]);
+}
+
+// --------------------------------------------------------------------------------------------
+// pay_via_escrow — cross-template integration with the Escrow template
+// --------------------------------------------------------------------------------------------
+
+/// Loads both the AgentBudget (this crate) and the sibling Escrow crate, so `pay_via_escrow` can
+/// instantiate an Escrow on-chain. Run from the agent_budget crate dir; `../escrow` is the sibling.
+fn setup_with_escrow() -> (Ctx, TemplateAddress) {
+    let mut test = TemplateTest::new(".", ["../escrow", "."]);
+    let template = test.get_template_address("AgentBudget");
+    let escrow_tpl = test.get_template_address("Escrow");
+    (Ctx { test, template }, escrow_tpl)
+}
+
+#[test]
+fn agent_pays_via_escrow_then_release() {
+    let (mut ctx, escrow_tpl) = setup_with_escrow();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![2000], amount![5000], 10,
+    );
+
+    // owner wires up the escrow integration: 5% fee, no arbiter, refunds to owner, fee to treasury
+    ctx.test.execute_expect_success(
+        ctx.test
+            .transaction()
+            .create_proof(owner.component, b.owner_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .call_method(
+                b.component,
+                "configure_escrow",
+                args![escrow_tpl, owner.component, treasury.component, None::<RistrettoPublicKeyBytes>, 500u64],
+            )
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+
+    // agent opens an escrow for 1000 instead of paying the merchant directly
+    let merchant_pk = pubkey(&merchant.key);
+    ctx.test.execute_expect_success(
+        ctx.test
+            .transaction()
+            .create_proof(agent.component, b.agent_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .call_method(
+                b.component,
+                "pay_via_escrow",
+                args![merchant.component, merchant_pk, amount![1000], 50u64, "deliver first".to_string()],
+            )
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&agent.key),
+        vec![agent.owner_token.clone()],
+    );
+    // instructions: 0 create_proof, 1 put, 2 pay_via_escrow -> escrow ComponentAddress
+    let escrow = ctx.test.expect_return::<ComponentAddress>(2);
+
+    // the funds are locked in the escrow — the merchant has NOT been paid yet
+    assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![0]);
+
+    // the agent is the escrow's payer (the tx signer), so it can release once the merchant delivers
+    ctx.test.execute_expect_success(
+        ctx.test
+            .transaction()
+            .call_method(escrow, "release", args![None::<Vec<u8>>])
+            .build_and_seal(&agent.key),
+        vec![agent.owner_token.clone()],
+    );
+    // 1000 funds, 5% fee => merchant +950, treasury +50
+    assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![950]);
+    assert_eq!(tari_balance(&mut ctx.test, &treasury), amount![50]);
+}

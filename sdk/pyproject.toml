@@ -1,0 +1,26 @@
+[project]
+name = "ootle-agentpay"
+version = "0.1.0"
+description = "Private, budget-capped stablecoin payments for AI agents on Tari Ootle (L2)."
+readme = "README.md"
+requires-python = ">=3.13"          # ootle-py itself requires >=3.13
+license = { text = "BSD-3-Clause" }
+dependencies = ["ootle-py>=0.2.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+agentpay = "agentpay.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentpay"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"

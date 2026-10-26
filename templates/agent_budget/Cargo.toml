@@ -1,0 +1,42 @@
+[workspace]
+[package]
+name = "agent_budget"
+version = "0.1.0"
+edition = "2024"
+description = "An on-chain spending budget for an AI agent: owner funds it, agent spends within chain-enforced limits"
+
+[package.metadata.tari-template]
+tags = ["agent", "payments", "budget"]
+category = "defi"
+
+[dependencies]
+tari_template_lib = { version = "0.35" }
+
+[dev-dependencies]
+tari_template_test_tooling = "0.47"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[profile.release]
+opt-level = 's'
+lto = true
+codegen-units = 1
+panic = 'abort'
+strip = true
+
+[profile.dev.package.wasmer]
+opt-level = 2
+[profile.dev.package.wasmer-compiler]
+opt-level = 2
+[profile.dev.package.wasmer-compiler-cranelift]
+opt-level = 2
+[profile.dev.package.cranelift-codegen]
+opt-level = 2
+[profile.dev.package.cranelift-frontend]
+opt-level = 2
+[profile.dev.package.cranelift-entity]
+opt-level = 2
+
+[build-dependencies]
+tari_ootle_template_build = "0.16"

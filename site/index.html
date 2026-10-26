@@ -1,0 +1,266 @@
+<title>Ootle 托管与代理支付</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* layout: ink header → hero thesis → two product cards → 3-template ledger → verification → honest status */
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface-2:#eceff4; --fg:#191c23; --fg-muted:#596072;
+    --border:#e3e7ee; --border-strong:#d2d8e2;
+    --purple:#6d5ae6; --purple-ink:#463aa6; --purple-bg:#efecfd;
+    --teal:#0f9e78; --teal-ink:#0b6b53; --teal-bg:#e3f5ee;
+    --amber-ink:#8a5a0b; --amber-bg:#fbeed7;
+    --danger:#c93d3d;
+    --font-display:"Sora","Noto Sans SC",system-ui,sans-serif;
+    --font-body:"Noto Sans SC",system-ui,"Helvetica Neue",sans-serif;
+    --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --bg:#0d0f15; --surface:#161922; --surface-2:#1e222d; --fg:#e9ebf1; --fg-muted:#9aa2b2;
+    --border:#272c38; --border-strong:#343a49;
+    --purple:#9e8fff; --purple-ink:#c6bdff; --purple-bg:#211d3a;
+    --teal:#38caa4; --teal-ink:#86e6ce; --teal-bg:#123029;
+    --amber-ink:#e9b159; --amber-bg:#2c2412;
+    --danger:#f08a8a; color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --bg:#0d0f15; --surface:#161922; --surface-2:#1e222d; --fg:#e9ebf1; --fg-muted:#9aa2b2;
+    --border:#272c38; --border-strong:#343a49;
+    --purple:#9e8fff; --purple-ink:#c6bdff; --purple-bg:#211d3a;
+    --teal:#38caa4; --teal-ink:#86e6ce; --teal-bg:#123029;
+    --amber-ink:#e9b159; --amber-bg:#2c2412;
+    --danger:#f08a8a; color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font-family:var(--font-body);line-height:1.7;margin:0;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding-inline:max(20px,env(safe-area-inset-left,0px)) max(20px,env(safe-area-inset-right,0px))}
+  h1,h2,h3{font-family:var(--font-display);font-weight:600;line-height:1.25;text-wrap:balance;margin:0}
+  p{margin:0}
+  .eyebrow{font-family:var(--font-mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-muted)}
+  .muted{color:var(--fg-muted)}
+  code,.mono{font-family:var(--font-mono)}
+  a{color:var(--purple)}
+  header.top{border-bottom:1px solid var(--border);background:var(--surface)}
+  .top .wrap{display:flex;align-items:center;gap:12px;padding-block:14px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:9px;font-family:var(--font-display);font-weight:600;font-size:16px}
+  .dot{width:11px;height:11px;border-radius:3px;background:var(--purple);box-shadow:5px 0 0 var(--teal)}
+  .top .tag{margin-left:auto;font-family:var(--font-mono);font-size:12px;color:var(--fg-muted);
+    border:1px solid var(--border);border-radius:999px;padding:3px 10px}
+  section{padding-block:clamp(40px,7vw,68px)}
+  .hero h1{font-size:clamp(28px,6vw,46px);letter-spacing:-.015em}
+  .hero .lede{font-size:clamp(16px,2.4vw,20px);color:var(--fg-muted);max-width:40ch;margin-top:18px}
+  .hero .chips{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px}
+  .chip{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;padding:6px 13px;border-radius:999px;border:1px solid}
+  .chip.p{color:var(--purple-ink);background:var(--purple-bg);border-color:transparent}
+  .chip.t{color:var(--teal-ink);background:var(--teal-bg);border-color:transparent}
+  .stat-row{display:flex;gap:28px;flex-wrap:wrap;margin-top:34px}
+  .stat b{font-family:var(--font-display);font-weight:600;font-size:26px;display:block;line-height:1.1}
+  .stat span{font-size:13px;color:var(--fg-muted)}
+  .h2row{display:flex;align-items:baseline;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+  .h2row h2{font-size:clamp(21px,3.4vw,27px)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:720px){.grid2{grid-template-columns:1fr}}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px 22px 24px;min-width:0}
+  .card .kic{font-size:12px;font-weight:500;letter-spacing:.04em;padding:3px 9px;border-radius:7px;display:inline-block}
+  .card.p .kic{color:var(--purple-ink);background:var(--purple-bg)}
+  .card.t .kic{color:var(--teal-ink);background:var(--teal-bg)}
+  .card h3{font-size:18px;margin:12px 0 6px}
+  .card .sub{color:var(--fg-muted);font-size:14px}
+  .flow{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:16px}
+  .step{font-size:12.5px;font-weight:500;padding:6px 10px;border-radius:9px;background:var(--surface-2);border:1px solid var(--border);white-space:nowrap}
+  .step.good{color:var(--teal-ink);background:var(--teal-bg);border-color:transparent}
+  .step.warn{color:var(--amber-ink);background:var(--amber-bg);border-color:transparent}
+  .step.bad{color:var(--danger);border-color:var(--border-strong)}
+  .arrow{color:var(--fg-muted);font-size:13px}
+  ul.feat{list-style:none;padding:0;margin:16px 0 0;display:flex;flex-direction:column;gap:7px}
+  ul.feat li{display:flex;gap:9px;font-size:14px}
+  ul.feat li::before{content:"";flex:0 0 7px;height:7px;margin-top:9px;border-radius:50%;background:currentColor;opacity:.55}
+  .card.p ul.feat li{color:var(--fg)} .card.p ul.feat li::before{background:var(--purple)}
+  .card.t ul.feat li::before{background:var(--teal)}
+  /* architecture stack */
+  .stack{display:flex;flex-direction:column;gap:10px;margin-top:8px}
+  .layer{border:1px solid var(--border);border-radius:14px;padding:14px 18px;background:var(--surface)}
+  .layer .lt{font-family:var(--font-display);font-weight:500;font-size:15px}
+  .layer .ls{font-size:13px;color:var(--fg-muted)}
+  .layer.base{background:var(--surface-2)}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media (max-width:620px){.two{grid-template-columns:1fr}}
+  .layer.p{border-color:var(--purple);} .layer.t{border-color:var(--teal);}
+  .conn{text-align:center;color:var(--fg-muted);font-size:12px;line-height:1}
+  /* ledger table */
+  .ledger{border:1px solid var(--border);border-radius:16px;overflow:hidden;background:var(--surface)}
+  .lrow{display:grid;grid-template-columns:150px 1fr auto;gap:16px;padding:16px 20px;align-items:center;border-top:1px solid var(--border)}
+  .lrow:first-child{border-top:0}
+  .lrow .nm{font-family:var(--font-display);font-weight:600;font-size:15px}
+  .lrow .ds{font-size:13.5px;color:var(--fg-muted)}
+  .lrow .addr{font-family:var(--font-mono);font-size:11.5px;color:var(--fg-muted);margin-top:4px;word-break:break-all}
+  .pass{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--teal-ink);background:var(--teal-bg);
+    padding:4px 10px;border-radius:999px;white-space:nowrap}
+  @media (max-width:640px){.lrow{grid-template-columns:1fr;gap:6px}.lrow .pass{justify-self:start}}
+  /* verify band */
+  .band{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px}
+  .vgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  @media (max-width:640px){.vgrid{grid-template-columns:1fr 1fr}}
+  .v b{font-family:var(--font-display);font-weight:600;font-size:24px;display:block;line-height:1.1}
+  .v span{font-size:12.5px;color:var(--fg-muted)}
+  /* status */
+  .status{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:720px){.status{grid-template-columns:1fr}}
+  .status .box{border:1px solid var(--border);border-radius:16px;padding:20px;background:var(--surface)}
+  .status h3{font-size:15px;display:flex;align-items:center;gap:8px}
+  .status ul{margin:12px 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:9px}
+  .status li{font-size:14px;display:flex;gap:9px;align-items:flex-start}
+  .ic{flex:0 0 auto;font-family:var(--font-mono);font-weight:600;margin-top:1px}
+  .ic.ok{color:var(--teal)} .ic.no{color:var(--amber-ink)}
+  footer{border-top:1px solid var(--border);color:var(--fg-muted);font-size:13px}
+  footer .wrap{padding-block:26px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .divider{height:1px;background:var(--border);margin:0}
+</style>
+
+<header class="top"><div class="wrap">
+  <span class="brand"><span class="dot" aria-hidden="true"></span>Ootle 托管与代理支付</span>
+  <span class="tag">Tari Ootle · L2</span>
+</div></header>
+
+<section class="hero"><div class="wrap">
+  <p class="eyebrow">on-chain escrow · agent budgets · p2p otc</p>
+  <h1>把花钱和交易的安全边界，从客户端自觉搬到区块链强制。</h1>
+  <p class="lede">让 AI 代理替你花钱、让陌生人跟你交易——而限额与托管规则由 Tari L2 的验证节点在链上执行，不靠任何一方自觉。</p>
+  <div class="chips">
+    <span class="chip p">AI 代理支付预算</span>
+    <span class="chip t">P2P 场外托管</span>
+  </div>
+  <div class="stat-row">
+    <div class="stat"><b>3</b><span>链上模板（Rust→WASM）</span></div>
+    <div class="stat"><b>81</b><span>测试全绿（模板+SDK）</span></div>
+    <div class="stat"><b>0</b><span>压测不匹配 / 链上已验证</span></div>
+  </div>
+</div></section>
+
+<div class="divider"></div>
+
+<section><div class="wrap">
+  <div class="h2row"><h2>两个产品，一个托管核心</h2><span class="muted">都建在同一套链上托管逻辑上</span></div>
+  <div class="grid2">
+    <div class="card p">
+      <span class="kic">AgentPay</span>
+      <h3>给 AI 代理的「带硬限额钱包」</h3>
+      <p class="sub">主人充值、给代理发会话凭证；代理只能在链上规则内花钱，钥匙不必交给它。</p>
+      <div class="flow">
+        <span class="step">所有者充值</span><span class="arrow">→</span>
+        <span class="step">AgentBudget 链上检查</span><span class="arrow">→</span>
+        <span class="step good">商户收款</span><span class="arrow">／</span>
+        <span class="step bad">违规被链拒</span>
+      </div>
+      <ul class="feat">
+        <li>单笔上限、每日（epoch 窗口）上限、商户白名单</li>
+        <li>主人一键撤销，agent 立刻冻结</li>
+        <li>客户端检查仅「提前报错」，以链上为准</li>
+      </ul>
+    </div>
+    <div class="card t">
+      <span class="kic">OTC Escrow</span>
+      <h3>陌生人之间的场外安全交易</h3>
+      <p class="sub">卖方资产先锁进托管，买方链下付款后放币；超时退回、争议由仲裁人裁决。</p>
+      <div class="flow">
+        <span class="step">卖方挂单</span><span class="arrow">→</span>
+        <span class="step">买方接单付款</span><span class="arrow">→</span>
+        <span class="step good">确认放款</span><span class="arrow">／</span>
+        <span class="step">超时退回</span><span class="arrow">／</span>
+        <span class="step warn">争议仲裁</span>
+      </div>
+      <ul class="feat">
+        <li>资产锁托管，谁都不用先裸信任对方</li>
+        <li>防作恶：挂单保证金、单笔上限、仲裁人白名单</li>
+        <li>平台每笔收手续费进金库</li>
+      </ul>
+    </div>
+  </div>
+</div></section>
+
+<div class="divider"></div>
+
+<section><div class="wrap">
+  <div class="h2row"><h2>架构</h2><span class="muted">用户 → 产品合约 → 链上托管核心</span></div>
+  <div class="stack">
+    <div class="two">
+      <div class="layer p"><div class="lt">所有者 · AI 代理</div><div class="ls">充值 / 在限额内花钱</div></div>
+      <div class="layer t"><div class="lt">卖方 · 买方 · 仲裁人</div><div class="ls">挂单 / 接单付款 / 裁决</div></div>
+    </div>
+    <div class="conn" aria-hidden="true">↓</div>
+    <div class="two">
+      <div class="layer p"><div class="lt">AgentBudget 合约</div><div class="ls">单笔·日限额·白名单·撤销</div></div>
+      <div class="layer t"><div class="lt">OtcBoard 合约</div><div class="ls">锁资产·超时退回·争议仲裁</div></div>
+    </div>
+    <div class="conn" aria-hidden="true">↓</div>
+    <div class="layer base"><div class="lt">Escrow 托管核心 · Tari Ootle L2</div><div class="ls">锁钱 → 放款 / 退款 / 仲裁 · 平台收费 — 规则由验证节点在链上强制</div></div>
+  </div>
+</div></section>
+
+<div class="divider"></div>
+
+<section><div class="wrap">
+  <div class="h2row"><h2>三个链上模板</h2><span class="muted">都已发布到本地链并用真实交易验证</span></div>
+  <div class="ledger">
+    <div class="lrow">
+      <div><div class="nm">Escrow</div></div>
+      <div><div class="ds">锁资金；放款（可选原像）/ 超时退款 / 争议→仲裁；平台手续费。</div>
+        <div class="addr">template_9b230fab92bd2c2e32b82d28162854b9d31a2cb6a950a7920088cb8d54f2ef90</div></div>
+      <div class="pass">13 tests ✓</div>
+    </div>
+    <div class="lrow">
+      <div><div class="nm">AgentBudget</div></div>
+      <div><div class="ds">owner/agent 双凭证；pay 受单笔+日限额+白名单约束；撤销；pay_via_escrow 跨模板。</div>
+        <div class="addr">template_758d0c587624cab9634692a9b13424e2da89e7389e0e8e2272c6dc7bdeec5b97</div></div>
+      <div class="pass">10 tests ✓</div>
+    </div>
+    <div class="lrow">
+      <div><div class="nm">OtcBoard</div></div>
+      <div><div class="ds">挂单/接单/确认/退回/争议/分配；挂单保证金、单笔上限、仲裁人白名单。</div>
+        <div class="addr">template_8bfa294dc89b6fdccccb123becaee056d0c250f9c1613d06b7c8571d10cb0ff1</div></div>
+      <div class="pass">12 tests ✓</div>
+    </div>
+  </div>
+</div></section>
+
+<div class="divider"></div>
+
+<section><div class="wrap">
+  <div class="h2row"><h2>验证到什么程度</h2><span class="muted">不只是单测，是链上真实调用</span></div>
+  <div class="band"><div class="vgrid">
+    <div class="v"><b>35</b><span>模板单元测试（wasmer 沙箱）</span></div>
+    <div class="v"><b>46</b><span>Python SDK 测试</span></div>
+    <div class="v"><b>3/3</b><span>模板发布本地链并真实调用</span></div>
+    <div class="v"><b>0</b><span>随机压测 20 轮 · 链上 vs 规则不匹配</span></div>
+  </div></div>
+  <p class="muted" style="margin-top:16px;font-size:14px">链上已核对的真实资金流动示例：Escrow 放款（payee&nbsp;+950 / 金库&nbsp;+50）、AgentBudget 付款与超额拒绝与撤销、OtcBoard 挂单→接单→确认（买方&nbsp;+950 / 金库&nbsp;+50）与争议分配（买方&nbsp;+570 / 金库&nbsp;+30）。</p>
+</div></section>
+
+<div class="divider"></div>
+
+<section><div class="wrap">
+  <div class="h2row"><h2>诚实的状态</h2><span class="muted">做了什么，还差什么</span></div>
+  <div class="status">
+    <div class="box">
+      <h3>已完成</h3>
+      <ul>
+        <li><span class="ic ok">✓</span>三个模板写完、测试全绿，部署到本地 Tari swarm 私链</li>
+        <li><span class="ic ok">✓</span>每个模板都用真实交易 + 余额核对验证过</li>
+        <li><span class="ic ok">✓</span>Python SDK（ootle-agentpay）接上链上组件，devnet 全流程演示跑通</li>
+        <li><span class="ic ok">✓</span>随机化压测、中英双语 README、接口 / 安全 / devnet 文档</li>
+        <li><span class="ic ok">✓</span>公共测试网（esmeralda）真实部署：账户充值上链 + 三个模板全部上链(escrow <code>template_7de6ee2d…</code> / agent_budget <code>template_299d49bc…</code> / otc_board <code>template_bafbe76e…</code>)</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>还没做</h3>
+      <ul>
+        <li><span class="ic no">○</span>争议保证金罚没、仲裁人质押等经济机制（主网前）</li>
+        <li><span class="ic no">○</span>主网前第三方合约审计 + 运营地合规审查</li>
+      </ul>
+    </div>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <span>保密金额链上读不到，所以硬限额走明文可数资源——不绑定单一币种。</span>
+  <span class="mono">BSD-3-Clause</span>
+</div></footer>
