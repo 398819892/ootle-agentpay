@@ -392,8 +392,17 @@ mod otc_board {
         }
 
         /// An arbiter withdraws their entire posted stake (e.g. to retire). Returns the bucket.
+        ///
+        /// Guarded: an arbiter may NOT pull their stake while they are named on a listing with an
+        /// unresolved dispute. Without this an arbiter could dodge `slash_arbiter` by unstaking the
+        /// moment a dispute names them — defeating the whole point of the stake. They must let the
+        /// open dispute reach resolution (or be slashed) before retiring their collateral.
         pub fn unstake_arbiter(&mut self) -> Bucket {
             let who = CallerContext::transaction_signer_public_key();
+            assert!(
+                !self.has_open_dispute_for(&who),
+                "Cannot unstake while you are the arbiter on a listing under dispute"
+            );
             let v = self.arbiter_stakes.get_mut(&who).expect("no stake posted");
             let out = v.withdraw_all();
             emit_event("unstake_arbiter", metadata!["amount" => out.amount().to_string()]);
@@ -435,6 +444,14 @@ mod otc_board {
         // -- helpers ---------------------------------------------------------------------
         fn get_mut(&mut self, id: u64) -> &mut Listing {
             self.listings.get_mut(&id).expect("unknown listing")
+        }
+
+        /// True if `who` is the arbiter on any listing currently under dispute, so their stake must
+        /// stay locked and slashable until it is resolved.
+        fn has_open_dispute_for(&self, who: &RistrettoPublicKeyBytes) -> bool {
+            self.listings
+                .values()
+                .any(|l| l.state == ListingState::Disputed && &l.arbiter == who)
         }
     }
 }

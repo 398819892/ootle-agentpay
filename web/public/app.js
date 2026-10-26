@@ -9,7 +9,25 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const el = (id) => document.getElementById(id);
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const fmt = (n) => Number(n || 0).toLocaleString("en-US");
+// Base-unit amounts are integers that can exceed JS's safe-integer range, so the backend sends
+// them as decimal strings. Group an integer string exactly (no lossy Number); fall back to
+// Number formatting for anything non-integer.
+const fmt = (n) => {
+  const s = n === null || n === undefined || n === "" ? "0" : String(n);
+  if (/^-?\d+$/.test(s)) return s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const x = Number(n || 0);
+  return Number.isFinite(x) ? x.toLocaleString("en-US") : s;
+};
+// Read a form field as a non-negative decimal-integer STRING (base units), or null if it is not a
+// whole number. Kept as a string end-to-end so large amounts never pass through a lossy float.
+const readAmt = (id) => {
+  const s = (el(id).value ?? "").trim();
+  return /^\d+$/.test(s) ? s : null;
+};
+// Compare amount strings as BigInt; null-safe (a null/invalid amount is treated as 0).
+const amtBig = (v) => {
+  try { return BigInt(String(v ?? "").trim() || "0"); } catch { return 0n; }
+};
 const UNIT = "XTR";
 
 /* ============================================================================
@@ -282,7 +300,7 @@ const I18N = {
     cancel: "Cancel",
     confirm_reset_title: "Reset the demo?",
     confirm_reset_body:
-      "This detaches the dashboard from the current budget so you can create a fresh one. The on-chain component itself is not deleted.",
+      "This only clears the dashboard's <b>local view</b> so you can open a fresh budget. Nothing on chain changes — the budget component, its vault and any remaining treasury stay exactly as they are. It does <b>not</b> withdraw or refund funds. Use <b>Withdraw</b> first if you want the treasury back.",
     confirm_reset_ok: "Reset",
     confirm_revoke_title: "Revoke the agent?",
     confirm_revoke_body:
@@ -317,7 +335,7 @@ const I18N = {
     t_connected_msg: "Wallet daemon is reachable.",
     t_still_offline: "Still offline",
     t_reset: "Reset",
-    t_reset_msg: "Ready for a new budget.",
+    t_reset_msg: "Local view cleared. The previous budget still exists on chain — funds were not withdrawn.",
     t_reset_failed: "Reset failed",
     t_agent_revoked: "Agent revoked",
     t_agent_revoked_msg: "The kill switch is on. Further payments will be rejected on chain.",
@@ -550,7 +568,7 @@ const I18N = {
     /* confirm modal */
     cancel: "取消",
     confirm_reset_title: "要重置演示吗?",
-    confirm_reset_body: "这会把仪表盘与当前预算解绑,方便你重新创建一个。链上组件本身不会被删除。",
+    confirm_reset_body: "这只清空仪表盘的<b>本地视图</b>,方便你新建预算。链上不发生任何变化——预算组件、其金库以及剩余余额都原样保留;<b>不会</b>提现或退款。如需取回余额,请先执行「提现」。",
     confirm_reset_ok: "重置",
     confirm_revoke_title: "要停用这个代理吗?",
     confirm_revoke_body:
@@ -585,7 +603,7 @@ const I18N = {
     t_connected_msg: "钱包守护进程可以访问。",
     t_still_offline: "仍未连接",
     t_reset: "已重置",
-    t_reset_msg: "可以创建新预算了。",
+    t_reset_msg: "已清空本地视图。原预算仍在链上——资金未被提现。",
     t_reset_failed: "重置失败",
     t_agent_revoked: "代理已停用",
     t_agent_revoked_msg: "紧急停用开关已打开。此后的支付都会在链上被拒绝。",
@@ -950,8 +968,10 @@ function viewOverview() {
   const w = b.window;
   const winSpent = w ? w.spentInWindow : b.spent;
   const winCap = w ? w.dailyCap : b.dailyCap;
-  const winRemaining = w ? w.remaining : Math.max(0, b.dailyCap - b.spent);
-  const dailyPct = winCap ? Math.min(100, (winSpent / winCap) * 100) : 0;
+  const winRemaining = w
+    ? w.remaining
+    : (() => { const r = amtBig(b.dailyCap) - amtBig(b.spent); return (r < 0n ? 0n : r).toString(); })();
+  const dailyPct = amtBig(winCap) > 0n ? Math.min(100, (Number(winSpent) / Number(winCap)) * 100) : 0;
   const dailyClass = dailyPct >= 100 ? "danger" : dailyPct >= 75 ? "warn" : "ok";
   const epochTip = w
     ? t("epoch_tip", {
@@ -987,7 +1007,7 @@ function viewOverview() {
     .join("");
 
   const meter = (label, used, max, suffix, cls) => {
-    const pct = max ? Math.min(100, (used / max) * 100) : 0;
+    const pct = Number(max) > 0 ? Math.min(100, (Number(used) / Number(max)) * 100) : 0;
     return `<div>
       <div class="meter__row"><span class="lbl">${esc(label)}</span>
         <span class="val">${fmt(used)} <span class="max">/ ${fmt(max)} ${suffix}</span></span></div>
@@ -1377,7 +1397,7 @@ function viewGovernance() {
                 <div class="input-affix"><input class="input" id="g-amount" type="number" min="1" max="${b.treasury}" value="${b.treasury}"/><span class="affix">${UNIT}</span></div>
                 <div class="field__err">${esc(t("withdraw_amount_err"))}</div>
               </div>
-              <button type="submit" class="btn btn--secondary btn--block" id="g-withdraw" ${b.treasury <= 0 ? "disabled" : ""}>${icon("up", 16)} ${esc(t("withdraw_to_owner"))}</button>
+              <button type="submit" class="btn btn--secondary btn--block" id="g-withdraw" ${amtBig(b.treasury) <= 0n ? "disabled" : ""}>${icon("up", 16)} ${esc(t("withdraw_to_owner"))}</button>
             </form>
           </div>
         </div>
@@ -1711,16 +1731,17 @@ function wireCreate() {
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const fund = Number(el("f-fund").value);
-    const perTxCap = Number(el("f-pertx").value);
-    const dailyCap = Number(el("f-daily").value);
+    const fund = readAmt("f-fund");
+    const perTxCap = readAmt("f-pertx");
+    const dailyCap = readAmt("f-daily");
     const epochsPerWindow = Number(el("f-epochs").value);
-    let bad = false;
-    setErr("f-fund", !(fund > 0));
-    setErr("f-pertx", !(perTxCap > 0));
-    setErr("f-daily", !(dailyCap >= perTxCap && dailyCap > 0));
-    bad = !(fund > 0) || !(perTxCap > 0) || !(dailyCap >= perTxCap && dailyCap > 0);
-    if (bad) return;
+    const fundOk = fund !== null && amtBig(fund) > 0n;
+    const perTxOk = perTxCap !== null && amtBig(perTxCap) > 0n;
+    const dailyOk = dailyCap !== null && amtBig(dailyCap) > 0n && amtBig(dailyCap) >= amtBig(perTxCap);
+    setErr("f-fund", !fundOk);
+    setErr("f-pertx", !perTxOk);
+    setErr("f-daily", !dailyOk);
+    if (!(fundOk && perTxOk && dailyOk)) return;
 
     await withPending(el("f-submit"), t("p_opening"), async () => {
       try {
@@ -1753,13 +1774,14 @@ function wirePay() {
 
   const readInputs = () => ({
     merchant: el("p-merchant").value.trim(),
-    amount: Number(el("p-amount").value),
+    amount: readAmt("p-amount"),
     memo: el("p-memo").value.trim(),
   });
   const validate = ({ merchant, amount }) => {
+    const amountOk = amount !== null && amtBig(amount) > 0n;
     setErr("p-merchant", !merchant);
-    setErr("p-amount", !(amount > 0));
-    return merchant && amount > 0;
+    setErr("p-amount", !amountOk);
+    return merchant && amountOk;
   };
 
   checkBtn.addEventListener("click", async () => {
@@ -1832,9 +1854,10 @@ function wireGovernance() {
   if (topupForm) {
     topupForm.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const amount = Number(el("g-topup").value);
-      setErr("g-topup", !(amount > 0));
-      if (!(amount > 0)) return;
+      const amount = readAmt("g-topup");
+      const ok = amount !== null && amtBig(amount) > 0n;
+      setErr("g-topup", !ok);
+      if (!ok) return;
       await withPending(el("g-topup-btn"), t("p_topping"), async () => {
         try {
           S.data = await api("/api/top-up", { amount });
@@ -1869,10 +1892,11 @@ function wireGovernance() {
   const wdForm = el("wd-form");
   wdForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const amount = Number(el("g-amount").value);
+    const amount = readAmt("g-amount");
     const max = S.data.budget.treasury;
-    setErr("g-amount", !(amount > 0 && amount <= max));
-    if (!(amount > 0 && amount <= max)) return;
+    const valid = amount !== null && amtBig(amount) > 0n && amtBig(amount) <= amtBig(max);
+    setErr("g-amount", !valid);
+    if (!valid) return;
     const ok = await confirmDialog({
       tone: "warn",
       icon: "up",

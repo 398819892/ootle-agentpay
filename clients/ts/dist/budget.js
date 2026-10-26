@@ -15,6 +15,30 @@ const walletd_1 = require("./walletd");
 const window_1 = require("./window");
 /** Native Tari test token used as the (plaintext, countable) budget resource on a devnet. */
 exports.XTR = "XTR";
+/** Normalise an amount to a plain decimal-integer string for a manifest `amount!(…)` literal. */
+function amt(x) {
+    if (typeof x === "bigint") {
+        if (x < 0n)
+            throw new errors_1.ChainError(`amount cannot be negative: ${x}`);
+        return x.toString();
+    }
+    if (typeof x === "string") {
+        const s = x.trim();
+        if (!/^\d+$/.test(s))
+            throw new errors_1.ChainError(`invalid amount (expected a non-negative integer): ${x}`);
+        return s;
+    }
+    // number: reject floats, negatives, and anything beyond the safe-integer range (would lose
+    // precision or stringify in exponential form and corrupt the manifest).
+    if (!Number.isInteger(x) || x < 0 || !Number.isSafeInteger(x)) {
+        throw new errors_1.ChainError(`unsafe amount (pass large values as a string/bigint): ${x}`);
+    }
+    return String(x);
+}
+/** Parse an amount to a BigInt (exact, no float rounding). */
+function big(x) {
+    return BigInt(amt(x));
+}
 function components(blob, exclude) {
     const all = new Set(blob.match(/component_[0-9a-f]{64}/g) ?? []);
     return [...all].filter((c) => !exclude.has(c));
@@ -83,11 +107,12 @@ class OnChainBudget {
         this.component = null;
         this.ownerBadge = null;
         this.agentBadge = null;
-        this.perTxCap = 0;
-        this.dailyCap = 0;
+        // Caps and running spend are base-unit integers held as decimal strings (exact beyond 2^53).
+        this.perTxCap = "0";
+        this.dailyCap = "0";
         this.whitelist = [];
         this.revoked = false;
-        this.spent = 0;
+        this.spent = "0";
         this.ledger = [];
         // Agent session badges issued for this budget (the first, "default", comes from `open`). Tracked
         // client-side for convenience; the chain is the source of truth for what each can do.
@@ -105,9 +130,9 @@ class OnChainBudget {
         const manifest = `use ${this.budgetTemplate} as AgentBudget;\n` +
             "fn main() {\n" +
             '    let mut owner = var!["owner"];\n' +
-            `    let funds = owner.withdraw(XTR, amount!(${fund}));\n` +
+            `    let funds = owner.withdraw(XTR, amount!(${amt(fund)}));\n` +
             `    let (comp, owner_badge, agent_badge) = AgentBudget::new(` +
-            `funds, amount!(${perTxCap}), amount!(${dailyCap}), ${epochsPerWindow}u64, [${wl}]);\n` +
+            `funds, amount!(${amt(perTxCap)}), amount!(${amt(dailyCap)}), ${Math.floor(epochsPerWindow)}u64, [${wl}]);\n` +
             "    owner.deposit(owner_badge);\n" +
             "    owner.deposit(agent_badge);\n" +
             "}\n";
@@ -122,8 +147,8 @@ class OnChainBudget {
         // owner badge minted first, agent badge second; sort is stable but not creation order,
         // so for devnet (one account holds both) either proof authorizes. Record both.
         [this.ownerBadge, this.agentBadge] = [badges[0], badges[1]];
-        this.perTxCap = perTxCap;
-        this.dailyCap = dailyCap;
+        this.perTxCap = amt(perTxCap);
+        this.dailyCap = amt(dailyCap);
         this.whitelist = [...whitelist];
         return this;
     }
@@ -136,7 +161,7 @@ class OnChainBudget {
             '    let mut owner = var!["owner"];\n' +
             `    let proof = owner.create_proof_for_resource(address!("${this.ownerBadge}"));\n` +
             '    let mut budget = var!["budget"];\n' +
-            `    let coins = budget.withdraw(amount!(${amount}));\n` +
+            `    let coins = budget.withdraw(amount!(${amt(amount)}));\n` +
             "    owner.deposit(coins);\n" +
             "    drop_all_proofs!();\n" +
             "}\n";
@@ -188,7 +213,7 @@ class OnChainBudget {
      */
     async setWindow(epochsPerWindow) {
         await this.ownerCall(`set_window(${Math.floor(epochsPerWindow)}u64)`);
-        this.spent = 0;
+        this.spent = "0";
     }
     /**
      * Add `amount` to the budget's vault, funded from `fromAccount` (defaults to the owner). `top_up`
@@ -199,7 +224,7 @@ class OnChainBudget {
         const funder = opts.fromAccount ?? this.ownerAccount;
         const manifest = "fn main() {\n" +
             '    let mut funder = var!["funder"];\n' +
-            `    let funds = funder.withdraw(XTR, amount!(${Math.floor(amount)}));\n` +
+            `    let funds = funder.withdraw(XTR, amount!(${amt(amount)}));\n` +
             '    let mut budget = var!["budget"];\n' +
             "    budget.top_up(funds);\n" +
             "}\n";
@@ -223,7 +248,7 @@ class OnChainBudget {
             '    let mut agent = var!["agent"];\n' +
             `    let proof = agent.create_proof_for_resource(address!("${this.agentBadge}"));\n` +
             '    let mut budget = var!["budget"];\n' +
-            `    budget.pay(proof, address!("${merchant}"), amount!(${amount}), "${memo}");\n` +
+            `    budget.pay(proof, address!("${merchant}"), amount!(${amt(amount)}), "${memo}");\n` +
             "    drop_all_proofs!();\n" +
             "}\n");
     }
@@ -240,9 +265,9 @@ class OnChainBudget {
             budget: this.component,
         });
         for (const ev of OnChainBudget.payEvents(res)) { // ledger follows the chain's events
-            const paid = Number(ev.amount ?? amount);
-            this.spent += paid;
-            this.ledger.push({ merchant: ev.merchant ?? merchant, amount: paid, memo: ev.memo ?? memo, txKind: "pay" });
+            const paid = big(ev.amount ?? amount); // exact, from the on-chain event
+            this.spent = (big(this.spent) + paid).toString();
+            this.ledger.push({ merchant: ev.merchant ?? merchant, amount: paid.toString(), memo: ev.memo ?? memo, txKind: "pay" });
         }
         return res;
     }
@@ -270,16 +295,17 @@ class OnChainBudget {
         return this.pay(params.merchant, params.amount, { memo });
     }
     precheck(merchant, amount) {
+        const a = big(amount);
         if (this.revoked) {
             throw new errors_1.PolicyViolation(["budget revoked (client pre-check; chain also rejects)"]);
         }
-        if (amount <= 0 || amount > this.perTxCap) {
-            throw new errors_1.PolicyViolation([`amount ${amount} over per-tx cap ${this.perTxCap} (client pre-check)`]);
+        if (a <= 0n || a > big(this.perTxCap)) {
+            throw new errors_1.PolicyViolation([`amount ${a} over per-tx cap ${this.perTxCap} (client pre-check)`]);
         }
         if (this.whitelist.length > 0 && !this.whitelist.includes(merchant)) {
             throw new errors_1.PolicyViolation(["merchant not whitelisted (client pre-check)"]);
         }
-        if (this.spent + amount > this.dailyCap) {
+        if (big(this.spent) + a > big(this.dailyCap)) {
             throw new errors_1.PolicyViolation([`would exceed daily cap ${this.dailyCap} (client pre-check)`]);
         }
     }

@@ -18,17 +18,20 @@ Two products on one shared escrow core:
    agent a session badge; the agent can only spend within chain-enforced rules: a per-transaction
    cap, a rolling daily cap, a merchant whitelist, and an instant kill switch. The client's own
    limit check is only a friendly early error — the chain is authoritative.
-2. **Private P2P OTC escrow** — sellers list an asset (locked in escrow), a buyer takes it and pays
-   off chain, then the asset is released / refunded on timeout / split by an arbiter on dispute. The
-   platform earns a fee per deal.
+2. **P2P OTC escrow** — sellers list an asset (locked in escrow), a buyer takes it and pays
+   **off chain**, then the asset is released / refunded on timeout / split by an arbiter on dispute.
+   The platform earns a fee per deal. This is **not a trustless atomic swap**: the optional hashlock
+   preimage is only a cryptographic condition, **not proof that an off-chain/fiat payment arrived**,
+   so settlement relies on off-chain-payment trust plus the arbiter. Amounts are public on chain —
+   privacy is scoped and known (see [`docs/security.md`](docs/security.md)), not anonymity.
 
 ### Templates (Rust → WASM)
 
 | Template | What it does | Tests | Published (localnet) | Published (esmeralda) |
 |---|---|---|---|---|
 | **Escrow** | Lock funds; release (opt. hashlock) / refund after timeout / dispute → arbiter resolves; platform fee | 17 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
-| **AgentBudget** | Owner/agent badges; `pay` within per-tx + rolling-daily caps + whitelist; revoke; `pay_via_escrow` (cross-template) | 10 ✅ | `template_758d0c58…` | `template_299d49bc…` |
-| **OtcBoard** | List/take/confirm/reclaim/dispute/resolve; listing bond, max-amount cap, arbiter whitelist + **arbiter stake/slash** | 16 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
+| **AgentBudget** | Owner/agent badges; `pay` within per-tx + rolling-daily caps + whitelist; revoke; `pay_via_escrow` (cross-template) | 14 ✅ | `template_758d0c58…` | `template_299d49bc…` |
+| **OtcBoard** | List/take/confirm/reclaim/dispute/resolve; listing bond, max-amount cap, arbiter whitelist + **arbiter stake/slash** | 18 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
 
 All three are deployed to a local swarm **and to the public esmeralda testnet**, and exercised with
 **real on-chain calls** (not just unit tests): see the demos below. Full esmeralda addresses and the
@@ -71,14 +74,27 @@ python ../scripts/otc_demo.py                             # OTC list→take→co
 
 ### Status & verification
 
-- **43 template unit tests** (Escrow 17, AgentBudget 10, OtcBoard 16) pass in the wasmer sandbox,
-  including adversarial/boundary cases (double-release, over-balance resolve, fee truncation) and
-  the arbiter stake/slash flow.
+Support level per component — read the ✅/❌ precisely:
+
+| Stage | Templates (escrow / agent_budget / otc_board) | SDK `agentpay.onchain` + offline logic | SDK `agentpay.ootle_chain` (OotlePyChain) |
+|---|---|---|---|
+| Implemented | ✅ | ✅ | ⚠️ partial (has `NotImplementedError` stubs) |
+| Unit-tested | ✅ | ✅ | ❌ not tested |
+| Exercised on-chain (live swarm + esmeralda) | ✅ | ✅ (local swarm) | ❌ never run against a live indexer |
+| Audited | ❌ not yet | ❌ not yet | ❌ not yet |
+
+- **49 template unit tests** (Escrow 17, AgentBudget 14, OtcBoard 18) pass in the wasmer sandbox,
+  including adversarial/boundary cases (double-release, over-balance resolve, fee truncation), the
+  arbiter stake/slash flow, and the arbiter-cannot-unstake-during-a-dispute guard.
 - **On-chain**: all three templates published to a local swarm; Escrow release, AgentBudget pay /
   cap-rejection / revoke, and OtcBoard list/take/confirm verified with real transactions and
   balance checks.
-- **SDK**: 46 Python tests pass (business logic + the 10 new on-chain-adapter tests).
-- See `docs/security.md` for the trust model, known limitations, and audit-prep notes.
+- **SDK**: the Python test suite covers the business logic and the stdlib JSON-RPC adapter
+  (`agentpay.onchain`), which is what the on-chain demos use. **Not covered:** the alternative
+  `agentpay.ootle_chain.OotlePyChain` adapter (built on `ootle-py`) is **experimental / unverified** —
+  it needs a live indexer and still contains `NotImplementedError` stubs, so a passing test count
+  does **not** mean that adapter is validated. See `sdk/README.md`.
+- **Not audited.** See `docs/security.md` for the trust model, known limitations, and audit-prep notes.
 
 ---
 
@@ -91,16 +107,18 @@ python ../scripts/otc_demo.py                             # OTC list→take→co
 1. **AgentPay（链上版）**：给 AI 代理用的支付钱包。所有者充值并给代理发一个会话凭证（badge）；
    代理只能在链上强制的规则内花钱——单笔上限、每日（epoch 窗口）上限、商户白名单、随时撤销的急停
    开关。客户端自己的限额检查只是「提前友好报错」，以链上为准。
-2. **隐私 P2P 场外托管**：卖方挂单（资产锁进托管），买方接单并链下付款，然后放币 / 超时退回 /
-   争议由仲裁人按比例分配。平台按笔收手续费。
+2. **P2P 场外托管**：卖方挂单（资产锁进托管），买方接单并**链下付款**，然后放币 / 超时退回 /
+   争议由仲裁人按比例分配。平台按笔收手续费。**这不是无信任的原子交换**：可选的 hashlock 原像只是
+   密码学条件，**并不能证明链下/法币付款已到账**，结算仍依赖链下付款信任 + 仲裁。链上金额**公开**——
+   隐私边界明确、范围有限（见 `docs/security.md`），并非匿名。
 
 ### 模板（Rust → WASM）
 
 | 模板 | 作用 | 测试 | 已发布(localnet) | 已发布(esmeralda) |
 |---|---|---|---|---|
 | **Escrow** | 锁资金；放款(可选 hashlock)/超时退款/争议→仲裁；平台手续费 | 17 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
-| **AgentBudget** | owner/agent 双 badge；`pay` 受单笔+日窗口上限+白名单约束；撤销；`pay_via_escrow`(跨模板) | 10 ✅ | `template_758d0c58…` | `template_299d49bc…` |
-| **OtcBoard** | 挂单/接单/确认/退回/争议/分配；挂单保证金、单笔上限、仲裁人白名单 + **仲裁人质押/罚没** | 16 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
+| **AgentBudget** | owner/agent 双 badge；`pay` 受单笔+日窗口上限+白名单约束；撤销；`pay_via_escrow`(跨模板) | 14 ✅ | `template_758d0c58…` | `template_299d49bc…` |
+| **OtcBoard** | 挂单/接单/确认/退回/争议/分配；挂单保证金、单笔上限、仲裁人白名单 + **仲裁人质押/罚没** | 18 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
 
 三个模板都已部署到本地链**以及公共测试网 esmeralda**,并用**真实链上调用**验证过（不只是单测）。
 esmeralda 完整地址与部署方法见 [`docs/esmeralda.md`](docs/esmeralda.md)。
@@ -154,12 +172,23 @@ Web 控制台里:开预算 → 正常付款(成功、余额减)→ 试试超额/
 
 ### 状态与验证
 
-- **43 个模板单测**（Escrow 17、AgentBudget 10、OtcBoard 16）在 wasmer 沙箱通过，含对抗/边界用例
-  （重复放款、超额分配、手续费截断）和仲裁人质押/罚没流程。
+按模块看支持程度（✅/❌ 请逐格读准）：
+
+| 阶段 | 模板(escrow / agent_budget / otc_board) | SDK `agentpay.onchain` + 离线逻辑 | SDK `agentpay.ootle_chain`(OotlePyChain) |
+|---|---|---|---|
+| 已实现 | ✅ | ✅ | ⚠️ 部分(含 `NotImplementedError` 桩) |
+| 已测试(单测) | ✅ | ✅ | ❌ 无测试 |
+| 已上链验证(本地 swarm + esmeralda) | ✅ | ✅(本地 swarm) | ❌ 从未对活索引器跑过 |
+| 已审计 | ❌ 暂无 | ❌ 暂无 | ❌ 暂无 |
+
+- **49 个模板单测**（Escrow 17、AgentBudget 14、OtcBoard 18）在 wasmer 沙箱通过，含对抗/边界用例
+  （重复放款、超额分配、手续费截断）、仲裁人质押/罚没流程，以及「在途争议时仲裁人不能取回质押」守卫。
 - **链上**：三个模板都发布到本地 swarm **以及公共测试网 esmeralda**；Escrow 放款、AgentBudget
   付款/超额拒绝/撤销、OtcBoard 挂单/接单/确认都用真实交易 + 余额核对验证过。
-- **SDK**：46 个 Python 测试通过（业务逻辑 + 10 个新的链上适配器测试）。
-- 信任模型、已知限制、审计准备见 `docs/security.md`。
+- **SDK**：Python 测试覆盖业务逻辑和纯标准库的 JSON-RPC 适配器（`agentpay.onchain`，即链上 demo 用的那条）。
+  **未覆盖**：另一条 `agentpay.ootle_chain.OotlePyChain` 适配器（基于 `ootle-py`）是**实验性 / 未验证**的——
+  它需要活索引器,且仍有 `NotImplementedError` 桩,所以「测试通过数」并不代表这条适配器已验证。详见 `sdk/README.md`。
+- **尚未审计。** 信任模型、已知限制、审计准备见 `docs/security.md`。
 
 ### 定位与局限（务必读）
 

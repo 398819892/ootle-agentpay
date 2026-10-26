@@ -2,12 +2,14 @@
 
 Private, budget-capped stablecoin payments for AI agents on Tari's L2 (Ootle).
 
-**Status: pre-alpha scaffold.** Business logic is implemented and tested (41 tests,
-`pytest -q`) against an in-memory fake chain and against `ootle-py`'s real key-derivation
-code. The real chain adapter (`agentpay.ootle_chain.OotlePyChain`) is written against
-`ootle-py` 0.2.0's documented API but has **not** been run against a live indexer — see
-`docs/00-api-notes.md` for exactly what is verified vs. assumed, and
-`docs/03-roadmap-onchain-conditions.md` for what's phase 1 vs. phase 2.
+**Status: pre-alpha scaffold.** Business logic is implemented and tested (run `pytest -q` for
+the current count) against an in-memory fake chain and against `ootle-py`'s real key-derivation
+code, plus the stdlib JSON-RPC adapter `agentpay.onchain` used by the live demos. That suite does
+**not** cover `agentpay.ootle_chain.OotlePyChain`: that adapter is **experimental / unverified** —
+written against `ootle-py` 0.2.0's documented API, never run against a live indexer, and it still
+contains `NotImplementedError` stubs. So a passing test count is **not** a claim that every SDK
+path is validated. See `docs/00-api-notes.md` for verified vs. assumed, and
+`docs/03-roadmap-onchain-conditions.md` for phase 1 vs. phase 2.
 
 ## What this is
 
@@ -101,7 +103,8 @@ src/agentpay/
   payout.py       batch payout planner (splits/jitters to avoid revealing headcount)
   privacy.py      privacy linter -- states what a given flow leaks, honestly
   escrow.py       phase-1 hash-lock "pay on delivery" approximation
-tests/            41 tests, all passing, run against FakeChain + real ootle-py keys
+tests/            pytest suite (FakeChain + real ootle-py keys + the onchain.py adapter);
+                  does NOT exercise ootle_chain.py (OotlePyChain) — see the status note above
 examples/
   demo_offline.py end-to-end walkthrough against FakeChain
 docs/

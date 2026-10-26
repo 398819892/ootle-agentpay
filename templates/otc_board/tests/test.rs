@@ -549,6 +549,109 @@ fn double_confirm_does_not_double_release() {
     assert_eq!(bal(&mut ctx.test, &buyer), buyer_after_first); // no extra payout
 }
 
+/// A whitelisted arbiter withdraws their entire posted stake.
+fn unstake_arbiter(ctx: &mut Ctx, board: &Board, arbiter: &Account) {
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .call_method(board.component, "unstake_arbiter", args![])
+            .put_last_instruction_output_on_workspace("stake")
+            .call_method(arbiter.component, "deposit", args![Workspace("stake")])
+            .build_and_seal(&arbiter.key),
+        vec![arbiter.owner_token.clone()],
+    );
+}
+
+/// An arbiter must NOT be able to pull their stake while a dispute names them (that would dodge
+/// slashing); and `slash_arbiter` must still work while the dispute is live.
+#[test]
+fn arbiter_cannot_unstake_during_dispute_and_slash_still_works() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = funded(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+    let buyer = empty(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 500);
+    set_arbiter_stake(&mut ctx, &board, &owner, amount![500]);
+    stake_arbiter(&mut ctx, &board, &arbiter, amount![500]);
+
+    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
+    take(&mut ctx, &board, &buyer, id, None);
+    simple(&mut ctx, &board, &buyer, "open_dispute", id);
+
+    // the arbiter tries to escape by pulling their stake mid-dispute -> rejected
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(board.component, "unstake_arbiter", args![])
+            .build_and_seal(&arbiter.key),
+        vec![arbiter.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Cannot unstake while you are the arbiter on a listing under dispute");
+
+    // the stake is still there, so slashing remains effective during the dispute
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .create_proof(owner.component, board.owner_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .call_method(board.component, "slash_arbiter", args![arbiter.public_key])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    assert_eq!(bal(&mut ctx.test, &treasury), amount![500]); // slashed stake moved to treasury
+
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .call_method(board.component, "get_arbiter_stake", args![arbiter.public_key])
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    let (_required, staked) = ctx.test.expect_return::<(Amount, Amount)>(0);
+    assert_eq!(staked, amount![0]);
+}
+
+/// Once the arbiter has no open dispute (the deal is resolved/settled), they CAN retire their stake.
+#[test]
+fn arbiter_can_unstake_once_dispute_is_resolved() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = funded(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+    let buyer = empty(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 500);
+    set_arbiter_stake(&mut ctx, &board, &owner, amount![500]);
+    stake_arbiter(&mut ctx, &board, &arbiter, amount![500]);
+
+    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
+    take(&mut ctx, &board, &buyer, id, None);
+    simple(&mut ctx, &board, &buyer, "open_dispute", id);
+
+    // arbiter resolves the dispute (settling the listing) ...
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .call_method(board.component, "resolve", args![id, amount![600]])
+            .build_and_seal(&arbiter.key),
+        vec![arbiter.owner_token.clone()],
+    );
+
+    // ... and with no open dispute remaining, the stake can be withdrawn
+    let before = bal(&mut ctx.test, &arbiter);
+    unstake_arbiter(&mut ctx, &board, &arbiter);
+    assert_eq!(bal(&mut ctx.test, &arbiter), before + amount![500]);
+
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .call_method(board.component, "get_arbiter_stake", args![arbiter.public_key])
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    let (_required, staked) = ctx.test.expect_return::<(Amount, Amount)>(0);
+    assert_eq!(staked, amount![0]);
+}
+
 #[test]
 fn confirm_before_take_is_rejected() {
     let mut ctx = setup();

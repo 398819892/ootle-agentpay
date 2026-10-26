@@ -14,9 +14,42 @@ import { windowStatus, WindowStatus } from "./window";
 /** Native Tari test token used as the (plaintext, countable) budget resource on a devnet. */
 export const XTR = "XTR";
 
+/**
+ * A base-unit amount. Accepted as a `bigint`, a decimal-integer `string`, or a `number` — but a
+ * `number` is only safe below 2^53, so anything that large must be passed as a string/bigint.
+ * Base-unit amounts are integers and can exceed JS's safe-integer range, so they are carried as
+ * decimal strings and compared with BigInt; they NEVER pass through a lossy float.
+ */
+export type AmountInput = bigint | number | string;
+
+/** Normalise an amount to a plain decimal-integer string for a manifest `amount!(…)` literal. */
+function amt(x: AmountInput): string {
+  if (typeof x === "bigint") {
+    if (x < 0n) throw new ChainError(`amount cannot be negative: ${x}`);
+    return x.toString();
+  }
+  if (typeof x === "string") {
+    const s = x.trim();
+    if (!/^\d+$/.test(s)) throw new ChainError(`invalid amount (expected a non-negative integer): ${x}`);
+    return s;
+  }
+  // number: reject floats, negatives, and anything beyond the safe-integer range (would lose
+  // precision or stringify in exponential form and corrupt the manifest).
+  if (!Number.isInteger(x) || x < 0 || !Number.isSafeInteger(x)) {
+    throw new ChainError(`unsafe amount (pass large values as a string/bigint): ${x}`);
+  }
+  return String(x);
+}
+
+/** Parse an amount to a BigInt (exact, no float rounding). */
+function big(x: AmountInput): bigint {
+  return BigInt(amt(x));
+}
+
 export interface LedgerEntry {
   merchant: string;
-  amount: number;
+  /** Base-unit amount as a decimal-integer string (exact; may exceed 2^53). */
+  amount: string;
   memo: string;
   txKind: "pay" | "pay_via_escrow";
 }
@@ -95,11 +128,12 @@ export class OnChainBudget {
   component: string | null = null;
   ownerBadge: string | null = null;
   agentBadge: string | null = null;
-  perTxCap = 0;
-  dailyCap = 0;
+  // Caps and running spend are base-unit integers held as decimal strings (exact beyond 2^53).
+  perTxCap = "0";
+  dailyCap = "0";
   whitelist: string[] = [];
   revoked = false;
-  spent = 0;
+  spent = "0";
   ledger: LedgerEntry[] = [];
   // Agent session badges issued for this budget (the first, "default", comes from `open`). Tracked
   // client-side for convenience; the chain is the source of truth for what each can do.
@@ -120,9 +154,9 @@ export class OnChainBudget {
 
   // -- owner -----------------------------------------------------------------------
   async open(params: {
-    fund: number;
-    perTxCap: number;
-    dailyCap: number;
+    fund: AmountInput;
+    perTxCap: AmountInput;
+    dailyCap: AmountInput;
     epochsPerWindow: number;
     whitelist: string[];
   }): Promise<this> {
@@ -132,9 +166,9 @@ export class OnChainBudget {
       `use ${this.budgetTemplate} as AgentBudget;\n` +
       "fn main() {\n" +
       '    let mut owner = var!["owner"];\n' +
-      `    let funds = owner.withdraw(XTR, amount!(${fund}));\n` +
+      `    let funds = owner.withdraw(XTR, amount!(${amt(fund)}));\n` +
       `    let (comp, owner_badge, agent_badge) = AgentBudget::new(` +
-      `funds, amount!(${perTxCap}), amount!(${dailyCap}), ${epochsPerWindow}u64, [${wl}]);\n` +
+      `funds, amount!(${amt(perTxCap)}), amount!(${amt(dailyCap)}), ${Math.floor(epochsPerWindow)}u64, [${wl}]);\n` +
       "    owner.deposit(owner_badge);\n" +
       "    owner.deposit(agent_badge);\n" +
       "}\n";
@@ -149,8 +183,8 @@ export class OnChainBudget {
     // owner badge minted first, agent badge second; sort is stable but not creation order,
     // so for devnet (one account holds both) either proof authorizes. Record both.
     [this.ownerBadge, this.agentBadge] = [badges[0], badges[1]];
-    this.perTxCap = perTxCap;
-    this.dailyCap = dailyCap;
+    this.perTxCap = amt(perTxCap);
+    this.dailyCap = amt(dailyCap);
     this.whitelist = [...whitelist];
     return this;
   }
@@ -160,13 +194,13 @@ export class OnChainBudget {
     this.revoked = true;
   }
 
-  async withdraw(amount: number): Promise<void> {
+  async withdraw(amount: AmountInput): Promise<void> {
     const manifest =
       "fn main() {\n" +
       '    let mut owner = var!["owner"];\n' +
       `    let proof = owner.create_proof_for_resource(address!("${this.ownerBadge}"));\n` +
       '    let mut budget = var!["budget"];\n' +
-      `    let coins = budget.withdraw(amount!(${amount}));\n` +
+      `    let coins = budget.withdraw(amount!(${amt(amount)}));\n` +
       "    owner.deposit(coins);\n" +
       "    drop_all_proofs!();\n" +
       "}\n";
@@ -220,7 +254,7 @@ export class OnChainBudget {
    */
   async setWindow(epochsPerWindow: number): Promise<void> {
     await this.ownerCall(`set_window(${Math.floor(epochsPerWindow)}u64)`);
-    this.spent = 0;
+    this.spent = "0";
   }
 
   /**
@@ -228,12 +262,12 @@ export class OnChainBudget {
    * is open on the template, so a keeper account can replenish on its own cadence — the chain has no
    * scheduler to do it automatically.
    */
-  async topUp(amount: number, opts: { fromAccount?: string } = {}): Promise<void> {
+  async topUp(amount: AmountInput, opts: { fromAccount?: string } = {}): Promise<void> {
     const funder = opts.fromAccount ?? this.ownerAccount;
     const manifest =
       "fn main() {\n" +
       '    let mut funder = var!["funder"];\n' +
-      `    let funds = funder.withdraw(XTR, amount!(${Math.floor(amount)}));\n` +
+      `    let funds = funder.withdraw(XTR, amount!(${amt(amount)}));\n` +
       '    let mut budget = var!["budget"];\n' +
       "    budget.top_up(funds);\n" +
       "}\n";
@@ -253,7 +287,7 @@ export class OnChainBudget {
   }
 
   // -- agent -----------------------------------------------------------------------
-  private payManifest(merchant: string, amount: number, memo: string): string {
+  private payManifest(merchant: string, amount: AmountInput, memo: string): string {
     // The agent presents a proof of its session badge; `pay` reads it to identify (and, if revoked,
     // refuse) the session before moving funds.
     return (
@@ -261,7 +295,7 @@ export class OnChainBudget {
       '    let mut agent = var!["agent"];\n' +
       `    let proof = agent.create_proof_for_resource(address!("${this.agentBadge}"));\n` +
       '    let mut budget = var!["budget"];\n' +
-      `    budget.pay(proof, address!("${merchant}"), amount!(${amount}), "${memo}");\n` +
+      `    budget.pay(proof, address!("${merchant}"), amount!(${amt(amount)}), "${memo}");\n` +
       "    drop_all_proofs!();\n" +
       "}\n"
     );
@@ -272,7 +306,7 @@ export class OnChainBudget {
    * error — the chain enforces the real limits regardless of what this client does. The local
    * ledger is updated from the on-chain `pay` event, not from the request.
    */
-  async pay(merchant: string, amount: number, opts: { memo?: string } = {}): Promise<any> {
+  async pay(merchant: string, amount: AmountInput, opts: { memo?: string } = {}): Promise<any> {
     const memo = opts.memo ?? "";
     this.precheck(merchant, amount);
     const res = await this.client.run(this.payManifest(merchant, amount, memo), {
@@ -280,9 +314,9 @@ export class OnChainBudget {
       budget: this.component!,
     });
     for (const ev of OnChainBudget.payEvents(res)) { // ledger follows the chain's events
-      const paid = Number(ev.amount ?? amount);
-      this.spent += paid;
-      this.ledger.push({ merchant: ev.merchant ?? merchant, amount: paid, memo: ev.memo ?? memo, txKind: "pay" });
+      const paid = big(ev.amount ?? amount); // exact, from the on-chain event
+      this.spent = (big(this.spent) + paid).toString();
+      this.ledger.push({ merchant: ev.merchant ?? merchant, amount: paid.toString(), memo: ev.memo ?? memo, txKind: "pay" });
     }
     return res;
   }
@@ -292,7 +326,7 @@ export class OnChainBudget {
    * reason — used to show that the *chain*, not the client, enforces the rules. Returns null if
    * the pay would be accepted.
    */
-  async wouldReject(merchant: string, amount: number, opts: { memo?: string } = {}): Promise<string | null> {
+  async wouldReject(merchant: string, amount: AmountInput, opts: { memo?: string } = {}): Promise<string | null> {
     const memo = opts.memo ?? "forced";
     const r = await this.client.dryRun(this.payManifest(merchant, amount, memo), {
       agent: this.agentAccount,
@@ -309,24 +343,25 @@ export class OnChainBudget {
   async payInvoice(params: {
     merchant: string;
     invoiceId: string;
-    amount: number;
+    amount: AmountInput;
     agentTag?: string;
   }): Promise<any> {
     const memo = encodeMemo(params.invoiceId, params.agentTag ?? "").Message;
     return this.pay(params.merchant, params.amount, { memo });
   }
 
-  private precheck(merchant: string, amount: number): void {
+  private precheck(merchant: string, amount: AmountInput): void {
+    const a = big(amount);
     if (this.revoked) {
       throw new PolicyViolation(["budget revoked (client pre-check; chain also rejects)"]);
     }
-    if (amount <= 0 || amount > this.perTxCap) {
-      throw new PolicyViolation([`amount ${amount} over per-tx cap ${this.perTxCap} (client pre-check)`]);
+    if (a <= 0n || a > big(this.perTxCap)) {
+      throw new PolicyViolation([`amount ${a} over per-tx cap ${this.perTxCap} (client pre-check)`]);
     }
     if (this.whitelist.length > 0 && !this.whitelist.includes(merchant)) {
       throw new PolicyViolation(["merchant not whitelisted (client pre-check)"]);
     }
-    if (this.spent + amount > this.dailyCap) {
+    if (big(this.spent) + a > big(this.dailyCap)) {
       throw new PolicyViolation([`would exceed daily cap ${this.dailyCap} (client pre-check)`]);
     }
   }

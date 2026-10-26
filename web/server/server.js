@@ -52,6 +52,17 @@ const STATE_FILE = process.env.AGENTPAY_STATE_FILE || path.resolve(__dirname, "s
 // gate is disabled so the local experience is unchanged — NEVER deploy without the password.
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || "";
 const AUTH_ON = DASHBOARD_PASSWORD.length > 0;
+// Auto-creating + faucet-funding a brand-new merchant account the first time a name is referenced
+// is handy for a local demo, but on a public deployment it is an abuse / cost vector — anyone could
+// mint and fund accounts at will. So it is allowed only in open local-dev mode (no password set),
+// and can be forced either way with AGENTPAY_AUTO_CREATE_MERCHANTS=true|false. When disabled, an
+// unknown merchant yields a clear error instead of silently creating an account.
+const AUTO_CREATE_MERCHANTS =
+  process.env.AGENTPAY_AUTO_CREATE_MERCHANTS === "true"
+    ? true
+    : process.env.AGENTPAY_AUTO_CREATE_MERCHANTS === "false"
+      ? false
+      : !AUTH_ON;
 // Secret for signing the session cookie. Provide SESSION_SECRET in production so sessions survive
 // restarts and are stable across replicas; otherwise we mint an ephemeral one per process.
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
@@ -141,12 +152,23 @@ function noteLoginOk(ip) {
 }
 
 // ---- persisted runtime state (so a reload / restart keeps the open budget) -------------------
-/** @type {{ budget: any|null, merchants: Record<string,string>, funded: number, withdrawn: number }} */
-let store = { budget: null, merchants: {}, funded: 0, withdrawn: 0 };
+/** @type {{ budget: any|null, merchants: Record<string,string>, funded: string, withdrawn: string }} */
+let store = { budget: null, merchants: {}, funded: "0", withdrawn: "0" };
 function loadStore() {
   try {
     store = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
     if (!store.merchants) store.merchants = {};
+    // Amounts are canonically decimal strings now; coerce any legacy numeric state so arithmetic
+    // stays exact (BigInt) regardless of what was persisted by an older build.
+    store.funded = String(store.funded ?? "0");
+    store.withdrawn = String(store.withdrawn ?? "0");
+    if (store.budget) {
+      const b = store.budget;
+      b.perTxCap = String(b.perTxCap ?? "0");
+      b.dailyCap = String(b.dailyCap ?? "0");
+      b.spent = String(b.spent ?? "0");
+      if (Array.isArray(b.ledger)) b.ledger = b.ledger.map((e) => ({ ...e, amount: String(e.amount) }));
+    }
   } catch {
     /* first run */
   }
@@ -188,11 +210,16 @@ async function walletd() {
   return wd;
 }
 
-/** Resolve a merchant by friendly name, creating + funding a localnet account on first use. */
+/**
+ * Resolve a merchant to a component address. A `component_…` address is used verbatim; a friendly
+ * name is looked up on chain. If the account does not exist it is created + faucet-funded ONLY when
+ * AUTO_CREATE_MERCHANTS is enabled (open local-dev mode); otherwise a clear error is returned so a
+ * public deployment is never a free account-minting / faucet-draining endpoint.
+ */
 async function resolveMerchant(nameOrAddr) {
   const c = await walletd();
   const raw = String(nameOrAddr || "").trim();
-  if (!raw) throw new Error("merchant name is required");
+  if (!raw) throw httpError(400, "A merchant name or component address is required.");
   if (raw.startsWith("component_")) return raw; // already an address
   const key = raw.toLowerCase();
   if (store.merchants[key]) return store.merchants[key];
@@ -201,6 +228,14 @@ async function resolveMerchant(nameOrAddr) {
     addr = await c.accountAddress(key);
   } catch (e) {
     if (!(e instanceof ChainError)) throw e;
+    if (!AUTO_CREATE_MERCHANTS) {
+      throw httpError(
+        400,
+        `No account named "${key}" was found on chain. Paste the merchant's component_… address, ` +
+          `or provision and fund the account out of band. (Auto-creating merchant accounts is ` +
+          `disabled on this deployment.)`,
+      );
+    }
     addr = await c.createAccount(key);
     await c.fund(key);
   }
@@ -267,17 +302,19 @@ async function dashboardState() {
   };
   if (!store.budget) return base;
   const b = store.budget;
-  const treasury = Math.max(0, store.funded - b.spent - store.withdrawn);
+  // All amounts are exact decimal strings; keep the arithmetic in BigInt so nothing is ever
+  // coerced through a lossy float on its way to the browser.
+  const treasury = clampStr(big(store.funded) - big(b.spent) - big(store.withdrawn));
   base.budget = {
     component: b.component,
-    perTxCap: b.perTxCap,
-    dailyCap: b.dailyCap,
+    perTxCap: String(b.perTxCap),
+    dailyCap: String(b.dailyCap),
     revoked: b.revoked,
-    spent: b.spent,
-    funded: store.funded,
-    withdrawn: store.withdrawn,
+    spent: String(b.spent),
+    funded: String(store.funded),
+    withdrawn: String(store.withdrawn),
     treasury,
-    dailyRemaining: Math.max(0, b.dailyCap - b.spent),
+    dailyRemaining: clampStr(big(b.dailyCap) - big(b.spent)),
     // Agent session badges issued for this budget, each with whether it has been individually revoked.
     sessions: (b.sessions || ["default"]).map((session) => ({
       session,
@@ -292,7 +329,7 @@ async function dashboardState() {
       index: i,
       merchant: e.merchant,
       merchantName: label(e.merchant),
-      amount: e.amount,
+      amount: String(e.amount),
       memo: e.memo,
       txKind: e.txKind,
     })),
@@ -317,8 +354,8 @@ const api = {
     const perTxCap = toAmount(body.perTxCap, "per-transaction cap");
     const dailyCap = toAmount(body.dailyCap, "daily cap");
     const epochsPerWindow = Math.max(1, Number(body.epochsPerWindow) || 10);
-    if (perTxCap > dailyCap) throw httpError(400, "Per-transaction cap cannot exceed the daily cap.");
-    if (fund <= 0) throw httpError(400, "Funding amount must be greater than zero.");
+    if (big(perTxCap) > big(dailyCap)) throw httpError(400, "Per-transaction cap cannot exceed the daily cap.");
+    if (big(fund) <= 0n) throw httpError(400, "Funding amount must be greater than zero.");
     const wlNames = Array.isArray(body.whitelist) ? body.whitelist : [];
     const whitelist = [];
     for (const n of wlNames) whitelist.push(await resolveMerchant(n));
@@ -331,7 +368,7 @@ const api = {
       whitelist,
     });
     store.funded = fund;
-    store.withdrawn = 0;
+    store.withdrawn = "0";
     snapshotBudget(budget);
     return await dashboardState();
   },
@@ -389,11 +426,11 @@ const api = {
   async "POST /api/withdraw"(body) {
     const b = await liveBudget();
     if (!b) throw httpError(409, "No budget is open.");
-    const treasury = Math.max(0, store.funded - b.spent - store.withdrawn);
+    const treasury = big(store.funded) - big(b.spent) - big(store.withdrawn);
     const amount = toAmount(body.amount, "amount");
-    if (amount > treasury) throw httpError(400, `Only ${treasury} remains in the treasury.`);
+    if (big(amount) > treasury) throw httpError(400, `Only ${clampStr(treasury)} remains in the treasury.`);
     await b.withdraw(amount);
-    store.withdrawn += amount;
+    store.withdrawn = (big(store.withdrawn) + big(amount)).toString();
     snapshotBudget(b);
     return await dashboardState();
   },
@@ -402,13 +439,13 @@ const api = {
     const b = await liveBudget();
     if (!b) throw httpError(409, "No budget is open.");
     const amount = toAmount(body.amount, "amount");
-    if (amount <= 0) throw httpError(400, "Top-up amount must be greater than zero.");
+    if (big(amount) <= 0n) throw httpError(400, "Top-up amount must be greater than zero.");
     try {
       await b.topUp(amount);
     } catch (e) {
       throw httpError(422, chainMessage(e));
     }
-    store.funded += amount; // the vault grew, so the treasury (funded − spent − withdrawn) grows too
+    store.funded = (big(store.funded) + big(amount)).toString(); // vault grew → treasury grows too
     snapshotBudget(b);
     return await dashboardState();
   },
@@ -447,13 +484,20 @@ const api = {
   },
 
   async "POST /api/reset"() {
-    // Local only: forget the current budget so a fresh one can be demoed. The on-chain component
-    // still exists; this just detaches the dashboard from it.
+    // LOCAL ONLY. This clears the dashboard's local view (the persisted budget reference and the
+    // funded/withdrawn tallies) so a fresh budget can be demoed. It does NOT touch the chain: the
+    // AgentBudget component, its vault and any remaining treasury stay exactly as they are, and no
+    // funds are withdrawn or refunded. To reclaim the treasury, use Withdraw before resetting.
     store.budget = null;
-    store.funded = 0;
-    store.withdrawn = 0;
+    store.funded = "0";
+    store.withdrawn = "0";
     saveStore();
-    return await dashboardState();
+    return {
+      ...(await dashboardState()),
+      notice:
+        "Local view cleared. The on-chain budget component, its vault and any remaining treasury " +
+        "still exist on chain — reset does not withdraw or refund funds.",
+    };
   },
 };
 
@@ -463,10 +507,23 @@ function httpError(status, message) {
   e.status = status;
   return e;
 }
+// Base-unit amounts are integers that can exceed JS's safe-integer range (2^53). We carry them as
+// decimal-integer STRINGS and do all arithmetic with BigInt, so a large amount never loses
+// precision or stringifies in exponential form (which would corrupt the on-chain manifest).
 function toAmount(v, label) {
-  const n = Number(v);
-  if (!Number.isFinite(n) || n < 0) throw httpError(400, `Invalid ${label}.`);
-  return Math.floor(n);
+  const s = String(v == null ? "" : v).trim();
+  if (!/^\d+$/.test(s)) throw httpError(400, `Invalid ${label} (whole number only).`);
+  return s;
+}
+/** Coerce a stored amount (string, or legacy number) to BigInt. */
+function big(x) {
+  if (typeof x === "bigint") return x;
+  const s = String(x == null ? "0" : x).trim();
+  return BigInt(/^-?\d+$/.test(s) ? s : "0");
+}
+/** max(0, a) for BigInt, as a decimal string. */
+function clampStr(a) {
+  return (a < 0n ? 0n : a).toString();
 }
 function chainMessage(e) {
   if (e instanceof PolicyViolation) return e.message;

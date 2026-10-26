@@ -2,9 +2,17 @@ import { WalletdClient } from "./walletd";
 import { WindowStatus } from "./window";
 /** Native Tari test token used as the (plaintext, countable) budget resource on a devnet. */
 export declare const XTR = "XTR";
+/**
+ * A base-unit amount. Accepted as a `bigint`, a decimal-integer `string`, or a `number` — but a
+ * `number` is only safe below 2^53, so anything that large must be passed as a string/bigint.
+ * Base-unit amounts are integers and can exceed JS's safe-integer range, so they are carried as
+ * decimal strings and compared with BigInt; they NEVER pass through a lossy float.
+ */
+export type AmountInput = bigint | number | string;
 export interface LedgerEntry {
     merchant: string;
-    amount: number;
+    /** Base-unit amount as a decimal-integer string (exact; may exceed 2^53). */
+    amount: string;
     memo: string;
     txKind: "pay" | "pay_via_escrow";
 }
@@ -20,24 +28,24 @@ export declare class OnChainBudget {
     component: string | null;
     ownerBadge: string | null;
     agentBadge: string | null;
-    perTxCap: number;
-    dailyCap: number;
+    perTxCap: string;
+    dailyCap: string;
     whitelist: string[];
     revoked: boolean;
-    spent: number;
+    spent: string;
     ledger: LedgerEntry[];
     sessions: string[];
     revokedSessions: string[];
     constructor(client: WalletdClient, budgetTemplate: string, ownerAccount: string, opts?: OnChainBudgetOptions);
     open(params: {
-        fund: number;
-        perTxCap: number;
-        dailyCap: number;
+        fund: AmountInput;
+        perTxCap: AmountInput;
+        dailyCap: AmountInput;
         epochsPerWindow: number;
         whitelist: string[];
     }): Promise<this>;
     revoke(): Promise<void>;
-    withdraw(amount: number): Promise<void>;
+    withdraw(amount: AmountInput): Promise<void>;
     addMerchant(merchant: string): Promise<void>;
     /**
      * Owner mints a new agent session badge labelled `session` and deposits it into `toAccount`
@@ -62,7 +70,7 @@ export declare class OnChainBudget {
      * is open on the template, so a keeper account can replenish on its own cadence — the chain has no
      * scheduler to do it automatically.
      */
-    topUp(amount: number, opts?: {
+    topUp(amount: AmountInput, opts?: {
         fromAccount?: string;
     }): Promise<void>;
     private ownerCall;
@@ -72,7 +80,7 @@ export declare class OnChainBudget {
      * error — the chain enforces the real limits regardless of what this client does. The local
      * ledger is updated from the on-chain `pay` event, not from the request.
      */
-    pay(merchant: string, amount: number, opts?: {
+    pay(merchant: string, amount: AmountInput, opts?: {
         memo?: string;
     }): Promise<any>;
     /**
@@ -80,14 +88,14 @@ export declare class OnChainBudget {
      * reason — used to show that the *chain*, not the client, enforces the rules. Returns null if
      * the pay would be accepted.
      */
-    wouldReject(merchant: string, amount: number, opts?: {
+    wouldReject(merchant: string, amount: AmountInput, opts?: {
         memo?: string;
     }): Promise<string | null>;
     /** Pay an invoice: the invoice id + agent tag ride along as the on-chain memo. */
     payInvoice(params: {
         merchant: string;
         invoiceId: string;
-        amount: number;
+        amount: AmountInput;
         agentTag?: string;
     }): Promise<any>;
     private precheck;

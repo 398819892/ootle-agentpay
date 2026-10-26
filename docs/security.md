@@ -20,7 +20,29 @@ Enforced **on chain** (a compromised client cannot bypass):
 - **OtcBoard**: listing bond, max-listing-amount cap, and arbiter whitelist are enforced at `list`;
   settlement authorises against the recorded seller/buyer/arbiter identities. An optional
   **arbiter stake** (set by the owner via `set_arbiter_stake`) is required before an arbiter may
-  `resolve`, and the owner can `slash_arbiter` a misbehaving arbiter's stake to the treasury.
+  `resolve`, and the owner can `slash_arbiter` a misbehaving arbiter's stake to the treasury. The
+  stake is **locked while a dispute names that arbiter**: `unstake_arbiter` is rejected if the caller
+  is the arbiter on any listing in `Disputed`, so an arbiter cannot dodge a slash by withdrawing
+  their collateral the moment a dispute lands (tested).
+
+### OTC is trust-minimised, NOT a trustless atomic swap
+
+The OTC flow settles an **off-chain payment** (fiat or another chain), so it cannot be a trustless
+atomic swap — the chain has no way to observe that the buyer actually paid. Read `confirm(preimage?)`
+precisely:
+
+- The optional **hashlock preimage is only a cryptographic condition, not a receipt.** Revealing a
+  preimage whose SHA-256 matches `hashlock` releases the asset; it proves the releaser *knows a
+  secret*, **not** that any off-chain/fiat payment arrived. Whoever holds the preimage can trigger
+  release **before** (or without ever) paying, so a seller who hands the preimage over early, or
+  whose preimage leaks, can be released against without being paid.
+- Without a hashlock, release is the **seller's** `confirm` — i.e. the seller voluntarily
+  acknowledging payment. That is a trust assumption on the seller's honesty, backed only by the
+  dispute → arbiter path.
+- **Net:** OTC safety rests on off-chain-payment trust **plus** the arbiter (and the arbiter's
+  stake), not on atomicity. Present it to users as an *escrow with human arbitration*, never as a
+  trustless swap. "Privacy" here is scoped and known (balances and amounts are public, see
+  limitation 1); it is not anonymity.
 
 Enforced **off chain only** (client-side, advisory):
 
@@ -92,13 +114,16 @@ Enforced **off chain only** (client-side, advisory):
 ## Audit-prep checklist
 
 - [ ] Freeze template versions and record their published addresses + metadata hashes.
-- [ ] Run `cargo test` for all three templates (47 tests; AgentBudget is 14) and the SDK
-      (`pytest`, 46 tests) in CI.
+- [ ] Run `cargo test` for all three templates (49 tests — Escrow 17, AgentBudget 14, OtcBoard 18)
+      and the SDK (`pytest`) in CI. Note the SDK suite does **not** cover the experimental
+      `ootle_chain.OotlePyChain` adapter (unverified against a live indexer; has `NotImplementedError`
+      stubs) — see `sdk/README.md`.
 - [ ] Run `examples/stress_devnet.py` with a high round count against a soak swarm.
 - [ ] Review the 7 known limitations above with the auditor; decide which are acceptable for mainnet.
 - [x] Owner-governed arbiter stake + slash implemented (`set_arbiter_stake`/`stake_arbiter`/
-      `slash_arbiter`). Still to do for high value: trustless multi-arbiter vote / appeals /
-      auto-slash-on-overturn, and listing-bond slashing-on-outcome.
+      `slash_arbiter`), with the stake **locked against `unstake_arbiter` while a dispute names the
+      arbiter** so a slash can't be dodged (tested). Still to do for high value: trustless
+      multi-arbiter vote / appeals / auto-slash-on-overturn, and listing-bond slashing-on-outcome.
 - [ ] Legal/compliance review for the OTC product (KYC/AML varies by jurisdiction) before launch.
 - [ ] Deploy to a public testnet (esmeralda) once test funds are available (the public faucet was
       empty during development; funding needs an L1 Minotari burn — see docs/devnet.md).

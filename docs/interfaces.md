@@ -77,9 +77,19 @@ Per-listing escrow with explicit OTC roles. Listing: `Open → Taken → Settled
 | `open_dispute(id)` | seller or buyer | → Disputed |
 | `resolve(id, to_buyer_amount)` | listing's arbiter | Split asset; bond → seller. → Settled |
 | `add_arbiter(pk)` / `remove_arbiter(pk)` / `set_params(bond, max, fee_bps)` | owner (owner_badge) | Manage the board. |
-| `get_listing(id) / get_params() / get_owner_badge()` | anyone | Read. |
+| `set_arbiter_stake(stake)` / `slash_arbiter(pk)` | owner (owner_badge) | Require a resolve stake; slash a bad arbiter's stake to treasury. |
+| `stake_arbiter(stake)` / `unstake_arbiter() -> bucket` | whitelisted arbiter | Post / withdraw stake. `unstake_arbiter` is **rejected while the caller is the arbiter on a `Disputed` listing** (can't dodge a slash). |
+| `get_listing(id) / get_params() / get_arbiter_stake(pk) / get_owner_badge()` | anyone | Read. |
 
 Terms are summarised on chain as `terms_hash` (a 32-byte hash); the detail is kept off chain.
 
 Anti-abuse: **listing bond** (skin in the game), **max listing amount** (per-deal cap), **arbiter
-whitelist** (only approved arbiters).
+whitelist** (only approved arbiters), and an optional **arbiter stake** the owner can slash.
+
+**Trust model (read before building on this).** OtcBoard settles an **off-chain** payment, so it is
+**not a trustless atomic swap**. `confirm(id, preimage?)`: the hashlock preimage is only a
+cryptographic condition — it proves the releaser knows a secret, **not** that any off-chain/fiat
+payment arrived, and a preimage holder can release **before** paying. Without a hashlock, `confirm`
+is the seller voluntarily acknowledging payment. Safety therefore rests on off-chain-payment trust
+plus the arbiter (and their slashable stake), never on atomicity. Amounts are public on chain —
+privacy is scoped and known, not anonymity. See `docs/security.md`.

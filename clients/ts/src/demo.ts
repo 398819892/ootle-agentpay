@@ -69,7 +69,8 @@ async function main(): Promise<void> {
   console.log(`  pay after revoke: ${reason ? "rejected -> " + reason : "UNEXPECTEDLY ACCEPTED"}`);
 
   console.log("\n== Owner withdraws the remaining balance ==");
-  const remaining = 10_000 - budget.spent; // 10000 funded − 1400 spent = 8600
+  // budget.spent is an exact decimal string; stay in BigInt so large budgets never lose precision.
+  const remaining = (10_000n - BigInt(budget.spent)).toString(); // 10000 funded − 1400 spent = 8600
   await budget.withdraw(remaining);
   console.log(`  withdrew ${remaining} back to owner`);
 
