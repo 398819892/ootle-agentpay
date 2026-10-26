@@ -27,12 +27,19 @@ function badgeResources(blob) {
         .filter((x) => !x.startsWith("resource_0101") && !x.startsWith("resource_0000"))
         .sort();
 }
+/**
+ * Extract the meaningful reason from a walletd RPC *error message* for a dry run. This is the ONE
+ * place we parse a reject out of free text, and only because a dry-run rejection arrives as an RPC
+ * error whose `message` is human text with no structured field — e.g. `Application error: 5:
+ * Dry-run transaction rejected: Execution failure (AssertionFailed): At instruction #2: Panic!
+ * Agent has been revoked`. Committed rejections and typed dry-run results go through
+ * `finalizedOutcome` instead. Mirrors the Python SDK's `_clean_reason`.
+ */
 function cleanReason(message) {
-    let m = message.match(/Template error: (.+?)(?:"|$)/);
-    if (m)
-        return m[1];
-    m = message.match(/rejected: (.+?)(?:"|$)/);
-    return m ? m[1] : message;
+    const m = message.match(/rejected:\s*(.+?)(?:"|$)/);
+    const tail = (m ? m[1] : message).trim();
+    const panic = tail.match(/Panic(?:ked)?[:!]?\s*(.+)/);
+    return panic ? panic[1].trim().replace(/\.$/, "") : tail;
 }
 /**
  * Find the AgentBudget component's state array anywhere in a `substates.get` result tree. The
@@ -82,6 +89,10 @@ class OnChainBudget {
         this.revoked = false;
         this.spent = 0;
         this.ledger = [];
+        // Agent session badges issued for this budget (the first, "default", comes from `open`). Tracked
+        // client-side for convenience; the chain is the source of truth for what each can do.
+        this.sessions = ["default"];
+        this.revokedSessions = [];
         this.client = client;
         this.budgetTemplate = budgetTemplate;
         this.ownerAccount = ownerAccount;
@@ -136,6 +147,64 @@ class OnChainBudget {
         if (!this.whitelist.includes(merchant))
             this.whitelist.push(merchant);
     }
+    /**
+     * Owner mints a new agent session badge labelled `session` and deposits it into `toAccount`
+     * (defaults to this budget's agent account). The new badge can `pay` within the same on-chain
+     * caps/whitelist until the owner revokes that session. Returns the session label.
+     */
+    async issueAgentBadge(session, opts = {}) {
+        const target = opts.toAccount ?? this.agentAccount;
+        const manifest = "fn main() {\n" +
+            '    let mut owner = var!["owner"];\n' +
+            `    let proof = owner.create_proof_for_resource(address!("${this.ownerBadge}"));\n` +
+            '    let mut budget = var!["budget"];\n' +
+            `    let badge = budget.issue_agent_badge("${session}");\n` +
+            '    let mut agent = var!["agent"];\n' +
+            "    agent.deposit(badge);\n" +
+            "    drop_all_proofs!();\n" +
+            "}\n";
+        await this.client.run(manifest, {
+            owner: this.ownerAccount,
+            budget: this.component,
+            agent: target,
+        });
+        if (!this.sessions.includes(session))
+            this.sessions.push(session);
+        this.revokedSessions = this.revokedSessions.filter((s) => s !== session); // re-issue clears revoke
+        return session;
+    }
+    /**
+     * Owner revokes a single agent session badge. Other sessions keep working; use `revoke()` for the
+     * global kill switch.
+     */
+    async revokeSession(session) {
+        await this.ownerCall(`revoke_session("${session}")`);
+        if (!this.revokedSessions.includes(session))
+            this.revokedSessions.push(session);
+    }
+    /**
+     * Owner reconfigures the rolling allowance window (and restarts it now). The daily cap is the
+     * recurring per-window allowance — there is no on-chain timer (see the template docs).
+     */
+    async setWindow(epochsPerWindow) {
+        await this.ownerCall(`set_window(${Math.floor(epochsPerWindow)}u64)`);
+        this.spent = 0;
+    }
+    /**
+     * Add `amount` to the budget's vault, funded from `fromAccount` (defaults to the owner). `top_up`
+     * is open on the template, so a keeper account can replenish on its own cadence — the chain has no
+     * scheduler to do it automatically.
+     */
+    async topUp(amount, opts = {}) {
+        const funder = opts.fromAccount ?? this.ownerAccount;
+        const manifest = "fn main() {\n" +
+            '    let mut funder = var!["funder"];\n' +
+            `    let funds = funder.withdraw(XTR, amount!(${Math.floor(amount)}));\n` +
+            '    let mut budget = var!["budget"];\n' +
+            "    budget.top_up(funds);\n" +
+            "}\n";
+        await this.client.run(manifest, { funder, budget: this.component });
+    }
     async ownerCall(call) {
         const manifest = "fn main() {\n" +
             '    let mut owner = var!["owner"];\n' +
@@ -148,11 +217,13 @@ class OnChainBudget {
     }
     // -- agent -----------------------------------------------------------------------
     payManifest(merchant, amount, memo) {
+        // The agent presents a proof of its session badge; `pay` reads it to identify (and, if revoked,
+        // refuse) the session before moving funds.
         return ("fn main() {\n" +
             '    let mut agent = var!["agent"];\n' +
             `    let proof = agent.create_proof_for_resource(address!("${this.agentBadge}"));\n` +
             '    let mut budget = var!["budget"];\n' +
-            `    budget.pay(address!("${merchant}"), amount!(${amount}), "${memo}");\n` +
+            `    budget.pay(proof, address!("${merchant}"), amount!(${amount}), "${memo}");\n` +
             "    drop_all_proofs!();\n" +
             "}\n");
     }
@@ -186,11 +257,12 @@ class OnChainBudget {
             agent: this.agentAccount,
             budget: this.component,
         });
+        // walletd surfaces a dry-run rejection either as an RPC error (plain message — parsed in the one
+        // place cleanReason lives) or as a finalized result whose TransactionResult is Reject (structural).
         if (r.error)
             return cleanReason(r.error.message ?? "rejected");
-        if (JSON.stringify(r.result ?? {}).includes('"Reject"'))
-            return (0, walletd_1.rejectReason)(r.result) ?? "rejected";
-        return null;
+        const outcome = (0, walletd_1.finalizedOutcome)(r.result);
+        return outcome && outcome[0] === "reject" ? outcome[1] : null;
     }
     /** Pay an invoice: the invoice id + agent tag ride along as the on-chain memo. */
     async payInvoice(params) {

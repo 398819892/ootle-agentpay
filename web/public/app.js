@@ -653,6 +653,42 @@ function fullLedgerRow(e) {
   </tr>`;
 }
 
+/* Agent sessions card: one badge per agent/session, each revocable on its own. */
+function sessionsCard(b) {
+  const sessions = b.sessions && b.sessions.length ? b.sessions : [{ session: "default", revoked: false }];
+  const rows = sessions
+    .map((s) => {
+      const revoked = s.revoked;
+      const status = revoked
+        ? `<span class="badge badge--danger">${icon("ban", 13)} Revoked</span>`
+        : `<span class="badge badge--ok">${icon("check", 13)} Active</span>`;
+      const action = revoked
+        ? `<button class="btn btn--ghost btn--sm" disabled>Revoked</button>`
+        : `<button class="btn btn--danger btn--sm" data-revoke-session="${esc(s.session)}">${icon("ban", 14)} Revoke</button>`;
+      return `<tr>
+        <td><div class="merchant">
+          <span class="avatar" style="background:${avatarColor(s.session)}">${initials(s.session, s.session)}</span>
+          <div><div style="font-weight:600">${esc(s.session)}</div>
+          <div class="muted" style="font-size:12px">${s.session === "default" ? "created with the budget" : "issued session badge"}</div></div>
+        </div></td>
+        <td>${status}</td>
+        <td style="text-align:right">${action}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<div class="card">
+    <div class="card__head"><h3>Agent sessions</h3><span class="sub">${fmt(sessions.length)} badge${sessions.length === 1 ? "" : "s"}</span></div>
+    <div class="card__body">
+      <div class="table-wrap"><table class="ledger"><tbody>${rows}</tbody></table></div>
+      <form id="session-form" class="addrow mt-18" novalidate>
+        <input class="input" id="g-session" placeholder="New session label, e.g. agent-2" autocomplete="off" maxlength="48"/>
+        <button type="submit" class="btn btn--primary" id="g-session-add">${icon("plus", 16)} Issue badge</button>
+      </form>
+      <div class="field__hint mt-12">Each session is a separate agent badge of the same on-chain resource. Issue one per agent/session and revoke any single one without touching the others. <b>Revoke agent</b> below is the global kill switch for all of them.</div>
+    </div>
+  </div>`;
+}
+
 /* ---- views: GOVERNANCE ---------------------------------------------------- */
 function viewGovernance() {
   const d = S.data;
@@ -687,7 +723,18 @@ function viewGovernance() {
           <div class="card__body">
             <div class="stat__value" style="margin:0">${fmt(b.treasury)} <span class="unit">${UNIT}</span></div>
             <div class="stat__hint">available to withdraw · ${fmt(b.funded)} funded, ${fmt(b.spent)} spent</div>
-            <form id="wd-form" class="mt-18" novalidate>
+            <form id="topup-form" class="mt-18" novalidate>
+              <div class="field" style="margin-bottom:12px">
+                <label class="field__label" for="g-topup">Top up (add funds)</label>
+                <div class="addrow">
+                  <div class="input-affix" style="flex:1"><input class="input" id="g-topup" type="number" min="1" value="5000"/><span class="affix">${UNIT}</span></div>
+                  <button type="submit" class="btn btn--primary" id="g-topup-btn">${icon("plus", 16)} Top up</button>
+                </div>
+                <div class="field__hint">Moves ${UNIT} from the owner account into the budget's on-chain vault. A keeper can do this on its own cadence — the chain has no timer.</div>
+                <div class="field__err">Enter a positive amount.</div>
+              </div>
+            </form>
+            <form id="wd-form" novalidate>
               <div class="field" style="margin-bottom:12px">
                 <label class="field__label" for="g-amount">Withdraw amount</label>
                 <div class="input-affix"><input class="input" id="g-amount" type="number" min="1" max="${b.treasury}" value="${b.treasury}"/><span class="affix">${UNIT}</span></div>
@@ -698,6 +745,8 @@ function viewGovernance() {
           </div>
         </div>
       </div>
+
+      ${sessionsCard(b)}
 
       <div class="card" style="border-color:color-mix(in srgb, var(--danger) 30%, var(--border))">
         <div class="card__head"><h3 style="color:var(--danger)">${icon("ban", 16)} Kill switch</h3>
@@ -849,6 +898,9 @@ function wire() {
       draftWhitelist.splice(Number(rm.dataset.rmtag), 1);
       renderTags();
     }
+
+    const rs = e.target.closest("[data-revoke-session]");
+    if (rs) return revokeSession(rs.dataset.revokeSession, rs);
   };
 
   // theme toggle
@@ -971,6 +1023,27 @@ async function handleAction(action, btn) {
     });
     return;
   }
+}
+
+async function revokeSession(session, btn) {
+  const ok = await confirmDialog({
+    tone: "danger",
+    icon: "ban",
+    title: `Revoke session “${esc(session)}”?`,
+    body: `The validators will reject <b>every future payment</b> from this agent session. Other sessions keep working. This cannot be undone (you can issue a fresh badge with the same label later).`,
+    requireAck: "I understand this blocks this session on chain.",
+    confirmLabel: "Revoke session",
+  });
+  if (!ok) return;
+  await withPending(btn, "Revoking", async () => {
+    try {
+      S.data = await api("/api/sessions/revoke", { session });
+      render();
+      toast("success", "Session revoked", `“${esc(session)}” can no longer pay. Other sessions are unaffected.`);
+    } catch (e) {
+      toast("error", "Revoke failed", e.message);
+    }
+  });
 }
 
 /* ---- create wiring -------------------------------------------------------- */
@@ -1114,6 +1187,44 @@ function wireGovernance() {
       }
     });
   });
+
+  const topupForm = el("topup-form");
+  if (topupForm) {
+    topupForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const amount = Number(el("g-topup").value);
+      setErr("g-topup", !(amount > 0));
+      if (!(amount > 0)) return;
+      await withPending(el("g-topup-btn"), "Topping up…", async () => {
+        try {
+          S.data = await api("/api/top-up", { amount });
+          render();
+          toast("success", "Topped up", `${fmt(amount)} ${UNIT} added to the budget's vault.`);
+        } catch (err) {
+          toast("error", "Top-up failed", err.message);
+        }
+      });
+    });
+  }
+
+  const sessionForm = el("session-form");
+  if (sessionForm) {
+    sessionForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const session = el("g-session").value.trim();
+      setErr("g-session", !session);
+      if (!session) return;
+      await withPending(el("g-session-add"), "Issuing…", async () => {
+        try {
+          S.data = await api("/api/sessions", { session });
+          render();
+          toast("success", "Session badge issued", `“${esc(session)}” can now pay within the same on-chain rules.`);
+        } catch (err) {
+          toast("error", "Couldn't issue badge", err.message);
+        }
+      });
+    });
+  }
 
   const wdForm = el("wd-form");
   wdForm.addEventListener("submit", async (e) => {

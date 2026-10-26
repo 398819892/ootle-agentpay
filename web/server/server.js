@@ -248,6 +248,8 @@ function snapshotBudget(b) {
     revoked: b.revoked,
     spent: b.spent,
     ledger: b.ledger,
+    sessions: b.sessions,
+    revokedSessions: b.revokedSessions,
   };
   saveStore();
 }
@@ -276,6 +278,11 @@ async function dashboardState() {
     withdrawn: store.withdrawn,
     treasury,
     dailyRemaining: Math.max(0, b.dailyCap - b.spent),
+    // Agent session badges issued for this budget, each with whether it has been individually revoked.
+    sessions: (b.sessions || ["default"]).map((session) => ({
+      session,
+      revoked: (b.revokedSessions || []).includes(session),
+    })),
     // The on-chain daily cap is a rolling window of epochs (≈30 min each), reset lazily — not a
     // calendar day. Read the live window from chain so the UI can show "X left this window, resets
     // ≈Y". Best-effort: if the chain read fails, leave it null and the UI falls back.
@@ -387,6 +394,54 @@ const api = {
     if (amount > treasury) throw httpError(400, `Only ${treasury} remains in the treasury.`);
     await b.withdraw(amount);
     store.withdrawn += amount;
+    snapshotBudget(b);
+    return await dashboardState();
+  },
+
+  async "POST /api/top-up"(body) {
+    const b = await liveBudget();
+    if (!b) throw httpError(409, "No budget is open.");
+    const amount = toAmount(body.amount, "amount");
+    if (amount <= 0) throw httpError(400, "Top-up amount must be greater than zero.");
+    try {
+      await b.topUp(amount);
+    } catch (e) {
+      throw httpError(422, chainMessage(e));
+    }
+    store.funded += amount; // the vault grew, so the treasury (funded − spent − withdrawn) grows too
+    snapshotBudget(b);
+    return await dashboardState();
+  },
+
+  async "POST /api/sessions"(body) {
+    const b = await liveBudget();
+    if (!b) throw httpError(409, "No budget is open.");
+    const session = String(body.session || "").trim();
+    if (!session) throw httpError(400, "A session label is required.");
+    if (!/^[A-Za-z0-9 _-]{1,48}$/.test(session)) {
+      throw httpError(400, "Use letters, numbers, spaces, hyphens or underscores (max 48).");
+    }
+    if ((b.sessions || []).includes(session)) throw httpError(400, "That session label already exists.");
+    try {
+      await b.issueAgentBadge(session);
+    } catch (e) {
+      throw httpError(422, chainMessage(e));
+    }
+    snapshotBudget(b);
+    return await dashboardState();
+  },
+
+  async "POST /api/sessions/revoke"(body) {
+    const b = await liveBudget();
+    if (!b) throw httpError(409, "No budget is open.");
+    const session = String(body.session || "").trim();
+    if (!session) throw httpError(400, "A session label is required.");
+    if ((b.revokedSessions || []).includes(session)) throw httpError(400, "That session is already revoked.");
+    try {
+      await b.revokeSession(session);
+    } catch (e) {
+      throw httpError(422, chainMessage(e));
+    }
     snapshotBudget(b);
     return await dashboardState();
   },

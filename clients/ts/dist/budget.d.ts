@@ -26,6 +26,8 @@ export declare class OnChainBudget {
     revoked: boolean;
     spent: number;
     ledger: LedgerEntry[];
+    sessions: string[];
+    revokedSessions: string[];
     constructor(client: WalletdClient, budgetTemplate: string, ownerAccount: string, opts?: OnChainBudgetOptions);
     open(params: {
         fund: number;
@@ -37,6 +39,32 @@ export declare class OnChainBudget {
     revoke(): Promise<void>;
     withdraw(amount: number): Promise<void>;
     addMerchant(merchant: string): Promise<void>;
+    /**
+     * Owner mints a new agent session badge labelled `session` and deposits it into `toAccount`
+     * (defaults to this budget's agent account). The new badge can `pay` within the same on-chain
+     * caps/whitelist until the owner revokes that session. Returns the session label.
+     */
+    issueAgentBadge(session: string, opts?: {
+        toAccount?: string;
+    }): Promise<string>;
+    /**
+     * Owner revokes a single agent session badge. Other sessions keep working; use `revoke()` for the
+     * global kill switch.
+     */
+    revokeSession(session: string): Promise<void>;
+    /**
+     * Owner reconfigures the rolling allowance window (and restarts it now). The daily cap is the
+     * recurring per-window allowance — there is no on-chain timer (see the template docs).
+     */
+    setWindow(epochsPerWindow: number): Promise<void>;
+    /**
+     * Add `amount` to the budget's vault, funded from `fromAccount` (defaults to the owner). `top_up`
+     * is open on the template, so a keeper account can replenish on its own cadence — the chain has no
+     * scheduler to do it automatically.
+     */
+    topUp(amount: number, opts?: {
+        fromAccount?: string;
+    }): Promise<void>;
     private ownerCall;
     private payManifest;
     /**

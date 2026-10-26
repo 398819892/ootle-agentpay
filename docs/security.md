@@ -9,9 +9,14 @@ Enforced **on chain** (a compromised client cannot bypass):
 - **Escrow**: funds only leave via `release` (payer or preimage), `refund` (payer, after timeout),
   or `resolve` (arbiter, after dispute). Double-release is blocked by the state machine. Fees are
   computed on chain.
-- **AgentBudget**: per-tx cap, rolling daily cap, merchant whitelist, and revoke are all enforced in
-  the template. The agent badge is required to `pay`; the owner badge to manage/withdraw. The
-  randomised stress test (`examples/stress_devnet.py`) checks accept-iff-allowed over random inputs.
+- **AgentBudget**: per-tx cap, rolling daily cap, merchant whitelist, global revoke, and **per-session
+  revoke** are all enforced in the template. Owner methods are badge-gated (`rule!(resource(owner_badge))`).
+  `pay`/`pay_via_escrow` are `allow_all` at the component level **by design** and self-enforce the agent
+  badge inside the method: the caller must pass a proof of an agent-badge session token, which the
+  method validates (`assert_resource` + a per-session revoke check) before moving funds — a fixed
+  component access rule can't identify *which* session is paying, so the gate lives in the method. All
+  session badges are tokens of one agent-badge resource. The randomised stress test
+  (`examples/stress_devnet.py`) checks accept-iff-allowed over random inputs.
 - **OtcBoard**: listing bond, max-listing-amount cap, and arbiter whitelist are enforced at `list`;
   settlement authorises against the recorded seller/buyer/arbiter identities. An optional
   **arbiter stake** (set by the owner via `set_arbiter_stake`) is required before an arbiter may
@@ -31,8 +36,13 @@ Enforced **off chain only** (client-side, advisory):
    payment amount are visible on chain.** Only the final settlement could later be routed through a
    confidential resource. A confidential-balance variant would need a "revealed amount + range proof"
    scheme (mid-term) or stronger on-chain amount checks from the Ootle (long-term) — out of scope now.
-2. **Time is epoch-granular (~30 min).** Timeouts and the "daily" window are epoch windows, not
-   wall-clock; document this to users. No sub-epoch deadlines.
+2. **Time is epoch-granular (~30 min), and there is no on-chain scheduler.** Timeouts and the "daily"
+   window are epoch windows, not wall-clock; document this to users. No sub-epoch deadlines. Crucially,
+   the AgentBudget "periodic allowance" is **lazy, not timed**: the per-window spend counter resets on
+   the first `pay` of a new window, and nothing on chain fires on a schedule. A recurring top-up or a
+   subscription-style charge **must be driven by the owner or an external keeper** calling `top_up`
+   (which is open precisely so a keeper can) — do not present it to users as an automatic/guaranteed
+   recurring payment. The chain enforces the *caps*; it does not *initiate* anything.
 3. **Escrow payer identity = whoever signs `new`.** This is why `OtcBoard` embeds its own escrow
    logic with explicit seller/buyer public keys rather than opening a standalone `Escrow` on the
    buyer's behalf. Anyone composing `Escrow::new` from another template must account for this.
@@ -71,13 +81,19 @@ Enforced **off chain only** (client-side, advisory):
 - State-machine completeness: every method asserts the expected state; no path leaves funds stuck or
   double-spent. Confirm removed/kept map entries don't orphan vault substates.
 - Access rules vs internal checks: badge-gated methods (`rule!(resource(...))`) and identity checks
-  (`CallerContext`) — confirm no method is unintentionally `allow_all`.
+  (`CallerContext`) — confirm no method is unintentionally `allow_all`. **Note the deliberate
+  exception:** `AgentBudget::pay`/`pay_via_escrow` are `allow_all` and enforce the agent badge *in the
+  method body* via the `Proof` argument (`assert_resource` + per-session revoke set). Audit that this
+  self-check cannot be bypassed (e.g. a proof of the wrong resource, an empty proof, or a stale
+  `revoked_sessions` read) and that `top_up` being open cannot harm the budget (it only adds funds of
+  the vault's own resource).
 - Hashlock: `intrinsics::hash_sha256` preimage check; preimage is revealed on release (expected).
 
 ## Audit-prep checklist
 
 - [ ] Freeze template versions and record their published addresses + metadata hashes.
-- [ ] Run `cargo test` for all three templates (43 tests) and the SDK (`pytest`, 46 tests) in CI.
+- [ ] Run `cargo test` for all three templates (47 tests; AgentBudget is 14) and the SDK
+      (`pytest`, 46 tests) in CI.
 - [ ] Run `examples/stress_devnet.py` with a high round count against a soak swarm.
 - [ ] Review the 7 known limitations above with the auditor; decide which are acceptable for mainnet.
 - [x] Owner-governed arbiter stake + slash implemented (`set_arbiter_stake`/`stake_arbiter`/

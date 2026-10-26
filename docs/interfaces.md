@@ -27,22 +27,38 @@ Fee = `amount * fee_bps / 10000` (0..=10000), charged on the payee's payout.
 
 ## AgentBudget — `templates/agent_budget`
 
-Owner funds it; `new` returns two badges. Access is gated by badges (owner methods need the owner
-badge; `pay`/`pay_via_escrow` need the agent badge). Enforces a **plaintext** resource budget.
+Owner funds it; `new` returns an owner badge and a first agent badge. Owner methods need the owner
+badge. `pay`/`pay_via_escrow` are open at the component level but self-enforce the agent badge: the
+caller must present a **proof of an agent-badge session token** as the first argument, which the
+method checks (resource + per-session revoke) before moving funds. Enforces a **plaintext** resource
+budget.
 
 | Method | Caller (badge) | Effect |
 |---|---|---|
-| `new(funds, per_tx_cap, daily_cap, epochs_per_window, whitelist) -> (Component, owner_badge, agent_badge)` | owner | Create the budget. |
-| `pay(merchant, amount, memo)` | agent | Checks: not revoked, `0 < amount ≤ per_tx_cap`, merchant whitelisted, `spent_in_window + amount ≤ daily_cap`; then pays, emits `pay`. |
-| `pay_via_escrow(merchant, merchant_pubkey, amount, timeout_epochs, memo) -> escrow` | agent | Same checks, but opens an `Escrow` (pay on delivery) instead of paying directly. Needs `configure_escrow` first. |
+| `new(funds, per_tx_cap, daily_cap, epochs_per_window, whitelist) -> (Component, owner_badge, agent_badge)` | owner | Create the budget; the agent badge is the first session (id `"default"`). |
+| `pay(agent_proof, merchant, amount, memo)` | agent (badge proof) | Checks: not globally revoked, proof is this budget's agent badge, the session is not individually revoked, `0 < amount ≤ per_tx_cap`, merchant whitelisted, `spent_in_window + amount ≤ daily_cap`; then pays, emits `pay`. |
+| `pay_via_escrow(agent_proof, merchant, merchant_pubkey, amount, timeout_epochs, memo) -> escrow` | agent (badge proof) | Same checks, but opens an `Escrow` (pay on delivery) instead of paying directly. Needs `configure_escrow` first. |
+| `issue_agent_badge(session) -> Bucket` | owner | Mint another agent session badge (one per agent/session); give the returned badge to that agent. |
+| `revoke_session(session)` | owner | Freeze **one** session; its `pay` then fails while others keep working. |
+| `top_up(funds)` | anyone (owner/keeper) | Add funds to the vault. Lets an external keeper replenish on its own cadence — there is no on-chain timer. |
+| `set_window(epochs_per_window)` | owner | Reconfigure the rolling allowance window (and restart it now). |
 | `configure_escrow(escrow_template, owner_account, treasury_account, arbiter?, fee_bps)` | owner | Wire up the escrow integration. |
 | `set_limits(per_tx_cap, daily_cap)` / `add_merchant(m)` / `remove_merchant(m)` | owner | Change the rules. |
-| `revoke()` | owner | Freeze the agent; every `pay` then fails. |
+| `revoke()` | owner | Global kill switch: freeze **every** session; every `pay` then fails. |
 | `withdraw(amount) -> Bucket` | owner | Take funds back. |
 | `get_badges() / get_info()` | anyone | `(owner_badge, agent_badge)` / `(revoked, balance, per_tx_cap, daily_cap, spent_in_window, window_start_epoch)`. |
 
-"Daily" = a rolling window of `epochs_per_window` epochs; `spent_in_window` resets lazily on the
-first `pay` after the window elapses.
+**Many agents / sessions.** Every agent badge is a non-fungible token of one agent-badge resource,
+so `pay` only ever honours that resource. `new` mints the first (`"default"`); `issue_agent_badge`
+mints more and `revoke_session` cuts off any single one. `revoke()` (no argument) stays the global
+kill switch.
+
+**"Daily" = a recurring per-window allowance.** It is a rolling window of `epochs_per_window` epochs;
+`spent_in_window` resets lazily on the first `pay` after the window elapses, so the agent regains its
+allowance each window automatically. **There is no wall-clock timer and no scheduler on the Ootle** —
+a window only advances as epochs pass and only *resets* on the next payment. Anything that must happen
+"on a schedule" (a recurring deposit) is driven by the owner or a keeper calling `top_up`; the chain
+does not do it for you.
 
 ---
 

@@ -111,29 +111,92 @@ class WalletdClient:
 
     def run(self, manifest: str, variables: dict[str, str], max_fee: int = 200_000) -> dict:
         """Submit a manifest for real and wait for it to finalize. Returns the finalized result
-        (a dict containing ``Accept``). Raises ChainError on rejection."""
+        (whose transaction result is ``Accept``). Raises ChainError on rejection."""
         r = self._submit_manifest(manifest, variables, max_fee, dry_run=False)
         if "error" in r:
             raise ChainError(r["error"]["message"])
         tx_id = r["result"].get("transaction_id") or r["result"].get("hash")
         for _ in range(120):   # esmeralda finalization can be slow under congestion
             res = self._rpc("transactions.get_result", {"transaction_id": tx_id}).get("result")
-            if res:
-                blob = json.dumps(res)
-                if '"Reject"' in blob:
-                    raise ChainError(_reject_reason(res) or "transaction rejected")
-                if '"Accept"' in blob:
+            # Decide accept/reject from the structured TransactionResult, not by searching the JSON
+            # blob for "Accept"/"Reject": the `AcceptFeeRejectRest` variant (fee taken, rest rejected)
+            # contains the substring "Accept" yet is a FAILURE, and reject reasons are now objects
+            # (`ExecutionFailure { code, message }`) a substring scan can't read.
+            outcome = _finalized_outcome(res)
+            if outcome is not None:
+                kind, reason = outcome
+                if kind == "accept":
                     return res
+                raise ChainError(reason)
             time.sleep(1.5)
         raise ChainError(f"transaction {tx_id} did not finalize in time")
 
 
-def _reject_reason(result: dict) -> str | None:
-    m = re.search(r'"(?:ExecutionFailure|OneOrMoreInputsNotFound|[A-Za-z]*Error)":"([^"]+)"', json.dumps(result))
+# --- structured transaction-result handling -------------------------------------------------
+# The Ootle returns a typed result tree; we navigate it by key instead of regex-matching the JSON
+# string, so a reject reason (now an object, e.g. ``ExecutionFailure { code, message }``) and the
+# accept/reject distinction are read from the actual fields. See the engine's `commit_result.rs`:
+#   TransactionResult = { "Accept": diff } | { "Reject": reason } | { "AcceptFeeRejectRest": [diff, reason] }
+# and RejectReason = { "ExecutionFailure": { code, message } } | { "<Variant>": "<message>" } | "<Variant>".
+
+_TX_RESULT_VARIANTS = ("Accept", "Reject", "AcceptFeeRejectRest")
+
+
+def _transaction_result(rpc_result: Any) -> dict | None:
+    """Locate the typed TransactionResult inside a walletd result, across both nesting shapes.
+
+    ``transactions.get_result`` nests it at ``result.result``; a dry run (``submit_manifest``) nests
+    it at ``result.result.finalize.result``. We descend the known wrapper keys rather than guessing.
+    """
+    node = rpc_result
+    for _ in range(6):
+        if not isinstance(node, dict):
+            return None
+        if any(v in node for v in _TX_RESULT_VARIANTS):
+            return node
+        node = node.get("result") if node.get("result") is not None else node.get("finalize")
+    return None
+
+
+def _render_reject(reason: Any) -> str:
+    """Render a structured RejectReason (or a bare string) into a human message."""
+    if reason is None:
+        return "transaction rejected"
+    if isinstance(reason, str):
+        return reason
+    if isinstance(reason, dict) and reason:
+        variant, payload = next(iter(reason.items()))
+        if isinstance(payload, dict):               # e.g. ExecutionFailure { code, message }
+            return _clean_panic(payload.get("message")) if payload.get("message") else variant
+        if isinstance(payload, str):                # e.g. SubstateNotFound("...")
+            return payload
+        return variant
+    return "transaction rejected"
+
+
+def _finalized_outcome(rpc_result: Any) -> tuple[str, str | None] | None:
+    """``("accept", None)`` / ``("reject", reason)`` once finalized, else ``None`` (still pending)."""
+    tr = _transaction_result(rpc_result)
+    if tr is None:
+        return None
+    if "Accept" in tr:
+        return ("accept", None)
+    if "Reject" in tr:
+        return ("reject", _render_reject(tr["Reject"]))
+    if "AcceptFeeRejectRest" in tr:
+        pair = tr["AcceptFeeRejectRest"]
+        reason = pair[1] if isinstance(pair, list) and len(pair) > 1 else None
+        return ("reject", _render_reject(reason))
+    return None
+
+
+def _clean_panic(message: str) -> str:
+    """Strip the engine's instruction/panic framing from a template assertion message so the UI shows
+    the budget's own wording (e.g. ``Agent has been revoked``) rather than ``At instruction #2: Panic! …``."""
+    m = re.search(r"Panic(?:ked)?[:!]?\s*(.+)", message)
     if m:
-        return m.group(1)
-    m = re.search(r"Template error: ([^\"]+)", json.dumps(result))
-    return m.group(1) if m else None
+        return m.group(1).strip().rstrip(".")
+    return message.strip()
 
 
 def _components(blob: str, exclude: set[str]) -> list[str]:
@@ -178,6 +241,10 @@ class OnChainBudget:
     revoked: bool = False
     spent: int = 0
     ledger: list[LedgerEntry] = field(default_factory=list)
+    # Agent session badges issued for this budget (the first, "default", comes from `open`). These
+    # are tracked client-side for convenience; the chain is the source of truth for what each can do.
+    sessions: list[str] = field(default_factory=lambda: ["default"])
+    revoked_sessions: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.agent_account is None:
@@ -233,6 +300,58 @@ class OnChainBudget:
         if merchant not in self.whitelist:
             self.whitelist.append(merchant)
 
+    def issue_agent_badge(self, session: str, *, to_account: str | None = None) -> str:
+        """Owner mints a new agent session badge labelled `session` and deposits it into `to_account`
+        (defaults to this budget's agent account). The new badge can `pay` within the same on-chain
+        caps/whitelist until the owner revokes *that* session. Returns the session label."""
+        target = to_account or self.agent_account
+        manifest = (
+            'fn main() {\n'
+            '    let mut owner = var!["owner"];\n'
+            f'    let proof = owner.create_proof_for_resource(address!("{self.owner_badge}"));\n'
+            '    let mut budget = var!["budget"];\n'
+            f'    let badge = budget.issue_agent_badge("{session}");\n'
+            '    let mut agent = var!["agent"];\n'
+            '    agent.deposit(badge);\n'
+            '    drop_all_proofs!();\n'
+            '}\n'
+        )
+        self.client.run(manifest, {"owner": self.owner_account, "budget": self.component,
+                                   "agent": target})
+        if session not in self.sessions:
+            self.sessions.append(session)
+        if session in self.revoked_sessions:          # re-issuing clears a prior revoke (mirrors chain)
+            self.revoked_sessions.remove(session)
+        return session
+
+    def revoke_session(self, session: str) -> None:
+        """Owner revokes a single agent session badge. Other sessions keep working; use `revoke()`
+        for the global kill switch."""
+        self._owner_call(f'revoke_session("{session}")')
+        if session not in self.revoked_sessions:
+            self.revoked_sessions.append(session)
+
+    def set_window(self, epochs_per_window: int) -> None:
+        """Owner reconfigures the rolling allowance window (and restarts it now). The daily cap is the
+        recurring per-window allowance — see the module/template docs on there being no on-chain timer."""
+        self._owner_call(f"set_window({int(epochs_per_window)}u64)")
+        self.spent = 0
+
+    def top_up(self, amount: int, *, from_account: str | None = None) -> None:
+        """Add `amount` to the budget's vault, funded from `from_account` (defaults to the owner).
+        `top_up` is open on the template, so a keeper account can replenish the budget on its own
+        cadence — the chain has no scheduler to do it automatically."""
+        funder = from_account or self.owner_account
+        manifest = (
+            'fn main() {\n'
+            '    let mut funder = var!["funder"];\n'
+            f'    let funds = funder.withdraw(XTR, amount!({int(amount)}));\n'
+            '    let mut budget = var!["budget"];\n'
+            '    budget.top_up(funds);\n'
+            '}\n'
+        )
+        self.client.run(manifest, {"funder": funder, "budget": self.component})
+
     def _owner_call(self, call: str) -> None:
         manifest = (
             'fn main() {\n'
@@ -247,12 +366,14 @@ class OnChainBudget:
 
     # -- agent -----------------------------------------------------------------------
     def _pay_manifest(self, merchant: str, amount: int, memo: str) -> str:
+        # The agent presents a proof of its session badge; `pay` reads it to identify (and, if
+        # revoked, refuse) the session before moving funds.
         return (
             'fn main() {\n'
             '    let mut agent = var!["agent"];\n'
             f'    let proof = agent.create_proof_for_resource(address!("{self.agent_badge}"));\n'
             '    let mut budget = var!["budget"];\n'
-            f'    budget.pay(address!("{merchant}"), amount!({amount}), "{memo}");\n'
+            f'    budget.pay(proof, address!("{merchant}"), amount!({amount}), "{memo}");\n'
             '    drop_all_proofs!();\n'
             '}\n'
         )
@@ -275,10 +396,14 @@ class OnChainBudget:
         on-chain reason — used to show that the *chain*, not the client, enforces the rules."""
         r = self.client.dry_run(self._pay_manifest(merchant, amount, memo),
                                 {"agent": self.agent_account, "budget": self.component})
+        # walletd surfaces a dry-run rejection either as an RPC error (a plain message string — no
+        # structured field is available there, so it is parsed in the one place _clean_reason lives)
+        # or as a finalized result whose TransactionResult is Reject (read structurally).
         if "error" in r:
             return _clean_reason(r["error"].get("message", "rejected"))
-        if '"Reject"' in json.dumps(r.get("result", {})):
-            return _reject_reason(r["result"]) or "rejected"
+        outcome = _finalized_outcome(r.get("result"))
+        if outcome is not None and outcome[0] == "reject":
+            return outcome[1]
         return None
 
     def pay_invoice(self, *, merchant: str, invoice_id: str, amount: int, agent_tag: str = "") -> dict:
@@ -328,8 +453,17 @@ def _iter_events(result: Any):
 
 
 def _clean_reason(message: str) -> str:
-    m = re.search(r"Template error: (.+?)(?:\"|$)", message)
-    if m:
-        return m.group(1)
-    m = re.search(r"rejected: (.+?)(?:\"|$)", message)
-    return m.group(1) if m else message
+    """Extract the meaningful reason from a walletd RPC *error message* for a dry run.
+
+    This is the ONE place we parse a reject out of a free-text string, and only because a dry-run
+    rejection arrives as an RPC error whose `message` is human text with no structured field to read,
+    e.g. ``Application error: 5: Dry-run transaction rejected: Execution failure (AssertionFailed):
+    At instruction #2: Panic! Agent has been revoked``. Committed-transaction rejections (`run`) and
+    dry-run results that carry a typed TransactionResult go through `_finalized_outcome` instead.
+    """
+    m = re.search(r"rejected:\s*(.+?)(?:\"|$)", message)
+    tail = m.group(1).strip() if m else message.strip()
+    # If the tail is the engine's "Execution failure (Code): <...>: Panic! <msg>" form, surface the
+    # template's own wording; otherwise return the tail as-is.
+    panic = re.search(r"Panic(?:ked)?[:!]?\s*(.+)", tail)
+    return panic.group(1).strip().rstrip(".") if panic else tail

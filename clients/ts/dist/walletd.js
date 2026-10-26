@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WalletdClient = exports.DEFAULT_WALLETD_URL = void 0;
+exports.finalizedOutcome = finalizedOutcome;
 exports.rejectReason = rejectReason;
 /**
  * Minimal JSON-RPC client for a Tari Ootle wallet daemon (auth = `none` devnet mode).
@@ -34,14 +35,72 @@ function isAuthError(message) {
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
-/** Extract a human reject reason from a finalized-but-rejected result tree. */
+// --- structured transaction-result handling ---------------------------------------------------
+// The Ootle returns a typed result tree; we navigate it by key instead of regex-matching the JSON
+// string, so the accept/reject distinction and the reject reason (now an object, e.g.
+// `ExecutionFailure { code, message }`) are read from the actual fields. Mirrors the Python SDK's
+// `agentpay/onchain.py`. See the engine's `commit_result.rs`:
+//   TransactionResult = { Accept: diff } | { Reject: reason } | { AcceptFeeRejectRest: [diff, reason] }
+//   RejectReason      = { ExecutionFailure: { code, message } } | { "<Variant>": "<message>" } | "<Variant>"
+const TX_RESULT_VARIANTS = ["Accept", "Reject", "AcceptFeeRejectRest"];
+/**
+ * Locate the typed TransactionResult inside a walletd result, across both nesting shapes:
+ * `transactions.get_result` nests it at `result.result`; a dry run (`submit_manifest`) nests it at
+ * `result.result.finalize.result`. Descend the known wrapper keys rather than guessing.
+ */
+function transactionResult(rpcResult) {
+    let node = rpcResult;
+    for (let i = 0; i < 6; i++) {
+        if (!node || typeof node !== "object" || Array.isArray(node))
+            return null;
+        if (TX_RESULT_VARIANTS.some((v) => v in node))
+            return node;
+        node = node.result != null ? node.result : node.finalize;
+    }
+    return null;
+}
+/** Clean the engine's instruction/panic framing off a template assertion message. */
+function cleanPanic(message) {
+    const m = message.match(/Panic(?:ked)?[:!]?\s*(.+)/);
+    return m ? m[1].trim().replace(/\.$/, "") : message.trim();
+}
+/** Render a structured RejectReason (or a bare string) into a human message. */
+function renderReject(reason) {
+    if (reason == null)
+        return "transaction rejected";
+    if (typeof reason === "string")
+        return reason;
+    if (typeof reason === "object") {
+        const [variant, payload] = Object.entries(reason)[0] ?? [];
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+            const msg = payload.message;
+            return msg ? cleanPanic(String(msg)) : String(variant ?? "transaction rejected");
+        }
+        if (typeof payload === "string")
+            return payload;
+        return String(variant ?? "transaction rejected");
+    }
+    return "transaction rejected";
+}
+/** `["accept", null]` / `["reject", reason]` once finalized, else null (still pending). */
+function finalizedOutcome(rpcResult) {
+    const tr = transactionResult(rpcResult);
+    if (!tr)
+        return null;
+    if ("Accept" in tr)
+        return ["accept", null];
+    if ("Reject" in tr)
+        return ["reject", renderReject(tr.Reject)];
+    if ("AcceptFeeRejectRest" in tr) {
+        const pair = tr.AcceptFeeRejectRest;
+        return ["reject", renderReject(Array.isArray(pair) && pair.length > 1 ? pair[1] : null)];
+    }
+    return null;
+}
+/** Extract a human reject reason from a finalized-but-rejected result tree, or null if not rejected. */
 function rejectReason(result) {
-    const blob = JSON.stringify(result);
-    let m = blob.match(/"(?:ExecutionFailure|OneOrMoreInputsNotFound|[A-Za-z]*Error)":"([^"]+)"/);
-    if (m)
-        return m[1];
-    m = blob.match(/Template error: ([^"]+)/);
-    return m ? m[1] : null;
+    const outcome = finalizedOutcome(result);
+    return outcome && outcome[0] === "reject" ? outcome[1] : null;
 }
 class WalletdClient {
     constructor(url = exports.DEFAULT_WALLETD_URL) {
@@ -168,13 +227,14 @@ class WalletdClient {
         const txId = r.result?.transaction_id ?? r.result?.hash;
         for (let i = 0; i < 120; i++) { // esmeralda finalization can be slow under congestion
             const got = await this.rpc("transactions.get_result", { transaction_id: txId });
-            const res = got.result;
-            if (res) {
-                const blob = JSON.stringify(res);
-                if (blob.includes('"Reject"'))
-                    throw new errors_1.ChainError(rejectReason(res) ?? "transaction rejected");
-                if (blob.includes('"Accept"'))
-                    return res;
+            // Decide accept/reject from the structured TransactionResult, not by searching the JSON blob:
+            // `AcceptFeeRejectRest` (fee taken, rest rejected) contains the substring "Accept" yet is a
+            // FAILURE, and reject reasons are now objects a substring scan can't read.
+            const outcome = finalizedOutcome(got.result);
+            if (outcome) {
+                if (outcome[0] === "accept")
+                    return got.result;
+                throw new errors_1.ChainError(outcome[1]);
             }
             await sleep(1500);
         }
