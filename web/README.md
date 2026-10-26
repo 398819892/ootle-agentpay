@@ -144,10 +144,29 @@ editing the caps after creation aren't in the template yet, so this dashboard de
 
 ## UX
 
-Light / dark / system themes (persisted), full loading / empty / error states, toasts, pending
-feedback on every on-chain action (they take a moment to finalize), truncated addresses with
-copy buttons, confirm dialogs for destructive actions, keyboard-navigable modals, and a
-responsive layout that collapses to a top bar on phones.
+Bilingual (**简体中文 / English**, see below), light / dark / system themes (persisted), full
+loading / empty / error states, toasts, pending feedback on every on-chain action (they take a
+moment to finalize), truncated addresses with copy buttons, confirm dialogs for destructive
+actions, keyboard-navigable modals, and a responsive layout that collapses to a top bar on phones.
+
+### Languages (简体中文 / English)
+
+The whole UI ships in **Simplified Chinese and English** and switches live — nav, headings,
+buttons, form labels/placeholders/hints, empty / error / loading states, toasts, confirm dialogs,
+tooltips and the footer meta, including the governance controls (top-up, issue / revoke session
+badges) and the epoch-window explainer.
+
+- **Switch** with the `中文 / EN` toggle in the sidebar footer (and on the login screen). The
+  choice is **remembered** in `localStorage` (`agentpay-lang`) and survives reloads.
+- **Default is 中文**; the document `<title>`, `<meta description>` and `<html lang>` follow the
+  selection.
+- The Chinese copy is written to **read naturally**, not transliterated — e.g. *merchant* is
+  **商户** (not 商人), *revoke* is **停用/撤销**, *withdraw* is **提现**, *top up* is **充值**,
+  *session badge* is **会话凭证**, *kill switch* is **紧急停用开关**.
+- Implementation is a **tiny zero-dependency i18n layer** in `public/app.js`: an `I18N` dictionary
+  (`en` / `zh`, values are strings with `{placeholders}` or small functions) plus a `t(key, params)`
+  lookup. Views already re-render on every state change, so a language switch just calls `render()`
+  — no framework, no build step, no new runtime deps.
 
 ## Project layout
 

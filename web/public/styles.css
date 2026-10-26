@@ -393,6 +393,21 @@ button {
   box-shadow: var(--shadow-xs);
 }
 
+/* language toggle — reuses the theme-toggle shell, but with short text labels */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.lang-toggle button {
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 34px;
+  padding: 5px 10px;
+  line-height: 1.1;
+}
+
 /* ---- main / content ------------------------------------------------------- */
 .main {
   min-width: 0;
@@ -1405,6 +1420,11 @@ table.ledger {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   padding: 30px 28px;
+}
+.auth__top {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
 }
 .auth__brand {
   display: flex;
