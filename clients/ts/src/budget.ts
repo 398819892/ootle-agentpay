@@ -9,6 +9,7 @@
 import { ChainError, PolicyViolation } from "./errors";
 import { encodeMemo } from "./invoice";
 import { rejectReason, WalletdClient } from "./walletd";
+import { windowStatus, WindowStatus } from "./window";
 
 /** Native Tari test token used as the (plaintext, countable) budget resource on a devnet. */
 export const XTR = "XTR";
@@ -39,6 +40,27 @@ function cleanReason(message: string): string {
   if (m) return m[1];
   m = message.match(/rejected: (.+?)(?:"|$)/);
   return m ? m[1] : message;
+}
+
+/**
+ * Find the AgentBudget component's state array anywhere in a `substates.get` result tree. The
+ * state is a positional array matching the struct's fields (vault, badges, then the scalar caps).
+ */
+function findComponentState(node: any): any[] | null {
+  if (!node || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const v of node) {
+      const r = findComponentState(v);
+      if (r) return r;
+    }
+    return null;
+  }
+  if (Array.isArray(node.Component?.body?.state)) return node.Component.body.state;
+  for (const v of Object.values(node)) {
+    const r = findComponentState(v);
+    if (r) return r;
+  }
+  return null;
 }
 
 /** Yield every event-shaped object (has a `payload`) anywhere in a result tree. */
@@ -229,6 +251,33 @@ export class OnChainBudget {
     if (this.spent + amount > this.dailyCap) {
       throw new PolicyViolation([`would exceed daily cap ${this.dailyCap} (client pre-check)`]);
     }
+  }
+
+  // -- read-only window view -------------------------------------------------------
+  /**
+   * Read the budget's live rolling-window status from chain and translate it into human-readable
+   * numbers (how much is left this window, roughly how long until it resets). Read-only: it queries
+   * the component substate and the current epoch, and changes nothing on chain.
+   *
+   * The "daily cap" is enforced over a rolling window of `epochs_per_window` chain epochs
+   * (≈30 min each), reset lazily on the next payment — so the wall-clock figures are approximate.
+   * See `window.ts` for the pure computation.
+   */
+  async readWindow(): Promise<WindowStatus> {
+    if (!this.component) throw new ChainError("budget component is not set");
+    const [sub, currentEpoch] = await Promise.all([
+      this.client.getSubstate(this.component),
+      this.client.currentEpoch(),
+    ]);
+    const state = findComponentState(sub);
+    if (!state) throw new ChainError("could not read the budget component state");
+    // The leading entries (vault + two badge resources) are CBOR-tagged objects; the next scalar
+    // fields are plain integers in struct order: per_tx_cap, daily_cap, spent_in_window,
+    // window_start_epoch, epochs_per_window. Take the first five numbers at the top level.
+    const nums = state.filter((x) => typeof x === "number") as number[];
+    if (nums.length < 5) throw new ChainError("unexpected budget component layout");
+    const [, dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow] = nums;
+    return windowStatus({ dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow, currentEpoch });
   }
 
   // -- events / ledger -------------------------------------------------------------

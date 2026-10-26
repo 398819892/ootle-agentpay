@@ -20,15 +20,35 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any
 
-# Make the repo's SDK importable without a manual PYTHONPATH, however this package is launched.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_REPO = os.path.abspath(os.path.join(_HERE, "..", "..", ".."))  # integrations/agentpay_mcp/agentpay_mcp -> repo root
-_SDK = os.path.join(_REPO, "sdk", "src")
-if _SDK not in sys.path:
-    sys.path.insert(0, _SDK)
+# Make the repo's SDK (`agentpay.onchain`) importable without a manual PYTHONPATH, however this
+# package is launched. We try, in order: an explicit AGENTPAY_SDK_PATH; the repo layout relative
+# to this file (works for a source checkout or `pip install -e .`); then fall through to whatever
+# is already importable (e.g. the SDK installed as a package). For an *isolated* install
+# (pipx / uvx from a copy), set AGENTPAY_SDK_PATH to the repo's `sdk/src`.
+def _ensure_sdk_on_path() -> None:
+    candidates: list[str] = []
+    explicit = os.environ.get("AGENTPAY_SDK_PATH")
+    if explicit:
+        candidates.append(explicit)
+    here = os.path.dirname(os.path.abspath(__file__))
+    # integrations/agentpay_mcp/agentpay_mcp -> repo root -> sdk/src
+    candidates.append(os.path.join(os.path.abspath(os.path.join(here, "..", "..", "..")), "sdk", "src"))
+    for path in candidates:
+        if path and os.path.isdir(os.path.join(path, "agentpay")) and path not in sys.path:
+            sys.path.insert(0, path)
 
-from agentpay.errors import ChainError  # noqa: E402
-from agentpay.onchain import OnChainBudget, WalletdClient  # noqa: E402
+
+_ensure_sdk_on_path()
+
+try:
+    from agentpay.errors import ChainError  # noqa: E402
+    from agentpay.onchain import OnChainBudget, WalletdClient  # noqa: E402
+except ImportError as exc:  # pragma: no cover - friendly message when the SDK can't be found
+    raise ImportError(
+        "Could not import the AgentPay SDK (`agentpay.onchain`). Run the server from the repo, "
+        "install it editable (`pip install -e integrations/agentpay_mcp`), or set AGENTPAY_SDK_PATH "
+        "to the repo's `sdk/src` directory."
+    ) from exc
 
 WALLETD_URL = os.environ.get("AGENTPAY_WALLETD_URL", "http://127.0.0.1:12010/json_rpc")
 DEFAULT_TEMPLATE = os.environ.get(
@@ -166,5 +186,28 @@ def attach_wallet(
         client, template, owner_account=agent_account, agent_account=agent_account,
         component=component, agent_badge=agent_badge,
         per_tx_cap=per_tx_cap, daily_cap=daily_cap, whitelist=list(whitelist),
+    )
+    return AgentWallet(budget, per_tx_cap=per_tx_cap, daily_cap=daily_cap, whitelist=list(whitelist))
+
+
+def provision_wallet(
+    client: WalletdClient,
+    owner_account: str,
+    *,
+    fund: int,
+    per_tx_cap: int,
+    daily_cap: int,
+    whitelist: list[str],
+    epochs_per_window: int = 10,
+    template: str = DEFAULT_TEMPLATE,
+) -> AgentWallet:
+    """Convenience for the zero-config path: the owner opens a fresh on-chain budget and we
+    return an :class:`AgentWallet` over it. On devnet the owner account also holds the agent
+    badge, so the wallet can pay; the owner powers (revoke/withdraw) are simply not exposed as
+    MCP tools. For a production split, open the budget out of band and use :func:`attach_wallet`.
+    """
+    budget = open_budget(
+        client, owner_account, fund=fund, per_tx_cap=per_tx_cap, daily_cap=daily_cap,
+        whitelist=list(whitelist), epochs_per_window=epochs_per_window, template=template,
     )
     return AgentWallet(budget, per_tx_cap=per_tx_cap, daily_cap=daily_cap, whitelist=list(whitelist))

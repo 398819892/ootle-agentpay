@@ -43,3 +43,14 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Vendored build output — the dashboard's run.sh runs with no build step,
+# so the small prebuilt TS client is committed on purpose.
+!clients/ts/dist/
+!clients/ts/dist/**
+
+# Archives & stray folders (not source)
+*.7z
+*.zip
+*.rar
+新建文件夹/

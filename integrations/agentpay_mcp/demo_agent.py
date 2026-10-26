@@ -165,7 +165,7 @@ async def run_demo() -> None:
             # ---- 代理先搞清楚自己能干什么 ----
             step("代理开工前,先查预算状态和可付商户(真·MCP 工具调用)")
             status = await call("get_budget_status")
-            merchants = await call("list_merchants")
+            merchants = (await call("list_merchants")).get("merchants", [])
             say("get_budget_status →", json.dumps(status, ensure_ascii=False))
             say("list_merchants →", json.dumps(merchants, ensure_ascii=False))
             agent_thinks(f"我有 {status['remaining_in_window']} 的额度,单笔不能超 {status['per_tx_cap']},只能付给白名单里的 {len(merchants)} 家商户。")

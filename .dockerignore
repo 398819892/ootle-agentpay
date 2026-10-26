@@ -1,0 +1,15 @@
+# Keep the dashboard image small and never ship secrets or local state.
+**/node_modules
+**/.git
+**/*.log
+web/server/state.json
+**/state.json
+scripts/
+integrations/
+templates/
+wasm-template/
+node-binaries/
+sdk/
+docs/
+site/
+# keep: web/ and clients/ts/dist (the only things the Dockerfile copies)

@@ -25,6 +25,13 @@ function isTransient(message: string): boolean {
   return TRANSIENT_MARKERS.some((m) => message.includes(m));
 }
 
+// An admin token has a finite lifetime, so a long-running host (e.g. the dashboard server) will
+// eventually see these once its boot-time token lapses. We re-mint and retry transparently.
+const AUTH_ERROR_MARKERS = ["Expired token", "Invalid token", "Access denied", "Unauthorized"];
+function isAuthError(message: string | undefined): boolean {
+  return !!message && AUTH_ERROR_MARKERS.some((m) => message.includes(m));
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -48,11 +55,12 @@ export class WalletdClient {
     this.url = url;
   }
 
-  private async rpc(method: string, params: unknown): Promise<RpcResponse> {
+  private async rpc(method: string, params: unknown, retriedAuth = false): Promise<RpcResponse> {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (this.token) headers["Authorization"] = "Bearer " + this.token;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 120_000);
+    let out: RpcResponse;
     try {
       const resp = await fetch(this.url, {
         method: "POST",
@@ -60,10 +68,18 @@ export class WalletdClient {
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
         signal: controller.signal,
       });
-      return (await resp.json()) as RpcResponse;
+      out = (await resp.json()) as RpcResponse;
     } finally {
       clearTimeout(timer);
     }
+    // If a previously-minted token has expired, re-mint it once and retry the call transparently,
+    // so a long-lived client (the dashboard server) doesn't fail every op until it's restarted.
+    if (!retriedAuth && this.token && method !== "auth.request" && isAuthError(out.error?.message)) {
+      this.token = null;
+      await this.connect();
+      return this.rpc(method, params, true);
+    }
+    return out;
   }
 
   /** Mint an admin token. On an `auth=none` devnet daemon this needs no credentials. */
@@ -106,6 +122,26 @@ export class WalletdClient {
       if (b.token_symbol === "tTARI") return Number(b.balance);
     }
     return 0;
+  }
+
+  // -- chain reads (read-only; no signing) ----------------------------------------
+  /**
+   * The current chain epoch (via `settings.get`). Ootle measures time in epochs, not wall-clock,
+   * so this is what the AgentBudget rolling window is compared against.
+   */
+  async currentEpoch(): Promise<number> {
+    const r = await this.rpc("settings.get", {});
+    if (r.error) throw new ChainError(r.error.message ?? "settings.get failed");
+    const e = r.result?.current_epoch;
+    if (typeof e !== "number") throw new ChainError("settings.get did not return current_epoch");
+    return e;
+  }
+
+  /** Fetch a substate (component / resource / vault) by its address. Read-only. */
+  async getSubstate(substateId: string): Promise<any> {
+    const r = await this.rpc("substates.get", { substate_id: substateId });
+    if (r.error) throw new ChainError(r.error.message ?? "substates.get failed");
+    return r.result;
   }
 
   // -- transactions ---------------------------------------------------------------

@@ -1,4 +1,7 @@
 # Extra dependencies for the AgentPay MCP integration ONLY.
 # The core SDK (agentpay.onchain) stays pure-stdlib; keep these out of it.
-# Install into a venv local to this directory (see README.md).
+#
+# Canonical install is the package: `pip install -e integrations/agentpay_mcp` (see pyproject.toml,
+# gives the `agentpay-mcp` console script). This file is the legacy venv path for environments
+# without build tooling: install into a venv local to this directory (see README.md).
 mcp>=1.2,<2

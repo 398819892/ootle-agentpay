@@ -1,0 +1,79 @@
+# AgentPay dashboard — deployment topology.
+#
+# Run from the repo root:   docker compose -f web/docker-compose.yml up -d
+# Put your secrets in an env file next to this one (web/.env); see web/.env.example.
+#
+# The important security property is the TOPOLOGY, not just the containers:
+#
+#   Internet ──HTTPS──▶ reverse proxy (Caddy/nginx, TLS) ──▶ dashboard:8787 ──▶ walletd:5100
+#                                                            (hosted backend)   (holds the keys)
+#
+#   • Only the reverse proxy is exposed to the internet.
+#   • `walletd` has NO published ports — it is reachable ONLY from the dashboard over the private
+#     compose network. Its JSON-RPC port is never bound to a public interface.
+#   • The dashboard requires a password (DASHBOARD_PASSWORD) — without it, it refuses to be safe.
+
+services:
+  dashboard:
+    build:
+      context: ..               # repo root, so clients/ts/dist is in the build context
+      dockerfile: web/Dockerfile
+    image: agentpay-dashboard
+    restart: unless-stopped
+    # Publish ONLY to localhost; a host reverse proxy (Caddy/nginx) terminates TLS in front of it.
+    # Never publish this straight to 0.0.0.0 in production.
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      # --- auth (REQUIRED in production) ---
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?set DASHBOARD_PASSWORD in web/.env}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in web/.env}
+      COOKIE_SECURE: "true"     # the proxy terminates HTTPS, so cookies must be Secure
+      # --- chain target: esmeralda public testnet ---
+      AGENTPAY_WALLETD_URL: "http://walletd:5100/json_rpc"
+      AGENTPAY_BUDGET_TEMPLATE: "template_299d49bcace827cb86a8cdd9e6b1880783ae40a8a29ab28ba94b6b3ded6123a8"
+      AGENTPAY_OWNER_ACCOUNT: "dev"
+    volumes:
+      - dashboard-state:/data   # persist the open budget across restarts
+    networks:
+      - agentpay
+    depends_on:
+      - walletd
+
+  # ---------------------------------------------------------------------------------------------
+  # walletd — the Tari Ootle wallet daemon. This is NOT a normal npm service: it needs the
+  # `tari_ootle_walletd` binary, an esmeralda network config, a persistent keyring, and a funded
+  # `dev` account. The block below is a TEMPLATE — see web/DEPLOYMENT.md for the full setup. Many
+  # operators prefer to run walletd directly on the host instead (then point the dashboard at
+  # AGENTPAY_WALLETD_URL=http://host.docker.internal:5100/json_rpc and delete this service).
+  #
+  # Whichever way you run it: bind it to localhost / the private network only, and NEVER publish
+  # its port to the internet.
+  walletd:
+    image: debian:bookworm-slim
+    restart: unless-stopped
+    # NOTE: no `ports:` — intentional. walletd is reachable only from `dashboard` on the private
+    # `agentpay` network, never from the host's public interface.
+    environment:
+      # walletd reads the keyring password from the environment; keep it out of logs and images.
+      TARI_WALLET_DAEMON_KEYRING_PASSPHRASE: ${WALLETD_KEYRING_PASSWORD:?set WALLETD_KEYRING_PASSWORD in web/.env}
+    volumes:
+      # Supply the binary and the esmeralda config + keyring from the host (read the deploy doc).
+      - ./walletd/tari_ootle_walletd:/usr/local/bin/tari_ootle_walletd:ro
+      - walletd-data:/root/.tari
+    # Bind inside the container to 0.0.0.0 so `dashboard` can reach it over the compose network;
+    # because no port is published, this is still private to the compose network.
+    command: >-
+      /usr/local/bin/tari_ootle_walletd
+      --network esmeralda
+      --listen-addr 0.0.0.0:5100
+    networks:
+      - agentpay
+
+networks:
+  agentpay:
+    driver: bridge
+
+volumes:
+  dashboard-state:
+  walletd-data:

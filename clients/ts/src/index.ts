@@ -11,5 +11,7 @@
 export { WalletdClient, DEFAULT_WALLETD_URL, rejectReason } from "./walletd";
 export { OnChainBudget, XTR } from "./budget";
 export type { LedgerEntry, OnChainBudgetOptions } from "./budget";
+export { windowStatus, formatEta, EPOCH_MINUTES } from "./window";
+export type { WindowStatus, BudgetWindowInput } from "./window";
 export { encodeMemo, newInvoiceId, MEMO_PREFIX, MAX_MEMO_BYTES } from "./invoice";
 export { AgentPayError, PolicyViolation, ChainError, InvoiceError } from "./errors";

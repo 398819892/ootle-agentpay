@@ -143,10 +143,45 @@ console.log(budget.spent, budget.ledger);
 | `.dryRun` / `.run` | same | `run` submits for real and polls `get_result` |
 | `OnChainBudget(client, template, owner, {agentAccount?})` | `OnChainBudget` | agent defaults to owner (devnet) |
 | `.open` / `.pay` / `.payInvoice` / `.wouldReject` / `.revoke` / `.withdraw` / `.addMerchant` | same | all `async` |
+| `.readWindow()` | — (TS-only helper) | reads the live rolling-window status from chain |
+| `WalletdClient.currentEpoch()` | — (TS-only helper) | current chain epoch (via `settings.get`) |
+| `WalletdClient.getSubstate(id)` | — (TS-only helper) | read a component/resource substate (read-only) |
 | `OnChainBudget.payEvents(result)` | `OnChainBudget.pay_events` | de-duplicated on-chain `pay` events |
 
 All methods are `async` (the Python originals are synchronous). Errors derive from `AgentPayError`
 (`ChainError`, `PolicyViolation`, `InvoiceError`).
+
+## Spending window — the "daily cap" in human terms
+
+The on-chain **daily cap is *not* a calendar day**. The AgentBudget template measures it over a
+**rolling window of `epochsPerWindow` chain epochs** (an Ootle epoch is **≈30 min**), and the window
+resets **lazily** — the spent counter is only zeroed on the next payment *after* the window has
+elapsed (see `roll_window` in [`templates/agent_budget/src/lib.rs`](../../templates/agent_budget/src/lib.rs)).
+That is correct but unintuitive, so the client ships a **read-only** helper that turns the raw
+on-chain numbers into "X left this window, resets in ≈Y":
+
+```ts
+import { WalletdClient, OnChainBudget, windowStatus } from "@agentpay/client";
+
+// 1) Straight from chain (recommended): reads the component substate + current epoch for you.
+const w = await budget.readWindow();
+//   { dailyCap, spentInWindow, remaining, epochsUntilReset, windowElapsed,
+//     approxMinutesUntilReset, resetEta: "≈5h", epochMinutes: 30, ... }
+console.log(`${w.remaining} left this window · resets ${w.resetEta}`);
+
+// 2) Or compute it yourself from numbers you already have (pure, no chain access):
+const status = windowStatus({
+  dailyCap: 1_500, spentInWindow: 1_200,
+  windowStartEpoch: 2, epochsPerWindow: 10,
+  currentEpoch: await c.currentEpoch(),
+});
+```
+
+`windowStatus()` is **pure computation** — no chain logic is touched and nothing is mutated. The
+wall-clock figures are deliberately approximate (`≈`): epoch length is not fixed, so `resetEta` and
+`approxMinutesUntilReset` are estimates, not guarantees. When the window has already elapsed,
+`windowElapsed` is `true` and `remaining` is the **full cap** (the next payment resets the counter
+first). `EPOCH_MINUTES` (30) is exported so callers can show the assumption.
 
 ## License
 
