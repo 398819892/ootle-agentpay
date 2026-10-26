@@ -17,6 +17,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
+// Local, zero-dependency hardening modules (see docs/custody.md for the custody model).
+const { createAuthorizer, createRateLimiter, TIERS } = require("./authorizer");
+const { createAudit } = require("./audit");
+
 // ---- locate and load the committed TS client (its compiled dist) -----------------------------
 const CLIENT_DIR = path.resolve(__dirname, "..", "..", "clients", "ts", "dist");
 let client;
@@ -71,6 +75,33 @@ const COOKIE_NAME = "ap_session";
 // Set COOKIE_SECURE=true behind HTTPS to force the Secure flag; otherwise it is inferred from the
 // X-Forwarded-Proto a TLS-terminating proxy sets (so cookies still work on plain-http localhost).
 const COOKIE_SECURE_ENV = process.env.COOKIE_SECURE; // "true" | "false" | undefined
+
+// ---- hardening config (custody boundary) ----------------------------------------------------
+// High-risk owner actions (withdraw, revoke, change whitelist, mint/revoke an agent badge, reset,
+// freeze/unfreeze) require a SECOND confirmation that is independent of the login session: the
+// operator re-presents a secret and gets a short-lived, single-use token bound to that one action.
+// This is enabled whenever auth is on. Locally (no password) there is no secret to step up with, so
+// the extra gate is off and the dev experience is unchanged. A distinct AGENTPAY_ADMIN_PASSWORD can
+// be set so that holding a read/operate session is not the same as being able to move funds.
+const ADMIN_PASSWORD = process.env.AGENTPAY_ADMIN_PASSWORD || DASHBOARD_PASSWORD;
+const STEP_UP_ON = AUTH_ON;
+const CONFIRM_TTL_MS = (Number(process.env.CONFIRM_TTL_SECONDS) || 120) * 1000;
+
+// Append-only audit log of every state-changing call. Overridable so a container can mount a
+// volume (or a later deployment can tee it to an off-box append-only sink).
+const audit = createAudit();
+
+// Rate limit + anomaly flags for fund-moving / admin ops (separate from the login throttle).
+const rate = createRateLimiter({
+  windowMs: Number(process.env.AGENTPAY_RATE_WINDOW_MS) || 60_000,
+  max: Number(process.env.AGENTPAY_RATE_MAX) || 40,
+  moneyWindowMs: Number(process.env.AGENTPAY_MONEY_WINDOW_MS) || 60_000,
+  moneyMax: Number(process.env.AGENTPAY_MONEY_MAX) || 12,
+  // 0 = disabled; set to a base-unit threshold to flag unusually large single amounts.
+  anomalyAmount: process.env.AGENTPAY_ANOMALY_AMOUNT || "0",
+  burstN: Number(process.env.AGENTPAY_BURST_N) || 5,
+  burstMs: Number(process.env.AGENTPAY_BURST_MS) || 10_000,
+});
 
 function cookieIsSecure(req) {
   if (COOKIE_SECURE_ENV === "true") return true;
@@ -151,13 +182,71 @@ function noteLoginOk(ip) {
   loginFails.delete(ip);
 }
 
+// ---- step-up confirmation for high-risk actions ---------------------------------------------
+// A confirm token is an HMAC over {op, exp, nonce}, minted only when the caller re-presents the
+// admin secret (see POST /api/confirm). It is bound to a single operation, expires quickly, and is
+// single-use. This gives a second factor that does not ride on the session cookie: stealing a live
+// session is not enough to move funds — you must also know the admin secret, right now.
+const usedConfirmNonces = new Map(); // nonce -> exp
+function pruneConfirmNonces() {
+  const now = Date.now();
+  for (const [n, exp] of usedConfirmNonces) if (exp <= now) usedConfirmNonces.delete(n);
+}
+function adminPasswordMatches(input) {
+  const a = crypto.createHash("sha256").update(String(input ?? "")).digest();
+  const b = crypto.createHash("sha256").update(ADMIN_PASSWORD).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+function issueConfirmToken(op) {
+  const payload = { op, exp: Date.now() + CONFIRM_TTL_MS, n: crypto.randomBytes(12).toString("hex") };
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const mac = crypto.createHmac("sha256", SESSION_SECRET).update("confirm." + body).digest("base64url");
+  return `${body}.${mac}`;
+}
+function verifyConfirmToken(token, op) {
+  if (!token || typeof token !== "string" || !token.includes(".")) return false;
+  const [body, mac] = token.split(".");
+  const expected = crypto.createHmac("sha256", SESSION_SECRET).update("confirm." + body).digest("base64url");
+  const a = Buffer.from(mac);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  let p;
+  try {
+    p = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  } catch {
+    return false;
+  }
+  if (!p || p.op !== op || typeof p.exp !== "number" || Date.now() >= p.exp) return false;
+  pruneConfirmNonces();
+  if (usedConfirmNonces.has(p.n)) return false; // already spent
+  usedConfirmNonces.set(p.n, p.exp);
+  return true;
+}
+const stepUp = { required: () => STEP_UP_ON, verify: verifyConfirmToken };
+
+/** Request identity for the authorizer/audit trail. Never carries a password. */
+function requestCtx(req, body) {
+  const session = AUTH_ON ? verifySession(parseCookies(req)[COOKIE_NAME]) : null;
+  const ip = clientIp(req);
+  const sid = session && session.sid ? session.sid : null;
+  return {
+    actor: AUTH_ON ? (sid ? `op:${sid.slice(0, 8)}` : "op") : "local",
+    sid,
+    ip,
+    // throttle per session when logged in, else per IP
+    rateKey: AUTH_ON ? sid || ip : ip,
+    confirmToken: body && body.confirmToken,
+  };
+}
+
 // ---- persisted runtime state (so a reload / restart keeps the open budget) -------------------
 /** @type {{ budget: any|null, merchants: Record<string,string>, funded: string, withdrawn: string }} */
-let store = { budget: null, merchants: {}, funded: "0", withdrawn: "0" };
+let store = { budget: null, merchants: {}, funded: "0", withdrawn: "0", frozen: false };
 function loadStore() {
   try {
     store = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
     if (!store.merchants) store.merchants = {};
+    store.frozen = Boolean(store.frozen); // global kill switch (emergency stop)
     // Amounts are canonically decimal strings now; coerce any legacy numeric state so arithmetic
     // stays exact (BigInt) regardless of what was persisted by an older build.
     store.funded = String(store.funded ?? "0");
@@ -298,6 +387,10 @@ async function dashboardState() {
     connected: Boolean(wd),
     owner: ownerAddr,
     merchants: Object.entries(store.merchants).map(([name, address]) => ({ name, address })),
+    // global emergency stop (dashboard-wide, independent of a single budget's on-chain revoke)
+    frozen: Boolean(store.frozen),
+    // whether high-risk actions require a step-up confirmation (true iff auth is enabled)
+    stepUpRequired: STEP_UP_ON,
     budget: null,
   };
   if (!store.budget) return base;
@@ -337,39 +430,247 @@ async function dashboardState() {
   return base;
 }
 
+// ---- restricted operation registry -----------------------------------------------------------
+// These `run` functions are the ONLY code that drives walletd / mutates the budget. Each declares a
+// risk tier; high-risk ones require a step-up confirmation. The authorizer (below) is the single
+// gate in front of them — request handlers never call walletd directly, so a compromised web layer
+// is confined to exactly this reviewed set of actions.
+const OPS = {
+  // Fund + mint a new budget: moves owner funds and sets the on-chain rules → high-risk.
+  createBudget: {
+    tier: TIERS.ADMIN,
+    highRisk: true,
+    async run(body, ctx) {
+      if (store.budget) throw httpError(409, "A budget is already open. Reset it to create a new one.");
+      const fund = toAmount(body.fund, "fund");
+      const perTxCap = toAmount(body.perTxCap, "per-transaction cap");
+      const dailyCap = toAmount(body.dailyCap, "daily cap");
+      const epochsPerWindow = Math.max(1, Number(body.epochsPerWindow) || 10);
+      if (big(perTxCap) > big(dailyCap)) throw httpError(400, "Per-transaction cap cannot exceed the daily cap.");
+      if (big(fund) <= 0n) throw httpError(400, "Funding amount must be greater than zero.");
+      const wlNames = Array.isArray(body.whitelist) ? body.whitelist : [];
+      const whitelist = [];
+      for (const n of wlNames) whitelist.push(await resolveMerchant(n));
+      const c = await walletd();
+      const budget = await new OnChainBudget(c, BUDGET_TEMPLATE, ownerAddr).open({
+        fund,
+        perTxCap,
+        dailyCap,
+        epochsPerWindow,
+        whitelist,
+      });
+      store.funded = fund;
+      store.withdrawn = "0";
+      snapshotBudget(budget);
+      ctx.meta.txId = budget.component;
+      ctx.meta.params = { fund, perTxCap, dailyCap, epochsPerWindow, whitelist: whitelist.length };
+      return await dashboardState();
+    },
+  },
+
+  // Agent payment: money-moving, within the on-chain caps → throttled + flagged, not step-up.
+  pay: {
+    tier: TIERS.MONEY,
+    async run(body, ctx) {
+      const b = await liveBudget();
+      if (!b) throw httpError(409, "No budget is open.");
+      const merchant = await resolveMerchant(body.merchant);
+      const amount = toAmount(body.amount, "amount");
+      const agentTag = (body.agentTag || "agent").toString().slice(0, 24);
+      const invoiceId = body.invoiceId ? String(body.invoiceId) : newInvoiceId();
+      try {
+        await b.payInvoice({ merchant, invoiceId, amount, agentTag });
+      } catch (e) {
+        // Surface the chain's own reason as a friendly 422, distinct from a server fault.
+        throw httpError(422, chainMessage(e));
+      }
+      snapshotBudget(b);
+      ctx.meta.txId = invoiceId;
+      ctx.meta.params = { merchant, amount, invoiceId };
+      return { ...(await dashboardState()), paid: { amount, merchant, invoiceId } };
+    },
+  },
+
+  // Expand the on-chain whitelist → high-risk (grows who the agent may pay).
+  addMerchant: {
+    tier: TIERS.ADMIN,
+    highRisk: true,
+    async run(body, ctx) {
+      const b = await liveBudget();
+      if (!b) throw httpError(409, "No budget is open.");
+      const address = await resolveMerchant(body.merchant);
+      if (b.whitelist.includes(address)) throw httpError(400, "That merchant is already whitelisted.");
+      await b.addMerchant(address);
+      snapshotBudget(b);
+      ctx.meta.params = { merchant: address };
+      return await dashboardState();
+    },
+  },
+
+  // Pull funds out of the vault back to the owner → highest-risk money extraction.
+  withdraw: {
+    tier: TIERS.ADMIN,
+    highRisk: true,
+    async run(body, ctx) {
+      const b = await liveBudget();
+      if (!b) throw httpError(409, "No budget is open.");
+      const treasury = big(store.funded) - big(b.spent) - big(store.withdrawn);
+      const amount = toAmount(body.amount, "amount");
+      if (big(amount) > treasury) throw httpError(400, `Only ${clampStr(treasury)} remains in the treasury.`);
+      await b.withdraw(amount);
+      store.withdrawn = (big(store.withdrawn) + big(amount)).toString();
+      snapshotBudget(b);
+      ctx.meta.params = { amount };
+      return await dashboardState();
+    },
+  },
+
+  // Add funds into the vault: money-moving (from the owner account) → throttled + flagged.
+  topUp: {
+    tier: TIERS.MONEY,
+    async run(body, ctx) {
+      const b = await liveBudget();
+      if (!b) throw httpError(409, "No budget is open.");
+      const amount = toAmount(body.amount, "amount");
+      if (big(amount) <= 0n) throw httpError(400, "Top-up amount must be greater than zero.");
+      try {
+        await b.topUp(amount);
+      } catch (e) {
+        throw httpError(422, chainMessage(e));
+      }
+      store.funded = (big(store.funded) + big(amount)).toString(); // vault grew → treasury grows too
+      snapshotBudget(b);
+      ctx.meta.params = { amount };
+      return await dashboardState();
+    },
+  },
+
+  // Global on-chain kill switch for the agent → high-risk, irreversible.
+  revoke: {
+    tier: TIERS.ADMIN,
+    highRisk: true,
+    async run(_body, ctx) {
+      const b = await liveBudget();
+      if (!b) throw httpError(409, "No budget is open.");
+      if (b.revoked) throw httpError(400, "This budget is already revoked.");
+      await b.revoke();
+      snapshotBudget(b);
+      ctx.meta.params = {};
+      return await dashboardState();
+    },
+  },
+
+  // Mint a new agent-session badge → high-risk (grants fresh spending authority).
+  issueSession: {
+    tier: TIERS.ADMIN,
+    highRisk: true,
+    async run(body, ctx) {
+      const b = await liveBudget();
+      if (!b) throw httpError(409, "No budget is open.");
+      const session = String(body.session || "").trim();
+      if (!session) throw httpError(400, "A session label is required.");
+      if (!/^[A-Za-z0-9 _-]{1,48}$/.test(session)) {
+        throw httpError(400, "Use letters, numbers, spaces, hyphens or underscores (max 48).");
+      }
+      if ((b.sessions || []).includes(session)) throw httpError(400, "That session label already exists.");
+      try {
+        await b.issueAgentBadge(session);
+      } catch (e) {
+        throw httpError(422, chainMessage(e));
+      }
+      snapshotBudget(b);
+      ctx.meta.params = { session };
+      return await dashboardState();
+    },
+  },
+
+  // Revoke a single agent session → high-risk, irreversible for that session.
+  revokeSession: {
+    tier: TIERS.ADMIN,
+    highRisk: true,
+    async run(body, ctx) {
+      const b = await liveBudget();
+      if (!b) throw httpError(409, "No budget is open.");
+      const session = String(body.session || "").trim();
+      if (!session) throw httpError(400, "A session label is required.");
+      if ((b.revokedSessions || []).includes(session)) throw httpError(400, "That session is already revoked.");
+      try {
+        await b.revokeSession(session);
+      } catch (e) {
+        throw httpError(422, chainMessage(e));
+      }
+      snapshotBudget(b);
+      ctx.meta.params = { session };
+      return await dashboardState();
+    },
+  },
+
+  // Detach the local budget view (no chain effect) → still high-risk (can hide a live budget).
+  resetLocal: {
+    tier: TIERS.ADMIN,
+    highRisk: true,
+    async run(_body, ctx) {
+      // LOCAL ONLY. Clears the dashboard's local view (the persisted budget reference and the
+      // funded/withdrawn tallies). It does NOT touch the chain: the AgentBudget component, its vault
+      // and any remaining treasury stay exactly as they are, and no funds are withdrawn or refunded.
+      store.budget = null;
+      store.funded = "0";
+      store.withdrawn = "0";
+      saveStore();
+      ctx.meta.params = {};
+      return {
+        ...(await dashboardState()),
+        notice:
+          "Local view cleared. The on-chain budget component, its vault and any remaining treasury " +
+          "still exist on chain — reset does not withdraw or refund funds.",
+      };
+    },
+  },
+
+  // Emergency stop: freeze every money/admin action dashboard-wide (independent of on-chain revoke).
+  freeze: {
+    tier: TIERS.ADMIN,
+    highRisk: true,
+    async run(_body, ctx) {
+      store.frozen = true;
+      saveStore();
+      ctx.meta.params = {};
+      return { ...(await dashboardState()), notice: "Dashboard frozen. All fund-moving actions are blocked until you unfreeze." };
+    },
+  },
+
+  // Lift the emergency stop. Allowed even while frozen (it is the way out), but still step-up gated.
+  unfreeze: {
+    tier: TIERS.ADMIN,
+    highRisk: true,
+    allowWhenFrozen: true,
+    async run(_body, ctx) {
+      store.frozen = false;
+      saveStore();
+      ctx.meta.params = {};
+      return { ...(await dashboardState()), notice: "Dashboard unfrozen. Fund-moving actions are enabled again." };
+    },
+  },
+};
+
+// The single audited gate in front of every chain operation.
+const authz = createAuthorizer({ ops: OPS, audit, isFrozen: () => Boolean(store.frozen), stepUp, rate });
+
 // ---- API handlers -----------------------------------------------------------------------------
+// Reads are plain handlers. Every state-changing endpoint delegates to the authorizer, which
+// enforces the whitelist, kill switch, rate limit, step-up confirmation and audit trail.
 const api = {
   async "GET /api/state"() {
     return await dashboardState();
   },
 
-  async "POST /api/connect"() {
-    await walletd();
-    return await dashboardState();
+  async "GET /api/audit"(_body, _ctx, query) {
+    const limit = Math.max(1, Math.min(500, Number(query && query.limit) || 100));
+    return { entries: audit.recent(limit) };
   },
 
-  async "POST /api/budget"(body) {
-    if (store.budget) throw httpError(409, "A budget is already open. Reset it to create a new one.");
-    const fund = toAmount(body.fund, "fund");
-    const perTxCap = toAmount(body.perTxCap, "per-transaction cap");
-    const dailyCap = toAmount(body.dailyCap, "daily cap");
-    const epochsPerWindow = Math.max(1, Number(body.epochsPerWindow) || 10);
-    if (big(perTxCap) > big(dailyCap)) throw httpError(400, "Per-transaction cap cannot exceed the daily cap.");
-    if (big(fund) <= 0n) throw httpError(400, "Funding amount must be greater than zero.");
-    const wlNames = Array.isArray(body.whitelist) ? body.whitelist : [];
-    const whitelist = [];
-    for (const n of wlNames) whitelist.push(await resolveMerchant(n));
-    const c = await walletd();
-    const budget = await new OnChainBudget(c, BUDGET_TEMPLATE, ownerAddr).open({
-      fund,
-      perTxCap,
-      dailyCap,
-      epochsPerWindow,
-      whitelist,
-    });
-    store.funded = fund;
-    store.withdrawn = "0";
-    snapshotBudget(budget);
+  async "POST /api/connect"() {
+    await walletd();
     return await dashboardState();
   },
 
@@ -382,123 +683,22 @@ const api = {
     return { ok: reason === null, reason };
   },
 
-  async "POST /api/pay"(body) {
-    const b = await liveBudget();
-    if (!b) throw httpError(409, "No budget is open.");
-    const merchant = await resolveMerchant(body.merchant);
-    const amount = toAmount(body.amount, "amount");
-    const agentTag = (body.agentTag || "agent").toString().slice(0, 24);
-    const invoiceId = body.invoiceId ? String(body.invoiceId) : newInvoiceId();
-    try {
-      await b.payInvoice({ merchant, invoiceId, amount, agentTag });
-    } catch (e) {
-      // Surface the chain's own reason as a friendly 422, distinct from a server fault.
-      throw httpError(422, chainMessage(e));
-    }
-    snapshotBudget(b);
-    return { ...(await dashboardState()), paid: { amount, merchant, invoiceId } };
-  },
-
-  async "POST /api/merchants"(body) {
-    const b = await liveBudget();
-    if (!b) throw httpError(409, "No budget is open.");
-    const address = await resolveMerchant(body.merchant);
-    if (b.whitelist.includes(address)) throw httpError(400, "That merchant is already whitelisted.");
-    await b.addMerchant(address);
-    snapshotBudget(b);
-    return await dashboardState();
-  },
-
   async "POST /api/merchants/resolve"(body) {
     const address = await resolveMerchant(body.merchant);
     return { name: String(body.merchant).trim().toLowerCase(), address };
   },
 
-  async "POST /api/revoke"() {
-    const b = await liveBudget();
-    if (!b) throw httpError(409, "No budget is open.");
-    if (b.revoked) throw httpError(400, "This budget is already revoked.");
-    await b.revoke();
-    snapshotBudget(b);
-    return await dashboardState();
-  },
-
-  async "POST /api/withdraw"(body) {
-    const b = await liveBudget();
-    if (!b) throw httpError(409, "No budget is open.");
-    const treasury = big(store.funded) - big(b.spent) - big(store.withdrawn);
-    const amount = toAmount(body.amount, "amount");
-    if (big(amount) > treasury) throw httpError(400, `Only ${clampStr(treasury)} remains in the treasury.`);
-    await b.withdraw(amount);
-    store.withdrawn = (big(store.withdrawn) + big(amount)).toString();
-    snapshotBudget(b);
-    return await dashboardState();
-  },
-
-  async "POST /api/top-up"(body) {
-    const b = await liveBudget();
-    if (!b) throw httpError(409, "No budget is open.");
-    const amount = toAmount(body.amount, "amount");
-    if (big(amount) <= 0n) throw httpError(400, "Top-up amount must be greater than zero.");
-    try {
-      await b.topUp(amount);
-    } catch (e) {
-      throw httpError(422, chainMessage(e));
-    }
-    store.funded = (big(store.funded) + big(amount)).toString(); // vault grew → treasury grows too
-    snapshotBudget(b);
-    return await dashboardState();
-  },
-
-  async "POST /api/sessions"(body) {
-    const b = await liveBudget();
-    if (!b) throw httpError(409, "No budget is open.");
-    const session = String(body.session || "").trim();
-    if (!session) throw httpError(400, "A session label is required.");
-    if (!/^[A-Za-z0-9 _-]{1,48}$/.test(session)) {
-      throw httpError(400, "Use letters, numbers, spaces, hyphens or underscores (max 48).");
-    }
-    if ((b.sessions || []).includes(session)) throw httpError(400, "That session label already exists.");
-    try {
-      await b.issueAgentBadge(session);
-    } catch (e) {
-      throw httpError(422, chainMessage(e));
-    }
-    snapshotBudget(b);
-    return await dashboardState();
-  },
-
-  async "POST /api/sessions/revoke"(body) {
-    const b = await liveBudget();
-    if (!b) throw httpError(409, "No budget is open.");
-    const session = String(body.session || "").trim();
-    if (!session) throw httpError(400, "A session label is required.");
-    if ((b.revokedSessions || []).includes(session)) throw httpError(400, "That session is already revoked.");
-    try {
-      await b.revokeSession(session);
-    } catch (e) {
-      throw httpError(422, chainMessage(e));
-    }
-    snapshotBudget(b);
-    return await dashboardState();
-  },
-
-  async "POST /api/reset"() {
-    // LOCAL ONLY. This clears the dashboard's local view (the persisted budget reference and the
-    // funded/withdrawn tallies) so a fresh budget can be demoed. It does NOT touch the chain: the
-    // AgentBudget component, its vault and any remaining treasury stay exactly as they are, and no
-    // funds are withdrawn or refunded. To reclaim the treasury, use Withdraw before resetting.
-    store.budget = null;
-    store.funded = "0";
-    store.withdrawn = "0";
-    saveStore();
-    return {
-      ...(await dashboardState()),
-      notice:
-        "Local view cleared. The on-chain budget component, its vault and any remaining treasury " +
-        "still exist on chain — reset does not withdraw or refund funds.",
-    };
-  },
+  "POST /api/budget": (body, ctx) => authz.execute("createBudget", body, ctx),
+  "POST /api/pay": (body, ctx) => authz.execute("pay", body, ctx),
+  "POST /api/merchants": (body, ctx) => authz.execute("addMerchant", body, ctx),
+  "POST /api/withdraw": (body, ctx) => authz.execute("withdraw", body, ctx),
+  "POST /api/top-up": (body, ctx) => authz.execute("topUp", body, ctx),
+  "POST /api/revoke": (body, ctx) => authz.execute("revoke", body, ctx),
+  "POST /api/sessions": (body, ctx) => authz.execute("issueSession", body, ctx),
+  "POST /api/sessions/revoke": (body, ctx) => authz.execute("revokeSession", body, ctx),
+  "POST /api/reset": (body, ctx) => authz.execute("resetLocal", body, ctx),
+  "POST /api/freeze": (body, ctx) => authz.execute("freeze", body, ctx),
+  "POST /api/unfreeze": (body, ctx) => authz.execute("unfreeze", body, ctx),
 };
 
 // ---- helpers ----------------------------------------------------------------------------------
@@ -606,7 +806,12 @@ const server = http.createServer(async (req, res) => {
 
   // --- public auth endpoints (no session required) -----------------------------------------
   if (key === "GET /api/session") {
-    return sendJson(res, 200, { authRequired: AUTH_ON, authed: isAuthed(req) });
+    return sendJson(res, 200, {
+      authRequired: AUTH_ON,
+      authed: isAuthed(req),
+      stepUpRequired: STEP_UP_ON,
+      frozen: Boolean(store.frozen),
+    });
   }
   if (key === "POST /api/logout") {
     clearSessionCookie(req, res);
@@ -624,7 +829,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (passwordMatches(body.password)) {
       noteLoginOk(ip);
-      setSessionCookie(req, res, signSession({ exp: Date.now() + SESSION_TTL_MS }), SESSION_TTL_MS);
+      const sid = crypto.randomUUID();
+      setSessionCookie(req, res, signSession({ exp: Date.now() + SESSION_TTL_MS, sid }), SESSION_TTL_MS);
+      audit.append({ actor: `op:${sid.slice(0, 8)}`, sid, ip, op: "login", tier: "auth", status: "ok" });
       return sendJson(res, 200, { authed: true });
     }
     noteLoginFail(ip);
@@ -634,18 +841,54 @@ const server = http.createServer(async (req, res) => {
   // --- gate everything else ----------------------------------------------------------------
   if (AUTH_ON && !isAuthed(req)) return sendJson(res, 401, { error: "Authentication required." });
 
+  // --- step-up: mint a short-lived, single-use confirmation token for one high-risk action -----
+  // Requires a valid session AND re-presenting the admin secret, so a stolen session alone can't
+  // move funds. In open local-dev mode there is no secret, so this is a no-op the UI skips.
+  if (key === "POST /api/confirm") {
+    let body = {};
+    try {
+      body = await readBody(req);
+    } catch {
+      /* treat as empty */
+    }
+    const op = String(body.op || "");
+    if (!OPS[op] || !OPS[op].highRisk) return sendJson(res, 400, { error: "Unknown or non-confirmable operation." });
+    if (!STEP_UP_ON) return sendJson(res, 200, { stepUp: false, token: null });
+    const ip = clientIp(req);
+    if (loginLocked(ip)) return sendJson(res, 429, { error: "Too many attempts. Try again in a few minutes." });
+    const ctx = requestCtx(req, body);
+    if (!adminPasswordMatches(body.password)) {
+      noteLoginFail(ip);
+      audit.append({ actor: ctx.actor, sid: ctx.sid, ip, op: `confirm:${op}`, tier: "admin", status: "denied", reason: "bad_password" });
+      return sendJson(res, 401, { error: "Incorrect password." }); // never log the attempt/value
+    }
+    noteLoginOk(ip);
+    audit.append({ actor: ctx.actor, sid: ctx.sid, ip, op: `confirm:${op}`, tier: "admin", status: "issued" });
+    return sendJson(res, 200, { stepUp: true, token: issueConfirmToken(op) });
+  }
+
   const handler = api[key];
   if (!handler) return sendJson(res, 404, { error: "unknown endpoint" });
 
   try {
     const body = req.method === "POST" ? await readBody(req) : {};
-    // all chain-touching ops run one at a time
-    const result = await serialize(() => handler(body));
+    const query = Object.fromEntries(new URL(req.url, "http://localhost").searchParams);
+    const ctx = requestCtx(req, body);
+    // all chain-touching ops run one at a time; the authorizer enforces policy + audit inside
+    const result = await serialize(() => handler(body, ctx, query));
     sendJson(res, 200, result);
   } catch (e) {
     const status = e.status || 500;
     if (status >= 500) console.error(`${key} failed:`, e);
-    sendJson(res, status, { error: chainMessage(e) });
+    // pass through policy flags so the client can react (frozen / rate-limited / confirm needed)
+    const payload = { error: chainMessage(e) };
+    if (e.frozen) payload.frozen = true;
+    if (e.rateLimited) payload.rateLimited = true;
+    if (e.confirmRequired) {
+      payload.confirmRequired = true;
+      payload.op = e.op;
+    }
+    sendJson(res, status, payload);
   }
 });
 
@@ -655,8 +898,19 @@ server.listen(PORT, HOST, () => {
   console.log(`  ├─ walletd ${WALLETD_URL}`);
   console.log(`  ├─ owner   ${OWNER}`);
   console.log(`  ├─ auth    ${AUTH_ON ? "ON (DASHBOARD_PASSWORD set)" : "OFF — local dev mode, do NOT expose"}`);
+  console.log(`  ├─ step-up ${STEP_UP_ON ? "ON — high-risk actions need a fresh confirmation" : "OFF (no password set)"}`);
+  console.log(`  ├─ frozen  ${store.frozen ? "YES — fund-moving actions are blocked" : "no"}`);
+  console.log(`  ├─ audit   ${audit.file}`);
   if (AUTH_ON && !process.env.SESSION_SECRET) {
     console.log("  │          note: SESSION_SECRET unset — using an ephemeral secret (sessions reset on restart)");
+  }
+  if (AUTH_ON && !process.env.AGENTPAY_ADMIN_PASSWORD) {
+    console.log("  │          note: AGENTPAY_ADMIN_PASSWORD unset — step-up reuses DASHBOARD_PASSWORD (set a distinct one to separate operate vs. move-funds)");
+  }
+  // Secret hygiene: a deployment that shipped the .env.example placeholders is not safe. Warn loudly
+  // (we never print the secret itself).
+  if (AUTH_ON && /change-me/i.test(DASHBOARD_PASSWORD)) {
+    console.log("  │          ⚠ DASHBOARD_PASSWORD looks like the .env.example placeholder — set a long random value!");
   }
   console.log(`  └─ template ${BUDGET_TEMPLATE.slice(0, 24)}…\n`);
 });

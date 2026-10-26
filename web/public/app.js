@@ -363,6 +363,36 @@ const I18N = {
     t_withdrawn_msg: (p) => `${p.amount} ${p.unit} returned to the owner.`,
     t_withdraw_failed: "Withdraw failed",
 
+    /* step-up confirmation */
+    stepup_title: "Confirm this action",
+    stepup_body:
+      "This is a high-risk action. Re-enter the admin password to authorize it — this second factor is separate from your login, so a stolen session alone can't move funds.",
+    stepup_password_label: "Admin password",
+    stepup_confirm: "Confirm",
+
+    /* emergency stop (dashboard-wide freeze) */
+    emergency_stop: "Emergency stop",
+    freeze_title: "Freeze the dashboard (global kill switch)",
+    freeze_body:
+      "Blocks every fund-moving action — payments, top-ups, withdrawals, new budgets — across the whole dashboard at once. Read-only views keep working. Use this if you suspect the server or an operator account is compromised. It is separate from a single budget's on-chain revoke, and it is reversible.",
+    freeze_btn: "Freeze everything",
+    unfreeze_btn: "Unfreeze",
+    frozen_badge: "Frozen",
+    confirm_freeze_title: "Freeze the whole dashboard?",
+    confirm_freeze_body:
+      "Every fund-moving action will be refused until you unfreeze. Read-only views stay available. Use this as an emergency stop.",
+    confirm_unfreeze_title: "Unfreeze the dashboard?",
+    confirm_unfreeze_body: "Fund-moving actions will be enabled again. Only do this once you're sure it's safe.",
+    frozen_banner_title: "Dashboard frozen — ",
+    frozen_banner_body: "the emergency stop is engaged, so every fund-moving action is blocked. Unfreeze it in Governance.",
+    p_freezing: "Freezing…",
+    p_unfreezing: "Unfreezing…",
+    t_frozen: "Dashboard frozen",
+    t_frozen_msg: "Every fund-moving action is now blocked. Read-only views still work.",
+    t_unfrozen: "Dashboard unfrozen",
+    t_unfrozen_msg: "Fund-moving actions are enabled again.",
+    t_freeze_failed: "Couldn't change the freeze state",
+
     dismiss: "Dismiss",
   },
 
@@ -631,6 +661,35 @@ const I18N = {
     t_withdrawn_msg: (p) => `${p.amount} ${p.unit} 已退回给所有者。`,
     t_withdraw_failed: "提现失败",
 
+    /* step-up confirmation */
+    stepup_title: "确认此操作",
+    stepup_body:
+      "这是高风险操作。请重新输入管理员密码以授权——这一第二因子独立于你的登录会话,因此即便会话被盗,也无法单凭它动用资金。",
+    stepup_password_label: "管理员密码",
+    stepup_confirm: "确认",
+
+    /* emergency stop (dashboard-wide freeze) */
+    emergency_stop: "紧急停机",
+    freeze_title: "冻结仪表盘(全局停机开关)",
+    freeze_body:
+      "一次性阻断整个仪表盘上所有动用资金的操作——付款、充值、提现、新建预算,只读视图照常可用。若怀疑服务器或某个操作员账户已被攻陷,请使用它。它独立于单个预算的链上撤销,且可以恢复。",
+    freeze_btn: "全部冻结",
+    unfreeze_btn: "解除冻结",
+    frozen_badge: "已冻结",
+    confirm_freeze_title: "要冻结整个仪表盘吗?",
+    confirm_freeze_body: "在你解除冻结之前,所有动用资金的操作都会被拒绝,只读视图仍可用。请将其作为紧急停机手段。",
+    confirm_unfreeze_title: "要解除仪表盘冻结吗?",
+    confirm_unfreeze_body: "动用资金的操作将被重新启用。请在确认安全之后再操作。",
+    frozen_banner_title: "仪表盘已冻结——",
+    frozen_banner_body: "紧急停机已启用,所有动用资金的操作都被阻断。请到「治理」页解除冻结。",
+    p_freezing: "冻结中…",
+    p_unfreezing: "解除中…",
+    t_frozen: "仪表盘已冻结",
+    t_frozen_msg: "所有动用资金的操作现已被阻断,只读视图仍可用。",
+    t_unfrozen: "已解除冻结",
+    t_unfrozen_msg: "动用资金的操作已重新启用。",
+    t_freeze_failed: "冻结状态变更失败",
+
     dismiss: "关闭",
   },
 };
@@ -714,6 +773,8 @@ const S = {
   connError: null,
   authRequired: false,
   authed: true,
+  // Whether high-risk actions need a step-up confirmation (set from /api/session; true iff auth on).
+  stepUpRequired: false,
 };
 
 /* ---- API client ----------------------------------------------------------- */
@@ -767,7 +828,11 @@ function toast(type, title, msg) {
 }
 
 /* ---- confirm modal -------------------------------------------------------- */
-function confirmDialog({ tone = "danger", icon: ic = "alert", title, body, confirmLabel, requireAck }) {
+// `stepUp` (an operation name) turns the dialog into a step-up confirmation: it adds a password
+// field and, on OK, exchanges the password for a short-lived, single-use confirm token via
+// /api/confirm. It then resolves to `{ token }` (or `false` on cancel). Without `stepUp` it resolves
+// to `true`/`false` as before, so existing call sites keep working.
+function confirmDialog({ tone = "danger", icon: ic = "alert", title, body, confirmLabel, requireAck, stepUp = null }) {
   return new Promise((resolve) => {
     const root = el("modal-root");
     const prevFocus = document.activeElement;
@@ -785,6 +850,15 @@ function confirmDialog({ tone = "danger", icon: ic = "alert", title, body, confi
                  </label>`
               : ""
           }
+          ${
+            stepUp
+              ? `<div class="field" style="margin-top:14px;margin-bottom:0">
+                   <label class="field__label" for="m-pw">${icon("lock", 14)} ${esc(t("stepup_password_label"))}</label>
+                   <input class="input" id="m-pw" type="password" autocomplete="off" placeholder="••••••••"/>
+                   <div class="field__err" id="m-pw-err" style="display:none"></div>
+                 </div>`
+              : ""
+          }
           <div class="modal__actions">
             <button class="btn btn--secondary" data-m="cancel">${esc(t("cancel"))}</button>
             <button class="btn btn--${tone}" data-m="ok" ${requireAck ? "disabled" : ""}>${esc(confirmLabel)}</button>
@@ -794,12 +868,47 @@ function confirmDialog({ tone = "danger", icon: ic = "alert", title, body, confi
     const backdrop = $(".modal-backdrop", root);
     const okBtn = $('[data-m="ok"]', root);
     const ack = $("#m-ack", root);
+    const pw = $("#m-pw", root);
+    const pwErr = $("#m-pw-err", root);
     if (ack) ack.addEventListener("change", () => (okBtn.disabled = !ack.checked));
+    const showPwErr = (msg) => {
+      if (!pwErr) return;
+      pwErr.textContent = msg;
+      pwErr.style.display = "block";
+    };
     const done = (val) => {
       root.innerHTML = "";
       document.removeEventListener("keydown", onKey);
       if (prevFocus && prevFocus.focus) prevFocus.focus();
       resolve(val);
+    };
+    const confirmOk = async () => {
+      if (!stepUp) return done(true);
+      const password = pw ? pw.value : "";
+      if (!password) return showPwErr(t("enter_password"));
+      okBtn.disabled = true;
+      const orig = okBtn.innerHTML;
+      okBtn.innerHTML = `<span class="spinner"></span><span>${esc(t("signing_in"))}</span>`;
+      try {
+        const res = await fetch("/api/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ op: stepUp, password }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showPwErr(data.error || t("incorrect_password"));
+          okBtn.disabled = false;
+          okBtn.innerHTML = orig;
+          if (pw) pw.select();
+          return;
+        }
+        done({ token: data.token });
+      } catch (e) {
+        showPwErr(t("incorrect_password"));
+        okBtn.disabled = false;
+        okBtn.innerHTML = orig;
+      }
     };
     const onKey = (e) => {
       if (e.key === "Escape") done(false);
@@ -822,10 +931,35 @@ function confirmDialog({ tone = "danger", icon: ic = "alert", title, body, confi
       if (e.target === backdrop) done(false);
     });
     $('[data-m="cancel"]', root).addEventListener("click", () => done(false));
-    okBtn.addEventListener("click", () => done(true));
+    okBtn.addEventListener("click", confirmOk);
+    if (pw)
+      pw.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (!okBtn.disabled) confirmOk();
+        }
+      });
     document.addEventListener("keydown", onKey);
-    (ack || okBtn).focus();
+    (pw || ack || okBtn).focus();
   });
+}
+
+/**
+ * Obtain a step-up confirm token for a high-risk op when the server requires one. Returns
+ * `{ token }` to proceed (token is `undefined` when no step-up is needed), or `null` if cancelled.
+ * Used for high-risk actions that don't already show their own confirm dialog.
+ */
+async function stepUpToken(op) {
+  if (!S.stepUpRequired) return { token: undefined };
+  const res = await confirmDialog({
+    tone: "danger",
+    icon: "lock",
+    title: t("stepup_title"),
+    body: t("stepup_body"),
+    confirmLabel: t("stepup_confirm"),
+    stepUp: op,
+  });
+  return res ? { token: res.token } : null;
 }
 
 /* ---- button pending state ------------------------------------------------- */
@@ -1419,11 +1553,39 @@ function viewGovernance() {
         </div>
       </div>
 
+      <div class="card" style="border-color:color-mix(in srgb, var(--danger) 30%, var(--border))">
+        <div class="card__head"><h3 style="color:var(--danger)">${icon("lock", 16)} ${esc(t("emergency_stop"))}</h3>
+          ${d.frozen ? `<span class="badge badge--danger">${esc(t("frozen_badge"))}</span>` : `<span class="badge badge--ok">${esc(t("status_active"))}</span>`}</div>
+        <div class="card__body">
+          <div class="row spread row--wrap" style="gap:16px">
+            <div style="max-width:52ch">
+              <p style="font-weight:600;margin-bottom:4px">${esc(t("freeze_title"))}</p>
+              <p class="muted" style="font-size:13.5px">${esc(t("freeze_body"))}</p>
+            </div>
+            ${
+              d.frozen
+                ? `<button class="btn btn--primary" data-action="unfreeze">${icon("check", 16)} ${esc(t("unfreeze_btn"))}</button>`
+                : `<button class="btn btn--danger" data-action="freeze">${icon("ban", 16)} ${esc(t("freeze_btn"))}</button>`
+            }
+          </div>
+        </div>
+      </div>
+
       <div class="row" style="justify-content:flex-end">
         <button class="btn btn--ghost btn--sm" data-action="reset">${esc(t("reset_demo"))}</button>
       </div>
     </div>`
   );
+}
+
+/** A dashboard-wide banner shown while the emergency stop (freeze) is engaged. */
+function frozenBanner() {
+  if (!(S.data && S.data.frozen)) return "";
+  return `<div class="banner banner--danger" role="alert" style="border-color:color-mix(in srgb, var(--danger) 45%, var(--border))">
+    ${icon("ban", 20)}
+    <div class="banner__text"><b>${esc(t("frozen_banner_title"))}</b>${esc(t("frozen_banner_body"))}</div>
+    <button class="btn btn--secondary btn--sm" data-nav="governance">${esc(t("manage"))}</button>
+  </div>`;
 }
 
 function noBudget(title, sub) {
@@ -1533,7 +1695,7 @@ function render() {
     default:
       body = viewOverview();
   }
-  app.innerHTML = sidebar() + `<main class="main">${body}</main>`;
+  app.innerHTML = sidebar() + `<main class="main">${frozenBanner()}${body}</main>`;
   wire();
 }
 
@@ -1646,16 +1808,17 @@ async function handleAction(action, btn) {
     return;
   }
   if (action === "reset") {
-    const ok = await confirmDialog({
+    const res = await confirmDialog({
       tone: "warn",
       icon: "refresh",
       title: t("confirm_reset_title"),
       body: t("confirm_reset_body"),
       confirmLabel: t("confirm_reset_ok"),
+      stepUp: S.stepUpRequired ? "resetLocal" : null,
     });
-    if (!ok) return;
+    if (!res) return;
     try {
-      S.data = await api("/api/reset", {});
+      S.data = await api("/api/reset", { confirmToken: res.token });
       go("create");
       toast("info", t("t_reset"), t("t_reset_msg"));
     } catch (e) {
@@ -1664,18 +1827,19 @@ async function handleAction(action, btn) {
     return;
   }
   if (action === "revoke") {
-    const ok = await confirmDialog({
+    const res = await confirmDialog({
       tone: "danger",
       icon: "ban",
       title: t("confirm_revoke_title"),
       body: t("confirm_revoke_body"),
       requireAck: t("confirm_revoke_ack"),
       confirmLabel: t("revoke_agent"),
+      stepUp: S.stepUpRequired ? "revoke" : null,
     });
-    if (!ok) return;
+    if (!res) return;
     await withPending(btn, t("p_revoking"), async () => {
       try {
-        S.data = await api("/api/revoke", {});
+        S.data = await api("/api/revoke", { confirmToken: res.token });
         render();
         toast("success", t("t_agent_revoked"), t("t_agent_revoked_msg"));
       } catch (e) {
@@ -1684,21 +1848,45 @@ async function handleAction(action, btn) {
     });
     return;
   }
+  if (action === "freeze" || action === "unfreeze") {
+    const freezing = action === "freeze";
+    const res = await confirmDialog({
+      tone: freezing ? "danger" : "warn",
+      icon: freezing ? "ban" : "check",
+      title: freezing ? t("confirm_freeze_title") : t("confirm_unfreeze_title"),
+      body: freezing ? t("confirm_freeze_body") : t("confirm_unfreeze_body"),
+      confirmLabel: freezing ? t("freeze_btn") : t("unfreeze_btn"),
+      stepUp: S.stepUpRequired ? action : null,
+    });
+    if (!res) return;
+    await withPending(btn, freezing ? t("p_freezing") : t("p_unfreezing"), async () => {
+      try {
+        S.data = await api(freezing ? "/api/freeze" : "/api/unfreeze", { confirmToken: res.token });
+        render();
+        if (freezing) toast("error", t("t_frozen"), t("t_frozen_msg"));
+        else toast("success", t("t_unfrozen"), t("t_unfrozen_msg"));
+      } catch (e) {
+        toast("error", t("t_freeze_failed"), e.message);
+      }
+    });
+    return;
+  }
 }
 
 async function revokeSession(session, btn) {
-  const ok = await confirmDialog({
+  const res = await confirmDialog({
     tone: "danger",
     icon: "ban",
     title: t("confirm_revoke_session_title", { session: esc(session) }),
     body: t("confirm_revoke_session_body"),
     requireAck: t("confirm_revoke_session_ack"),
     confirmLabel: t("confirm_revoke_session_ok"),
+    stepUp: S.stepUpRequired ? "revokeSession" : null,
   });
-  if (!ok) return;
+  if (!res) return;
   await withPending(btn, t("p_revoking"), async () => {
     try {
-      S.data = await api("/api/sessions/revoke", { session });
+      S.data = await api("/api/sessions/revoke", { session, confirmToken: res.token });
       render();
       toast("success", t("t_session_revoked"), t("t_session_revoked_msg", { session }));
     } catch (e) {
@@ -1743,6 +1931,8 @@ function wireCreate() {
     setErr("f-daily", !dailyOk);
     if (!(fundOk && perTxOk && dailyOk)) return;
 
+    const gate = await stepUpToken("createBudget");
+    if (!gate) return;
     await withPending(el("f-submit"), t("p_opening"), async () => {
       try {
         S.data = await api("/api/budget", {
@@ -1751,6 +1941,7 @@ function wireCreate() {
           dailyCap,
           epochsPerWindow,
           whitelist: draftWhitelist,
+          confirmToken: gate.token,
         });
         toast("success", t("t_budget_opened"), t("t_budget_opened_msg", { amount: fmt(fund), unit: UNIT }));
         draftWhitelist = ["shop"];
@@ -1839,9 +2030,11 @@ function wireGovernance() {
     const name = el("g-merchant").value.trim();
     setErr("g-merchant", !name);
     if (!name) return;
+    const gate = await stepUpToken("addMerchant");
+    if (!gate) return;
     await withPending(el("g-add"), t("p_adding"), async () => {
       try {
-        S.data = await api("/api/merchants", { merchant: name });
+        S.data = await api("/api/merchants", { merchant: name, confirmToken: gate.token });
         render();
         toast("success", t("t_merchant_wl"), t("t_merchant_wl_msg", { name: esc(name) }));
       } catch (err) {
@@ -1877,9 +2070,11 @@ function wireGovernance() {
       const session = el("g-session").value.trim();
       setErr("g-session", !session);
       if (!session) return;
+      const gate = await stepUpToken("issueSession");
+      if (!gate) return;
       await withPending(el("g-session-add"), t("p_issuing"), async () => {
         try {
-          S.data = await api("/api/sessions", { session });
+          S.data = await api("/api/sessions", { session, confirmToken: gate.token });
           render();
           toast("success", t("t_badge_issued"), t("t_badge_issued_msg", { session: esc(session) }));
         } catch (err) {
@@ -1897,17 +2092,18 @@ function wireGovernance() {
     const valid = amount !== null && amtBig(amount) > 0n && amtBig(amount) <= amtBig(max);
     setErr("g-amount", !valid);
     if (!valid) return;
-    const ok = await confirmDialog({
+    const res = await confirmDialog({
       tone: "warn",
       icon: "up",
       title: t("confirm_withdraw_title"),
       body: t("confirm_withdraw_body", { amount: fmt(amount), unit: UNIT }),
       confirmLabel: t("confirm_withdraw_ok", { amount: fmt(amount), unit: UNIT }),
+      stepUp: S.stepUpRequired ? "withdraw" : null,
     });
-    if (!ok) return;
+    if (!res) return;
     await withPending(el("g-withdraw"), t("p_withdrawing"), async () => {
       try {
-        S.data = await api("/api/withdraw", { amount });
+        S.data = await api("/api/withdraw", { amount, confirmToken: res.token });
         render();
         toast("success", t("t_withdrawn"), t("t_withdrawn_msg", { amount: fmt(amount), unit: UNIT }));
       } catch (err) {
@@ -1926,6 +2122,7 @@ async function boot() {
     const sess = await api("/api/session");
     S.authRequired = Boolean(sess.authRequired);
     S.authed = Boolean(sess.authed);
+    S.stepUpRequired = Boolean(sess.stepUpRequired);
   } catch {
     S.authRequired = false;
     S.authed = true;

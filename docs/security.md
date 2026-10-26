@@ -50,6 +50,18 @@ Enforced **off chain only** (client-side, advisory):
   source of truth; never rely on the client for a limit.
 - Invoice expiry and the memo codec (`agentpay.invoice`). A memo is public metadata, not a secret.
 
+### The web dashboard is a custodial service (separate attack surface)
+
+The `web/` dashboard is a **hosted wallet**: the browser talks only to its backend, which signs
+through walletd. The chain still caps the *agent*, but the *owner-side* operations the backend
+performs (withdraw, change whitelist, revoke, mint badges) are a distinct attack surface that the
+chain does not police. That surface is hardened — restricted authorizer (one audited chain exit),
+risk tiering with a **session-independent step-up confirmation** on high-risk ops, append-only audit
+log, a global **kill switch (freeze)**, fund-movement rate limits, env-only secrets, and account
+isolation — and the target custody architecture plus the remaining gaps (separate signer, HSM/KMS,
+multisig, tamper-proof audit) are written up honestly in **[`custody.md`](custody.md)**. It is
+**testnet hardening, not production-grade custody.**
+
 ## Known limitations
 
 1. **Confidential amounts can't be range-checked inside a template → balances are public.** The

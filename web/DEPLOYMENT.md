@@ -16,6 +16,13 @@ daemon** (`walletd`) that **holds private keys**. That makes two things non-nego
 2. **`walletd` must be private.** Its JSON-RPC port must bind to localhost / a private network and
    **never** be published to the internet. Only the dashboard backend — on the same host or a
    private network — should be able to reach it.
+3. **The custody boundary is hardened, but this is a custodial service.** Every chain signature goes
+   through one restricted, audited authorizer; high-risk actions (withdraw, revoke, whitelist edits,
+   badge mint/revoke, freeze) require a **step-up confirmation independent of the login session**
+   (`AGENTPAY_ADMIN_PASSWORD`); there is a global **kill switch (freeze)**, an append-only **audit
+   log**, and fund-movement rate limits. Read **[`../docs/custody.md`](../docs/custody.md)** for the
+   target architecture and what is still missing (separate signer, HSM/KMS, multisig) — this is
+   **testnet hardening, not production-grade custody.**
 
 ### Topology
 
@@ -42,6 +49,8 @@ All via environment variables.
 |---|---|---|
 | `DASHBOARD_PASSWORD` | **yes (prod)** | Password users type to sign in. Long & random. Enables auth. |
 | `SESSION_SECRET` | **yes (prod)** | Signs session cookies. `openssl rand -hex 32`. Keep stable across restarts/replicas. |
+| `AGENTPAY_ADMIN_PASSWORD` | recommended | Step-up secret for high-risk actions. Keep **different** from `DASHBOARD_PASSWORD`; falls back to it if unset. |
+| `AGENTPAY_AUDIT_FILE` | recommended | Append-only audit log path (mount a volume; ship off-box in prod). Default `web/server/audit.log`. |
 | `COOKIE_SECURE` | recommended | `true` behind HTTPS (forces the `Secure` cookie flag). Otherwise inferred from `X-Forwarded-Proto`. |
 | `AGENTPAY_WALLETD_URL` | yes | walletd JSON-RPC URL, e.g. `http://walletd:5100/json_rpc`. |
 | `AGENTPAY_BUDGET_TEMPLATE` | yes | esmeralda AgentBudget template (below). |
@@ -237,6 +246,10 @@ reasons.
 
 - [ ] `DASHBOARD_PASSWORD` is set (long, random) — the server logs `auth ON` on boot.
 - [ ] `SESSION_SECRET` is set (stable) — `openssl rand -hex 32`, kept in secrets, never committed.
+- [ ] `AGENTPAY_ADMIN_PASSWORD` is set and **different** from `DASHBOARD_PASSWORD` (the boot log notes
+      it if unset) — high-risk actions log `step-up ON`.
+- [ ] The audit log (`AGENTPAY_AUDIT_FILE`) is on a mounted volume and (prod) shipped off-box to an
+      append-only sink; a dedicated owner/treasury account is used, not the wallet `default`.
 - [ ] HTTPS everywhere; `COOKIE_SECURE=true` (or a proxy that sets `X-Forwarded-Proto: https`).
 - [ ] `walletd`'s port (`5100`) is bound to localhost / a private network and has **no** public
       mapping (`docker compose ps` shows no host port for it; `ss -tlnp` on the host shows it on
