@@ -46,6 +46,11 @@ a watcher rebuilds the local ledger from the chain's `pay` events.
 Dev happens on Linux (the Tari engine's wasmer/cranelift backend doesn't build on Windows). This
 repo was built on **WSL Ubuntu**.
 
+> Common tasks are wrapped in the root [`Makefile`](Makefile): `make test` (templates + SDK),
+> `make fetch-binaries` (download the swarm binaries — see below), `make swarm-up`, `make publish-local`,
+> `make dashboard`, `make demo`. `make help` lists them. The raw scripts are documented in
+> [`scripts/README.md`](scripts/README.md).
+
 ```bash
 # 1. toolchain (in WSL)
 rustup target add wasm32-unknown-unknown
@@ -176,8 +181,8 @@ templates/        escrow · agent_budget · otc_board — Rust→WASM 模板 + �
 sdk/              ootle-agentpay Python SDK —— onchain 链上适配器 + demos + tests
 site/             index.html —— 产品一页介绍网页（也发布为在线 Artifact）
 docs/             spike · interfaces · security · devnet 四份文档
-scripts/          发布 / 演示 / 辅助脚本（otc_demo.py, call-escrow.py, publish-*.sh …）
-node-binaries/    bins/ 预编译 Tari 节点二进制（跑本地 swarm 用；可从官方 release 重新下载）
+scripts/          发布 / 演示 / 辅助脚本（见 scripts/README.md：demo / publish / esmeralda / dev）
+node-binaries/    bins/ 预编译 Tari 节点二进制（跑本地 swarm 用；用 scripts/fetch-binaries.sh 下载）
 wasm-template/    官方模板仓库克隆（参考，纯源码，无构建产物）
 ```
 
