@@ -106,7 +106,7 @@ function createRateLimiter(opts = {}) {
  * @param {Record<string, {tier:string, highRisk?:boolean, allowWhenFrozen?:boolean, run:Function}>} cfg.ops
  * @param {{append:Function}} cfg.audit
  * @param {() => boolean} cfg.isFrozen        - current global kill-switch state
- * @param {{required:() => boolean, verify:(token:string, op:string)=>boolean}} cfg.stepUp
+ * @param {{required:() => boolean, verify:(token:string, op:string, args?:object)=>boolean}} cfg.stepUp
  * @param {{check:Function}} [cfg.rate]
  */
 function createAuthorizer({ ops, audit, isFrozen, stepUp, rate }) {
@@ -162,18 +162,50 @@ function createAuthorizer({ ops, audit, isFrozen, stepUp, rate }) {
 
     // 4. step-up confirmation for high-risk ops, independent of the login session.
     if (op.highRisk && stepUp && stepUp.required()) {
-      const okToken = ctx.confirmToken && stepUp.verify(ctx.confirmToken, name);
+      // Pass the operation's actual arguments so the confirm token can be verified as bound to THESE
+      // funding parameters (amount, payee, caps, budget), not merely to the operation name.
+      const okToken = ctx.confirmToken && stepUp.verify(ctx.confirmToken, name, args);
       if (!okToken) {
         audit.append({ ...base, tier: op.tier, status: "denied", reason: "confirmation_required" });
         throw httpError(401, "This action needs a fresh confirmation.", { confirmRequired: true, op: name });
       }
     }
 
-    // 5. run + audit (success and failure both leave a record).
+    // 4b. DURABLE audit for HIGH-RISK fund ops: record the ATTEMPT *before* touching the chain, and
+    // fsync it. If we cannot durably persist it, we REFUSE the action — a money operation we cannot
+    // record is one we do not perform. This makes the audit entry part of the operation, so an audit
+    // outage fails the op loudly instead of letting an unrecorded fund move slip through. (Low-risk
+    // and read ops keep the best-effort append below.) The strict writer is used when the audit sink
+    // provides one; otherwise we fall back so a minimal audit object still works.
+    const strict = typeof audit.appendStrict === "function" ? audit.appendStrict : audit.append;
+    if (op.highRisk) {
+      try {
+        strict({ ...base, tier: op.tier, highRisk: true, status: "attempt", flags, params: args });
+      } catch (e) {
+        audit.append({ ...base, tier: op.tier, status: "denied", reason: "audit_unavailable" }); // best-effort breadcrumb
+        throw httpError(500, "Cannot durably record this action in the audit log; refusing to perform it.", {
+          auditUnavailable: true,
+        });
+      }
+    }
+
+    // 5. run + audit (success and failure both leave a record). For high-risk ops the outcome record
+    // is written durably too; the pre-op `attempt` record above is the authoritative durable trace, so
+    // if an outcome write fails *after* an irreversible chain op we log loudly rather than falsely
+    // reporting failure for something the chain already finalized.
+    const recordOutcome = (entry) => {
+      if (!op.highRisk) return audit.append(entry);
+      try {
+        strict(entry);
+      } catch (e) {
+        console.error("warn: could not durably write high-risk audit outcome (attempt record stands):", e.message);
+        audit.append(entry);
+      }
+    };
     ctx.meta = ctx.meta || {};
     try {
       const result = await op.run(args, ctx);
-      audit.append({
+      recordOutcome({
         ...base,
         tier: op.tier,
         highRisk: Boolean(op.highRisk),
@@ -189,7 +221,7 @@ function createAuthorizer({ ops, audit, isFrozen, stepUp, rate }) {
       }
       return result;
     } catch (err) {
-      audit.append({
+      recordOutcome({
         ...base,
         tier: op.tier,
         highRisk: Boolean(op.highRisk),

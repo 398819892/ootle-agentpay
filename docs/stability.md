@@ -81,7 +81,11 @@ reconcilable trace.
 Within one instance, the same `Idempotency-Key` maps to **at most one on-chain effect**:
 - concurrent burst of 12 identical requests → **one** chain submit, 12 identical confirmed receipts;
 - timeout then retry of the same key → reconciled, **not** resubmitted (one submit);
-- replay of a confirmed key → `replayed: true`, no new submit;
+- replay of a confirmed key (same key, **same parameters**) → `replayed: true`, no new submit;
+- **same key, DIFFERENT parameters** (a changed amount or payee) → **HTTP 409 `idempotencyConflict`**,
+  no new submit, and the original receipt is left untouched — a reused key never silently returns the
+  prior receipt for a different request (the key is bound to a fingerprint of its funding parameters;
+  see `web/server/idempotency.js` and `docs/security.md`);
 - retry of a chain-rejected key → refused, **not** resubmitted, stays rejected (deterministic);
 - 6 distinct keys → 6 submits (no accidental collapsing).
 
@@ -110,7 +114,23 @@ need a real shared store with atomic idempotency (DB / Redis) + a distributed lo
 
 ## Bugs found
 
-### Fixed this round
+### Fixed this round (go-live hardening pass)
+- **Idempotency key not bound to its parameters.** A key deduped purely on the key string, so the same
+  key reused with **different** parameters (a different amount or payee) would silently replay the
+  original receipt — masking a second, different payment, or letting a replayed key be redirected.
+  Fixed by binding each key to a canonical fingerprint of its funding parameters (op + budget +
+  payee + amount + memo; a server-generated invoiceId is excluded as it is random per call), recorded
+  on both the journal record and the cross-process claim marker. Same key + same params → replay as
+  before; same key + different params → **409 `idempotencyConflict`**, never a silent replay; concurrent
+  same-key/same-params → still exactly one submit. New module `web/server/idempotency.js`; changes in
+  `web/server/server.js` (`runChainOp`) and `web/server/txlog.js` (record carries `fp`). Proven by the
+  extended `scripts/stability/idempotency.js`.
+- **B-6 mock walletd substate shape was stale.** The pay-badge-fix changed the TS client to resolve
+  badges from CBOR-tagged resource entries (`tag 131`, struct order owner→agent) instead of address
+  sort order, but `scripts/stability/mock_walletd.js` still emitted the old `@@TAGGED@@` shape, so
+  `createBudget` failed against the mock and the whole stability harness was red. Updated the mock's
+  `componentSubstate()` to the real tagged shape (resources `tag 131` owner-first, vault `tag 130`,
+  whitelist components `tag 128`). Test-infra only; no production change.
 - **Multi-instance double-spend of the same idempotency key (the one hard go-live gate).** Idempotency
   was enforced only *per process* (an in-memory map keyed by the Idempotency-Key). Two instances sharing
   one journal did not share that map, so the **same key sent concurrently to both was submitted to chain
@@ -186,6 +206,14 @@ need a real shared store with atomic idempotency (DB / Redis) + a distributed lo
 - [x] Unconfirmed outcomes (timeout / unknown / walletd down) are **never** reported as success.
 - [x] Crash mid-flight → startup reconcile settles against chain with **no double-spend, no lost record**.
 - [x] Idempotency: same key under retry/timeout/concurrency → **one** on-chain effect; rejected keys not resubmitted.
+- [x] **Idempotency key bound to its parameters** — same key with a different amount/payee is refused
+      (409), never a silent replay of the prior receipt (`web/server/idempotency.js`).
+- [x] **Step-up confirmation bound to funding parameters + single-use** — a confirm token cannot be
+      replayed against a different amount/payee/budget (`web/server/stepup.test.js`, 10 checks).
+- [x] **High-risk audit durable (fsync) as part of the op** — a high-risk fund op whose audit write
+      fails is refused and not performed (`web/server/audit.test.js`).
+- [x] **Loopback bind by default** — exposing the dashboard needs an explicit `HOST` + a password, or
+      the server refuses to start (`docs/security.md`).
 - [x] On-chain caps hold under concurrency (the backstop).
 - [x] **Same-host multi-instance idempotency enforced** — same key across instances submits once, no
       shared-journal clobber (cross-process claim + merge-under-lock persist; multi-instance suite extended

@@ -23,6 +23,7 @@ const { createAudit } = require("./audit");
 const { createTxLog, writeJsonAtomic } = require("./txlog");
 const { createClaimStore } = require("./claims");
 const { createApiKeys } = require("./apikeys");
+const { paramFingerprint, conflicts: fpConflicts, stableStringify: idempotencyStableStringify } = require("./idempotency");
 
 // ---- locate and load the committed TS client (its compiled dist) -----------------------------
 const CLIENT_DIR = path.resolve(__dirname, "..", "..", "clients", "ts", "dist");
@@ -41,7 +42,12 @@ const { WalletdClient, OnChainBudget, newInvoiceId, ChainError, PolicyViolation,
 
 // ---- configuration (env, defaults = local swarm) ---------------------------------------------
 const PORT = Number(process.env.PORT || 8787);
-const HOST = process.env.HOST || "0.0.0.0"; // bound wide so the Windows browser can reach WSL
+// Bind to LOOPBACK by default. A custodial wallet UI must not be reachable from the network unless
+// the operator deliberately exposes it (behind TLS / a reverse proxy). To listen on all interfaces,
+// set HOST=0.0.0.0 EXPLICITLY — and then put HTTPS in front of it (see docs/security.md). On WSL2,
+// Windows' localhost forwarding still reaches a 127.0.0.1-bound server in WSL, so the default needs
+// no override for local dev (verified: Windows `localhost:8787` → WSL `127.0.0.1`).
+const HOST = process.env.HOST || "127.0.0.1";
 const WALLETD_URL = process.env.AGENTPAY_WALLETD_URL || "http://127.0.0.1:12010/json_rpc";
 const BUDGET_TEMPLATE =
   process.env.AGENTPAY_BUDGET_TEMPLATE ||
@@ -343,13 +349,60 @@ function adminPasswordMatches(input) {
   const b = crypto.createHash("sha256").update(ADMIN_PASSWORD).digest();
   return crypto.timingSafeEqual(a, b);
 }
-function issueConfirmToken(op) {
-  const payload = { op, exp: Date.now() + CONFIRM_TTL_MS, n: crypto.randomBytes(12).toString("hex") };
-  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const mac = crypto.createHmac("sha256", SESSION_SECRET).update("confirm." + body).digest("base64url");
-  return `${body}.${mac}`;
+// The FUNDING PARAMETERS a confirm token is bound to. A step-up token must authorise one SPECIFIC
+// action, not just "some withdraw": the amount, the payee/session, the caps and the budget it targets.
+// We extract exactly those from the request body into a canonical shape and fold them into the token;
+// at execute time we recompute the shape from the ACTUAL op arguments and require an exact match. So a
+// token minted to confirm "withdraw 100" cannot be replayed to withdraw 900, or redirected to another
+// payee, or reused after the budget was reset (a new budget has a different component id). The budget
+// component acts as the budget/authorisation "version": reset→new budget ⇒ old tokens are void.
+function confirmParams(op, body) {
+  const b = body || {};
+  const s = (v) => (v == null ? null : String(v));
+  const f = { op, component: (store.budget && store.budget.component) || null };
+  switch (op) {
+    case "createBudget": // no component yet (null on both mint+verify); bind the funding + caps
+      f.fund = s(b.fund);
+      f.perTxCap = s(b.perTxCap);
+      f.dailyCap = s(b.dailyCap);
+      f.epochsPerWindow = s(b.epochsPerWindow);
+      f.whitelist = Array.isArray(b.whitelist) ? b.whitelist.map(String).sort() : [];
+      break;
+    case "withdraw":
+      f.amount = s(b.amount);
+      break;
+    case "addMerchant":
+      f.merchant = s(b.merchant);
+      break;
+    case "issueSession":
+    case "revokeSession":
+      f.session = s(b.session);
+      break;
+    // revoke / freeze / unfreeze / resetLocal carry no funding params: op + component is the binding.
+    default:
+      break;
+  }
+  return f;
 }
-function verifyConfirmToken(token, op) {
+/** HMAC digest of the funding parameters a token is bound to (stable key order via idempotency.js). */
+function confirmDigest(op, body) {
+  return crypto
+    .createHmac("sha256", SESSION_SECRET)
+    .update("confirm-params." + idempotencyStableStringify(confirmParams(op, body)))
+    .digest("base64url");
+}
+function issueConfirmToken(op, body) {
+  const payload = {
+    op,
+    pd: confirmDigest(op, body), // bind the token to THIS action's funding parameters
+    exp: Date.now() + CONFIRM_TTL_MS,
+    n: crypto.randomBytes(12).toString("hex"),
+  };
+  const b = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const mac = crypto.createHmac("sha256", SESSION_SECRET).update("confirm." + b).digest("base64url");
+  return `${b}.${mac}`;
+}
+function verifyConfirmToken(token, op, args) {
   if (!token || typeof token !== "string" || !token.includes(".")) return false;
   const [body, mac] = token.split(".");
   const expected = crypto.createHmac("sha256", SESSION_SECRET).update("confirm." + body).digest("base64url");
@@ -363,8 +416,12 @@ function verifyConfirmToken(token, op) {
     return false;
   }
   if (!p || p.op !== op || typeof p.exp !== "number" || Date.now() >= p.exp) return false;
+  // Re-derive the funding-parameter digest from the ACTUAL op arguments and require it to match the
+  // one bound into the token. A token minted for different parameters (amount, payee, caps, budget)
+  // is rejected — this is what stops a confirmation being replayed against a different action.
+  if (p.pd !== confirmDigest(op, args || {})) return false;
   pruneConfirmNonces();
-  if (usedConfirmNonces.has(p.n)) return false; // already spent
+  if (usedConfirmNonces.has(p.n)) return false; // already spent (single-use)
   usedConfirmNonces.set(p.n, p.exp);
   return true;
 }
@@ -712,6 +769,16 @@ async function reconcileRecord(rec) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CLAIM_POLL_MS = 25;
 
+/** The idempotency key was reused with DIFFERENT parameters — a 409 the caller must surface, never a
+ *  silent replay of the prior receipt. */
+function idempotencyConflict(key) {
+  return httpError(
+    409,
+    "This idempotency key was already used with different parameters. Use a new key for a different operation.",
+    { idempotencyConflict: true, key },
+  );
+}
+
 /** Replay the outcome of a journal record that already exists, settling it against chain first if
  *  it is still open. Never resubmits — an unresolved open record is reported as `unknown`. */
 async function replayPrior(prior) {
@@ -732,12 +799,15 @@ async function replayPrior(prior) {
  * the wait budget (winner slow, or crashed mid-flight), report `unknown` — the existing startup
  * reconcile settles it later by its tx id, and we NEVER resubmit (that is the double-spend we block).
  */
-async function replayForeignClaim(key, claim) {
+async function replayForeignClaim(key, claim, fp) {
   const deadline = Date.now() + CLAIM_WAIT_MS;
   for (;;) {
     txlog.reload(); // merge whatever the winner has persisted into our view
     const rec = txlog.get(key);
     if (rec) {
+      // The winner's journal record is authoritative for the fingerprint too: a mismatch here is the
+      // same reused-key-different-params conflict, caught once the winner has persisted its record.
+      if (fp != null && fpConflicts(rec.fp, fp)) throw idempotencyConflict(key);
       if (txlog.isTerminal(rec.status)) return await replayPrior(rec);
       if (rec.txId) {
         const settled = await reconcileRecord(rec); // read-only get_result; promotes if chain has a verdict
@@ -769,11 +839,23 @@ async function replayForeignClaim(key, claim) {
  * cross-process filesystem claim (claims.js) so that multiple instances sharing one filesystem never
  * submit the same key twice. See docs/stability.md for the cross-HOST limit that remains.
  */
-async function runChainOp(key, opName, component, params, submitFn) {
+async function runChainOp(key, opName, component, params, submitFn, fpParams) {
+  // Bind this key to a fingerprint of its FUNDING-RELEVANT parameters: a repeat of the key with
+  // different parameters (amount, payee, memo…) must NOT silently replay the prior receipt (see
+  // idempotency.js). The fingerprint is computed from `fpParams` when the op supplies it, else from
+  // `params`. The distinction matters because `params` also carries non-funding identifiers — notably
+  // a server-GENERATED invoiceId, which is random per call and so must be excluded, or two legitimate
+  // retries under one key would fingerprint differently and spuriously conflict. Recorded on both the
+  // journal record and the cross-process claim marker so either layer can detect a real mismatch.
+  const fp = paramFingerprint(opName, component, fpParams !== undefined ? fpParams : params);
+
   // Fast path — a record already visible IN THIS PROCESS (a same-process replay, or one recovered
   // from the journal at startup). This is the single-instance idempotency guarantee, unchanged.
   const prior = txlog.get(key);
-  if (prior) return await replayPrior(prior);
+  if (prior) {
+    if (fpConflicts(prior.fp, fp)) throw idempotencyConflict(key);
+    return await replayPrior(prior);
+  }
 
   // No local record yet. Before submitting anything, take the CROSS-PROCESS claim on this key. On a
   // shared filesystem `fs.open(…,"wx")` lets exactly one instance win; every other instance that
@@ -781,15 +863,20 @@ async function runChainOp(key, opName, component, params, submitFn) {
   // executes the payment twice. This is the multi-instance double-spend the B-6 harness reproduced.
   let claim;
   try {
-    claim = claims.tryClaim(key, { op: opName });
+    claim = claims.tryClaim(key, { op: opName, fp });
   } catch (e) {
     // We could not take the claim for a reason other than "already claimed" (e.g. the shared dir is
     // unwritable). Fail safe: do not submit on an unproven claim.
     throw httpError(503, "Could not take the idempotency claim (shared store unavailable): " + e.message);
   }
-  if (!claim.won) return await replayForeignClaim(key, claim);
+  if (!claim.won) {
+    // A peer already holds this key. If its marker records a DIFFERENT fingerprint, this is a reused
+    // key with different parameters — reject rather than wait to replay a receipt for another request.
+    if (claim.record && fpConflicts(claim.record.fp, fp)) throw idempotencyConflict(key);
+    return await replayForeignClaim(key, claim, fp);
+  }
 
-  txlog.begin({ key, op: opName, params, component }); // persist pending BEFORE the chain submit (throws on fail)
+  txlog.begin({ key, op: opName, params, component, fp }); // persist pending BEFORE the chain submit (throws on fail)
   // Snapshot the client's last tx id BEFORE we submit. `wd.lastTxId` is sticky — it holds the id of
   // the most recent *successful* submit on this shared client. An op that fails WITHOUT submitting
   // (a client-side precheck rejection, or a fault before submit_manifest returns) must NOT inherit
@@ -1010,11 +1097,17 @@ const OPS = {
       const key = idemKey(body, "pay:" + invoiceId);
       let r;
       try {
-        r = await runChainOp(key, "pay", b.component, { merchant, amount, invoiceId, memo }, () =>
-          b.payInvoice({ merchant, invoiceId, amount, agentTag }),
+        r = await runChainOp(
+          key,
+          "pay",
+          b.component,
+          { merchant, amount, invoiceId, memo },
+          () => b.payInvoice({ merchant, invoiceId, amount, agentTag }),
+          { merchant, amount, memo }, // fingerprint on what the money DOES, not the (often auto-generated) invoiceId
         );
       } catch (e) {
         // Surface the chain's own reason as a friendly 422, distinct from a server fault.
+        if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
         throw httpError(422, chainMessage(e));
       }
       ctx.meta.txId = (r.record && r.record.txId) || invoiceId;
@@ -1084,6 +1177,7 @@ const OPS = {
       try {
         r = await runChainOp(key, "topUp", b.component, { amount }, () => b.topUp(amount));
       } catch (e) {
+        if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
         throw httpError(422, chainMessage(e));
       }
       ctx.meta.txId = r.record.txId;
@@ -1130,6 +1224,7 @@ const OPS = {
       try {
         r = await runChainOp(key, "issueSession", b.component, { session }, () => b.issueAgentBadge(session));
       } catch (e) {
+        if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
         throw httpError(422, chainMessage(e));
       }
       ctx.meta.txId = r.record.txId;
@@ -1155,6 +1250,7 @@ const OPS = {
       try {
         r = await runChainOp(key, "revokeSession", b.component, { session }, () => b.revokeSession(session));
       } catch (e) {
+        if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
         throw httpError(422, chainMessage(e));
       }
       ctx.meta.txId = r.record.txId;
@@ -1274,9 +1370,10 @@ const api = {
 };
 
 // ---- helpers ----------------------------------------------------------------------------------
-function httpError(status, message) {
+function httpError(status, message, extra) {
   const e = new Error(message);
   e.status = status;
+  if (extra) Object.assign(e, extra); // policy flags the handlers forward (idempotencyConflict, …)
   return e;
 }
 // Base-unit amounts are integers that can exceed JS's safe-integer range (2^53). We carry them as
@@ -1409,7 +1506,10 @@ function validInvoiceId(v) {
  */
 async function executeAsKey(opName, body, ctx) {
   const op = OPS[opName];
-  if (op && op.highRisk && STEP_UP_ON) ctx = { ...ctx, confirmToken: issueConfirmToken(opName) };
+  // Mint the single-use confirm token from the SAME body the op will run with, so the funding-param
+  // binding is satisfied automatically for the machine-to-machine path (the admin key is the strong
+  // out-of-band factor; the token binding still pins amount/payee/budget for the audit trail).
+  if (op && op.highRisk && STEP_UP_ON) ctx = { ...ctx, confirmToken: issueConfirmToken(opName, body) };
   return await authz.execute(opName, body, ctx);
 }
 /** Build a public payment receipt from a tx-journal record (status is chain-authoritative). */
@@ -1551,6 +1651,9 @@ async function handleApiV1(req, res, urlPath) {
         const r = await serialize(() => authz.execute("pay", payBody, ctx));
         replayed = priorExisted || Boolean(r && r.replayed);
       } catch (e) {
+        // A reused key with DIFFERENT parameters is a hard conflict — surface it, never fall through
+        // to replay the prior receipt (which belongs to a different request).
+        if (e.idempotencyConflict) throw e;
         // A chain REJECTION still produces a receipt (status=rejected). Only a record-less failure
         // (bad request, frozen, rate-limited, no budget) is surfaced as an error.
         if (!txlog.get(key)) throw e;
@@ -1640,6 +1743,8 @@ async function handleApiV1(req, res, urlPath) {
     const payload = { error: chainMessage(e) };
     if (e.frozen) payload.frozen = true;
     if (e.rateLimited) payload.rateLimited = true;
+    if (e.idempotencyConflict) payload.idempotencyConflict = true;
+    if (e.auditUnavailable) payload.auditUnavailable = true;
     if (e.confirmRequired) payload.confirmRequired = true; // not expected for admin keys (token auto-minted)
     return sendJson(res, status, payload);
   }
@@ -1751,7 +1856,10 @@ const server = http.createServer(async (req, res) => {
     }
     noteLoginOk(ip);
     audit.append({ actor: ctx.actor, sid: ctx.sid, ip, op: `confirm:${op}`, tier: "admin", status: "issued" });
-    return sendJson(res, 200, { stepUp: true, token: issueConfirmToken(op) });
+    // Bind the token to the funding parameters the client sent alongside the op name, so it can only
+    // confirm THIS action (same amount / payee / caps / budget). The client must send those same
+    // fields on the subsequent op call, or verification fails at execute time.
+    return sendJson(res, 200, { stepUp: true, token: issueConfirmToken(op, body) });
   }
 
   const handler = api[key];
@@ -1771,6 +1879,8 @@ const server = http.createServer(async (req, res) => {
     const payload = { error: chainMessage(e) };
     if (e.frozen) payload.frozen = true;
     if (e.rateLimited) payload.rateLimited = true;
+    if (e.idempotencyConflict) payload.idempotencyConflict = true;
+    if (e.auditUnavailable) payload.auditUnavailable = true;
     if (e.confirmRequired) {
       payload.confirmRequired = true;
       payload.op = e.op;
@@ -1779,9 +1889,30 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// Refuse the one dangerous combination: bound to a NON-loopback interface (reachable from the network)
+// with auth OFF (no DASHBOARD_PASSWORD). That would expose a custodial wallet, unauthenticated, to
+// anyone who can reach the port. Loopback (the default) stays open for local dev; to expose the
+// dashboard you must set DASHBOARD_PASSWORD (and put HTTPS / a reverse proxy in front — see
+// docs/security.md). This is the "exposed without a password refuses to start" guard.
+function isLoopbackHost(h) {
+  const v = String(h || "").trim().toLowerCase();
+  return v === "127.0.0.1" || v === "::1" || v === "localhost" || v === "";
+}
+if (!isLoopbackHost(HOST) && !AUTH_ON) {
+  console.error(
+    `\nRefusing to start: HOST=${HOST} binds beyond loopback (reachable from the network) but no ` +
+      `DASHBOARD_PASSWORD is set — that would expose a custodial wallet with no authentication.\n` +
+      `Fix one of:\n` +
+      `  • set DASHBOARD_PASSWORD (and front the service with HTTPS / a reverse proxy), or\n` +
+      `  • bind to loopback for local dev (unset HOST, or HOST=127.0.0.1).\n`,
+  );
+  process.exit(1);
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`\n  AgentPay dashboard`);
   console.log(`  ├─ UI      http://localhost:${PORT}`);
+  console.log(`  ├─ bind    ${HOST}${isLoopbackHost(HOST) ? " (loopback — not reachable from the network)" : " ⚠ EXPOSED — ensure HTTPS / a reverse proxy is in front"}`);
   console.log(`  ├─ walletd ${WALLETD_URL}`);
   console.log(`  ├─ owner   ${OWNER}`);
   console.log(`  ├─ auth    ${AUTH_ON ? "ON (DASHBOARD_PASSWORD set)" : "OFF — local dev mode, do NOT expose"}`);

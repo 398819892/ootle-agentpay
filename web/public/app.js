@@ -837,7 +837,7 @@ function toast(type, title, msg) {
 // field and, on OK, exchanges the password for a short-lived, single-use confirm token via
 // /api/confirm. It then resolves to `{ token }` (or `false` on cancel). Without `stepUp` it resolves
 // to `true`/`false` as before, so existing call sites keep working.
-function confirmDialog({ tone = "danger", icon: ic = "alert", title, body, confirmLabel, requireAck, stepUp = null }) {
+function confirmDialog({ tone = "danger", icon: ic = "alert", title, body, confirmLabel, requireAck, stepUp = null, stepUpParams = null }) {
   return new Promise((resolve) => {
     const root = el("modal-root");
     const prevFocus = document.activeElement;
@@ -901,7 +901,9 @@ function confirmDialog({ tone = "danger", icon: ic = "alert", title, body, confi
             "Content-Type": "application/json",
             ...(S.csrf ? { "X-CSRF-Token": S.csrf } : {}),
           },
-          body: JSON.stringify({ op: stepUp, password }),
+          // Send the funding parameters so the server binds the token to THIS action (same amount /
+          // payee / caps / budget). The op call below must send the identical fields.
+          body: JSON.stringify({ op: stepUp, password, ...(stepUpParams || {}) }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -957,7 +959,7 @@ function confirmDialog({ tone = "danger", icon: ic = "alert", title, body, confi
  * `{ token }` to proceed (token is `undefined` when no step-up is needed), or `null` if cancelled.
  * Used for high-risk actions that don't already show their own confirm dialog.
  */
-async function stepUpToken(op) {
+async function stepUpToken(op, stepUpParams = null) {
   if (!S.stepUpRequired) return { token: undefined };
   const res = await confirmDialog({
     tone: "danger",
@@ -966,6 +968,7 @@ async function stepUpToken(op) {
     body: t("stepup_body"),
     confirmLabel: t("stepup_confirm"),
     stepUp: op,
+    stepUpParams,
   });
   return res ? { token: res.token } : null;
 }
@@ -1896,6 +1899,7 @@ async function revokeSession(session, btn) {
     requireAck: t("confirm_revoke_session_ack"),
     confirmLabel: t("confirm_revoke_session_ok"),
     stepUp: S.stepUpRequired ? "revokeSession" : null,
+    stepUpParams: { session },
   });
   if (!res) return;
   await withPending(btn, t("p_revoking"), async () => {
@@ -1945,7 +1949,7 @@ function wireCreate() {
     setErr("f-daily", !dailyOk);
     if (!(fundOk && perTxOk && dailyOk)) return;
 
-    const gate = await stepUpToken("createBudget");
+    const gate = await stepUpToken("createBudget", { fund, perTxCap, dailyCap, epochsPerWindow, whitelist: draftWhitelist });
     if (!gate) return;
     await withPending(el("f-submit"), t("p_opening"), async () => {
       try {
@@ -2044,7 +2048,7 @@ function wireGovernance() {
     const name = el("g-merchant").value.trim();
     setErr("g-merchant", !name);
     if (!name) return;
-    const gate = await stepUpToken("addMerchant");
+    const gate = await stepUpToken("addMerchant", { merchant: name });
     if (!gate) return;
     await withPending(el("g-add"), t("p_adding"), async () => {
       try {
@@ -2084,7 +2088,7 @@ function wireGovernance() {
       const session = el("g-session").value.trim();
       setErr("g-session", !session);
       if (!session) return;
-      const gate = await stepUpToken("issueSession");
+      const gate = await stepUpToken("issueSession", { session });
       if (!gate) return;
       await withPending(el("g-session-add"), t("p_issuing"), async () => {
         try {
@@ -2113,6 +2117,7 @@ function wireGovernance() {
       body: t("confirm_withdraw_body", { amount: fmt(amount), unit: UNIT }),
       confirmLabel: t("confirm_withdraw_ok", { amount: fmt(amount), unit: UNIT }),
       stepUp: S.stepUpRequired ? "withdraw" : null,
+      stepUpParams: { amount },
     });
     if (!res) return;
     await withPending(el("g-withdraw"), t("p_withdrawing"), async () => {

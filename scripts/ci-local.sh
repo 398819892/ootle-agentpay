@@ -145,21 +145,28 @@ run_sdk() {
 
 # ================================================================ web
 run_web() {
-  step "Web dashboard — node security test suite"
-  local t="$REPO_ROOT/web/server/security.test.js"
-  if [ ! -f "$t" ]; then record "web (node security test)" FAIL "" "missing $t"; return; fi
-  if ! command -v node >/dev/null 2>&1; then record "web (node security test)" FAIL "" "node not found"; return; fi
-  local log="$LOGDIR/web.log"
-  ( cd "$REPO_ROOT/web" && node server/security.test.js ) >"$log" 2>&1
-  local rc=$?
-  local passed; passed=$(grep -Eo '([0-9]+) passed' "$log" | tail -1 | grep -Eo '[0-9]+'); passed=${passed:-0}
-  if [ $rc -eq 0 ] && [ "$passed" -gt 0 ]; then
-    record "web (node security test)" PASS "$passed"
-    TOTAL_TESTS=$((TOTAL_TESTS + passed))
-  else
-    record "web (node security test)" FAIL "" "node test failed (rc=$rc)"
-    tail -n 25 "$log" | sed 's/^/        /'
-  fi
+  step "Web dashboard — node test suites (web/server/*.test.js)"
+  if ! command -v node >/dev/null 2>&1; then record "web (node tests)" FAIL "" "node not found"; return; fi
+  local any=0
+  # Run every self-contained web test (security boundary, step-up binding, audit durability, …).
+  # None needs a swarm: each boots a real server with a dead/no walletd and lands before any chain call.
+  for t in "$REPO_ROOT"/web/server/*.test.js; do
+    [ -f "$t" ] || continue
+    any=1
+    local name; name="web ($(basename "$t" .test.js))"
+    local log="$LOGDIR/web-$(basename "$t" .test.js).log"
+    ( cd "$REPO_ROOT/web" && node "$t" ) >"$log" 2>&1
+    local rc=$?
+    local passed; passed=$(grep -Eo '([0-9]+) passed' "$log" | tail -1 | grep -Eo '[0-9]+'); passed=${passed:-0}
+    if [ $rc -eq 0 ] && [ "$passed" -gt 0 ]; then
+      record "$name" PASS "$passed"
+      TOTAL_TESTS=$((TOTAL_TESTS + passed))
+    else
+      record "$name" FAIL "" "node test failed (rc=$rc)"
+      tail -n 25 "$log" | sed 's/^/        /'
+    fi
+  done
+  [ "$any" -eq 1 ] || record "web (node tests)" FAIL "" "no web/server/*.test.js found"
 }
 
 # ================================================================ clients/ts

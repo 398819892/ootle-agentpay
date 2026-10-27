@@ -25,6 +25,18 @@ Enforced **on chain** (a compromised client cannot bypass):
   is the arbiter on any listing in `Disputed`, so an arbiter cannot dodge a slash by withdrawing
   their collateral the moment a dispute lands (tested).
 
+**Fund-conservation invariant (all three templates).** Each template has a dedicated
+`tests/conservation.rs` that drives the real contract in the sandbox and asserts, over a deterministic
+property/fuzz sweep (random amounts, fees and operation sequences) plus explicit boundaries, that no
+base unit is ever created or destroyed:
+- **Escrow:** `locked == to_payee + to_payer + fee + remaining` across release / refund / resolve;
+- **AgentBudget:** `funded (initial + top-ups) == vault + Σ(paid) + Σ(withdrawn)`;
+- **OtcBoard:** the asset splits exactly into `to_buyer + fee + to_seller`, the bond always round-trips
+  to the seller, and arbiter stake is conserved under stake/unstake/slash.
+Each also asserts illegal transitions (double-release, resolve-when-open, over-cap pay, refund before
+timeout, resolve exceeding the escrow, …) **reject and move no funds**. Run with `cargo test` per
+template (in WSL; see `docs/devnet.md`).
+
 ### OTC is trust-minimised, NOT a trustless atomic swap
 
 The OTC flow settles an **off-chain payment** (fiat or another chain), so it cannot be a trustless
@@ -112,6 +124,50 @@ ambient credential to abuse, so the CSRF/origin gate is off and the dev experien
 headers, the 401/403 outcomes for unauthenticated / cross-origin / missing-CSRF requests, that a
 cookie + correct token + same origin passes the security layer, that logout invalidates the token, and
 that a forged XFF cannot evade the lockout. 22 checks, no walletd required.
+
+### Go-live hardening pass (fund-safety follow-ups)
+
+A focused pass closing the specific fund-safety items a strict review flagged as still open (the rest
+of its P0/P1 set was already handled by the custody / chain-authority / web-hardening / integration /
+stability passes above). Each item has an automated test.
+
+- **Idempotency keys are bound to their parameters.** A key alone no longer pins *what* it does: the
+  journal record and the cross-process claim marker both carry a canonical fingerprint of the
+  operation's funding parameters (op type + budget component + payee + amount + memo…; a server-
+  generated invoiceId is excluded, since it is random per call). A repeat of a key with the **same**
+  parameters replays the recorded receipt as before; a repeat with **different** parameters (a larger
+  amount, a different payee) is **rejected with HTTP 409 `idempotencyConflict`** and never silently
+  returns the prior receipt — closing a hole where a key collision (or a replayed key) could mask a
+  second, different payment. Concurrent same-key/same-params requests still execute exactly once.
+  `web/server/idempotency.js`; enforced in `runChainOp` (`web/server/server.js`). Proven by
+  `scripts/stability/idempotency.js` (same key + different amount/payee → 409, no new submit; same
+  params → replay).
+- **Loopback bind by default; exposing requires a password (refuses to start otherwise).** `HOST`
+  defaults to `127.0.0.1`, so the custodial dashboard is not reachable from the network unless the
+  operator deliberately sets `HOST=0.0.0.0` (or a specific interface) — and if they do so **without**
+  `DASHBOARD_PASSWORD`, the server **refuses to start** rather than expose an unauthenticated wallet.
+  Exposing it is a conscious step that must be paired with HTTPS / a reverse proxy. On WSL2, Windows'
+  localhost forwarding still reaches a `127.0.0.1`-bound server in WSL, so local dev is unaffected
+  (verified: Windows `localhost:<port>` → the WSL server). `web/server/server.js`.
+- **Step-up confirmation tokens are bound to the funding parameters, not just the operation name.** A
+  high-risk confirm token now carries an HMAC over `{op, budget component, amount, payee/session,
+  caps…, expiry}` and is **single-use**; at execute time the server recomputes that digest from the
+  **actual** arguments and rejects a mismatch. So a token minted to confirm "withdraw 100" cannot be
+  replayed to withdraw 900, redirected to a different payee, or reused after the budget was reset (a
+  new budget has a different component id, which voids old tokens). `issueConfirmToken` /
+  `verifyConfirmToken` / `confirmParams` in `web/server/server.js`; the authorizer passes the op args
+  to `stepUp.verify`. Proven by `web/server/stepup.test.js` (10 checks: mismatch/expired/reused/
+  cross-op all rejected, matching passes).
+- **High-risk audit records are durable, and a write failure fails the operation.** For a high-risk
+  fund op the authorizer writes an `attempt` record **synchronously with `fsync`, before** the chain
+  call; if that durable write fails the op is **refused** (HTTP 500 `auditUnavailable`) and never
+  performed — a money action we cannot record is one we do not take. The outcome record is written
+  durably too (the pre-op `attempt` is the authoritative trace if an outcome write fails after an
+  already-finalized chain op). Low-risk / read ops keep the best-effort append so an audit hiccup
+  can't take reads down. `audit.appendStrict` in `web/server/audit.js`; gate in
+  `web/server/authorizer.js`. Proven by `web/server/audit.test.js` (broken audit sink → high-risk op
+  refused **and not executed**; reads still work; working sink → op succeeds with a durable `attempt`
+  record).
 
 ### Operational assumptions (testnet-grade, be honest)
 

@@ -43,22 +43,45 @@ function redact(obj) {
 }
 
 function createAudit(file = process.env.AGENTPAY_AUDIT_FILE || DEFAULT_FILE) {
-  /**
-   * Append one audit entry. `entry` is any JSON-serialisable object; `ts` is stamped here so the
-   * caller can't forge the time. Returns nothing and never throws.
-   */
-  function append(entry) {
+  /** Stamp the time (so the caller can't forge it) and redact secrets → the JSONL line to write. */
+  function buildLine(entry) {
     const line = {
       ts: new Date().toISOString(),
       ...entry,
       // defensively redact a params blob if the caller passed one raw
       params: entry && entry.params !== undefined ? redact(entry.params) : undefined,
     };
+    return JSON.stringify(line) + "\n";
+  }
+
+  /**
+   * Append one audit entry. `entry` is any JSON-serialisable object; `ts` is stamped here so the
+   * caller can't forge the time. Best-effort: a write failure is logged, never thrown — used for
+   * low-risk / informational entries where losing one line must not take the request path down.
+   */
+  function append(entry) {
     try {
-      fs.appendFileSync(file, JSON.stringify(line) + "\n");
+      fs.appendFileSync(file, buildLine(entry));
     } catch (e) {
-      // Never let an audit write failure break the operation it is recording.
+      // Never let a best-effort audit write failure break the operation it is recording.
       console.error("warn: could not write audit log:", e.message);
+    }
+  }
+
+  /**
+   * DURABLE append for HIGH-RISK fund operations: synchronously append AND fsync to disk, and THROW
+   * if the bytes cannot be durably written. The caller treats a failure here as the operation failing
+   * — a money action we cannot record is one we refuse to take (see authorizer.js). We open with 'a'
+   * (atomic append), write, fsync the file descriptor, then close; any error propagates.
+   */
+  function appendStrict(entry) {
+    const data = buildLine(entry);
+    const fd = fs.openSync(file, "a");
+    try {
+      fs.writeSync(fd, data);
+      fs.fsyncSync(fd); // flush to stable storage before we report the action as recorded
+    } finally {
+      fs.closeSync(fd);
     }
   }
 
@@ -81,7 +104,7 @@ function createAudit(file = process.env.AGENTPAY_AUDIT_FILE || DEFAULT_FILE) {
     }
   }
 
-  return { append, recent, file, redact };
+  return { append, appendStrict, recent, file, redact };
 }
 
 module.exports = { createAudit, redact };

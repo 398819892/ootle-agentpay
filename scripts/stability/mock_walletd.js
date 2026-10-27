@@ -156,17 +156,21 @@ function decide(tx) {
 
 // ---- substate shapes --------------------------------------------------------------------------
 function componentSubstate() {
-  const tag = (hex) => ({ "@@TAGGED@@": 128, value: { hex } });
+  // CBOR tags as the real Ootle substate exposes them (what the TS client parses): a ResourceAddress
+  // is tag 131, a Vault ref tag 130, a ComponentAddress tag 128. The client resolves the two badges by
+  // picking the top-level tag-131 entries in STRUCT ORDER (owner_badge, then agent_badge) — not by
+  // address sort — so this mock must lay them out in that exact order with that exact tag.
+  const tagged = (t, hex) => ({ tag: t, value: { hex } });
   const state = [
-    tag(budget.vaultHex), // vault (child substate)
-    tag(budget.agentBadge.slice("resource_".length)),
-    tag(budget.ownerBadge.slice("resource_".length)),
+    tagged(130, budget.vaultHex), // field 0: vault (child substate)
+    tagged(131, budget.ownerBadge.slice("resource_".length)), // field 1: owner_badge → resources[0]
+    tagged(131, budget.agentBadge.slice("resource_".length)), // field 2: agent_badge → resources[1]
     Number(budget.perTxCap),
     Number(budget.dailyCap),
     Number(budget.spent),
     budget.windowStart,
     budget.epochsPerWindow,
-    budget.whitelist.map((c) => tag(c.slice("component_".length))),
+    budget.whitelist.map((c) => tagged(128, c.slice("component_".length))),
     budget.revoked,
   ];
   return { substate: { substate: { Component: { body: { state } } } } };

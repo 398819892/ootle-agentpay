@@ -71,6 +71,31 @@ const L = require("./lib");
     await Promise.all(Array.from({ length: 6 }, (_, i) => agent.pay({ merchant: shop, amount: 100, invoiceId: `d${i}` }, `d${i}`)));
     const submits5 = (await mock.state()).counters.paySubmits - base;
     r.check("6 distinct keys → 6 chain submits (no accidental collapse)", submits5 === 6, `submits=${submits5}`);
+
+    // ---- 6. SAME KEY, DIFFERENT PARAMS → 409 conflict, never a silent replay (item ①) ----
+    // First establish a confirmed payment under key "fpk" for 300 to the shop.
+    base = (await mock.state()).counters.paySubmits;
+    const shop2 = L.addr(); // a different payee; the conflict is caught BEFORE any submit, so it need not be whitelisted
+    const p0 = await agent.pay({ merchant: shop, amount: 300, invoiceId: "fp0" }, "fpk");
+    r.check("baseline pay under key fpk confirmed (300 → shop)", p0.body.receipt && p0.body.receipt.status === "confirmed", `status=${p0.body.receipt && p0.body.receipt.status}`);
+    const submitsBaseline = (await mock.state()).counters.paySubmits - base;
+
+    // (a) reuse the SAME key with a DIFFERENT amount → 409, no new submit.
+    base = (await mock.state()).counters.paySubmits;
+    const cAmt = await agent.pay({ merchant: shop, amount: 700, invoiceId: "fp0" }, "fpk");
+    r.check("same key + different AMOUNT → 409 conflict", cAmt.status === 409 && cAmt.body.idempotencyConflict === true, `status=${cAmt.status} body=${JSON.stringify(cAmt.body)}`);
+    r.check("conflicting amount did NOT submit to chain", ((await mock.state()).counters.paySubmits - base) === 0, `submits=${(await mock.state()).counters.paySubmits - base}`);
+
+    // (b) reuse the SAME key with a DIFFERENT payee → 409, no new submit.
+    base = (await mock.state()).counters.paySubmits;
+    const cPayee = await agent.pay({ merchant: shop2, amount: 300, invoiceId: "fp0" }, "fpk");
+    r.check("same key + different PAYEE → 409 conflict", cPayee.status === 409 && cPayee.body.idempotencyConflict === true, `status=${cPayee.status} body=${JSON.stringify(cPayee.body)}`);
+    r.check("conflicting payee did NOT submit to chain", ((await mock.state()).counters.paySubmits - base) === 0, `submits=${(await mock.state()).counters.paySubmits - base}`);
+
+    // (c) the ORIGINAL receipt is untouched: same key + SAME params still replays the 300 → shop.
+    const replay = await agent.pay({ merchant: shop, amount: 300, invoiceId: "fp0" }, "fpk");
+    r.check("same key + same params still replays the original receipt", replay.body.receipt && replay.body.receipt.status === "confirmed" && replay.body.replayed === true && String(replay.body.receipt.amount) === "300", `body=${JSON.stringify(replay.body.receipt)} replayed=${replay.body.replayed}`);
+    r.check("baseline pay itself was exactly one submit (sanity)", submitsBaseline === 1, `submits=${submitsBaseline}`);
   } catch (e) {
     r.check("no exception", false, e.message + "\nBACKEND LOG:\n" + be.log.slice(-2000));
   } finally {

@@ -210,7 +210,7 @@ function createTxLog(file = process.env.AGENTPAY_TXLOG_FILE || path.resolve(__di
    * already known (the caller decides what to do with a prior record). Persisting the pending row
    * BEFORE the chain submit is what makes a mid-flight crash reconcilable.
    */
-  function begin({ key, op, params, component }) {
+  function begin({ key, op, params, component, fp }) {
     const existing = byKey.get(key);
     if (existing) return existing;
     const now = new Date().toISOString();
@@ -219,6 +219,7 @@ function createTxLog(file = process.env.AGENTPAY_TXLOG_FILE || path.resolve(__di
       op,
       component: component || null, // which budget this op belongs to (scopes the history)
       params: params || {},
+      fp: fp || null, // fingerprint of the funding params bound to this key (see idempotency.js)
       status: "pending",
       txId: null,
       reason: null,
