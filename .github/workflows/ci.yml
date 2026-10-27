@@ -1,0 +1,139 @@
+# Continuous Integration for the Ootle AgentPay / OTC Escrow DApp.
+#
+# STATUS: correct-by-construction, NOT YET RUN on GitHub.
+#   This repo has no GitHub remote at the time of writing, so GitHub Actions has never
+#   executed this file. It is written for a standard `ubuntu-latest` runner and mirrors the
+#   suites that pass locally (see `make ci` / scripts/ci-local.sh and docs/ci.md). It is wired
+#   to run automatically on the first push once a GitHub remote is added — nothing else to do.
+#
+# It runs the same four suites as the local CI, but each in its own job for clear, cached,
+# parallel feedback:
+#   1. templates  — cargo test for the three Rust→WASM Tari templates (wasmer, Linux only)
+#   2. sdk        — pytest for the Python SDK (ootle-agentpay)
+#   3. web        — the zero-dependency Node security test suite for the dashboard
+#   4. ts-client  — a clean `tsc` build (type-check) of the zero-dependency TS client
+#
+# Why Linux only: the Tari engine's template test tooling pins wasmer's cranelift backend,
+# which does not compile on Windows/macOS (see docs/devnet.md). Upstream tari-project CI is
+# ubuntu-only for the same reason.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ------------------------------------------------------------------ templates
+  templates:
+    name: templates (cargo test · ${{ matrix.template }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        template: [escrow, agent_budget, otc_board]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (+ wasm32 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # Cache the cargo registry + the per-template build dir. The template test tooling
+      # compiles the template to wasm and runs it in wasmer in-process, so a warm target/
+      # makes repeat runs dramatically faster (the first run is a cold build).
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            templates/${{ matrix.template }}/target
+          key: cargo-${{ runner.os }}-${{ matrix.template }}-${{ hashFiles(format('templates/{0}/Cargo.toml', matrix.template)) }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ matrix.template }}-
+
+      - name: cargo test
+        working-directory: templates/${{ matrix.template }}
+        run: cargo test --locked || cargo test
+
+  # ------------------------------------------------------------------ Python SDK
+  sdk:
+    name: sdk (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ootle-py (a transitive dep of the SDK, used by tests/test_keys.py) requires Python >=3.13.
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install the SDK (with its deps + pytest)
+        working-directory: sdk
+        # Installs ootle-agentpay and its dependency ootle-py so the FULL suite — including
+        # tests/test_keys.py — runs on the runner. If ootle-py cannot be resolved on the runner,
+        # drop this line's `.[dev]` extra and run pytest with --continue-on-collection-errors
+        # (as the local CI does on the dev box, where Python is 3.12 and ootle-py is absent).
+        run: pip install -e ".[dev]"
+
+      - name: pytest
+        working-directory: sdk
+        run: python -m pytest -q
+
+  # ------------------------------------------------------------------ web dashboard
+  web:
+    name: web (node security tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Zero dependencies: the suite boots the real server (Node built-ins only) on a random
+      # port against throwaway state and asserts the whole web-security boundary. No install.
+      - name: node security test suite
+        working-directory: web
+        run: node server/security.test.js
+
+  # ------------------------------------------------------------------ TS client
+  ts-client:
+    name: clients/ts (tsc build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The TS client has no unit tests; its gate is a clean type-checked compile of the
+      # committed sources. typescript + @types/node are the only (dev) deps.
+      - name: Install dev deps
+        working-directory: clients/ts
+        run: npm install --no-audit --no-fund
+
+      - name: tsc build
+        working-directory: clients/ts
+        run: npm run build
+
+      - name: Verify dist was produced
+        working-directory: clients/ts
+        run: test -f dist/index.js

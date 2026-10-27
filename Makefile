@@ -22,18 +22,29 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
 	  | sort | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-# ---------------------------------------------------------------- tests
-.PHONY: test test-templates test-sdk
-test: test-templates test-sdk ## Run all template + SDK tests
+# ---------------------------------------------------------------- tests / CI
+.PHONY: ci test test-templates test-sdk test-web test-ts
+ci: ## One-command local CI: every suite + a pass/fail summary with counts (see scripts/ci-local.sh)
+	bash scripts/ci-local.sh
 
-test-templates: ## cargo test for all three WASM templates
+# `make test` is the full suite with a summary — the same one-command CI as `make ci`.
+# The per-suite targets below stay for running one suite in isolation.
+test: ci ## Run the whole test suite (templates + SDK + web + TS) with a summary
+
+test-templates: ## cargo test for all three WASM templates (in-tree; see `make ci` for the warm-dir path)
 	@for t in $(TEMPLATES); do \
 	  echo "== cargo test: templates/$$t =="; \
 	  cargo test --manifest-path templates/$$t/Cargo.toml || exit $$?; \
 	done
 
 test-sdk: ## pytest for the ootle-agentpay Python SDK
-	cd sdk && $(PYTHON) -m pytest -q
+	cd sdk && $(PYTHON) -m pytest -q --continue-on-collection-errors
+
+test-web: ## node security test suite for the dashboard (zero deps, no walletd)
+	cd web && node server/security.test.js
+
+test-ts: ## tsc type-check build of the clients/ts client
+	cd clients/ts && npm install --no-audit --no-fund && npm run build
 
 # ---------------------------------------------------------------- local swarm
 .PHONY: swarm-up swarm-down

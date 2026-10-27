@@ -49,7 +49,8 @@ a watcher rebuilds the local ledger from the chain's `pay` events.
 Dev happens on Linux (the Tari engine's wasmer/cranelift backend doesn't build on Windows). This
 repo was built on **WSL Ubuntu**.
 
-> Common tasks are wrapped in the root [`Makefile`](Makefile): `make test` (templates + SDK),
+> Common tasks are wrapped in the root [`Makefile`](Makefile): `make ci` / `make test` (the whole
+> test suite + a pass/fail summary — see [CI](#continuous-integration) below),
 > `make fetch-binaries` (download the swarm binaries — see below), `make swarm-up`, `make publish-local`,
 > `make dashboard`, `make demo`. `make help` lists them. The raw scripts are documented in
 > [`scripts/README.md`](scripts/README.md).
@@ -71,6 +72,22 @@ cd sdk && PYTHONPATH=src python examples/demo_devnet.py   # agent budget, on-cha
 PYTHONPATH=src python examples/stress_devnet.py 20        # randomised stress vs reference model
 python ../scripts/otc_demo.py                             # OTC list→take→confirm, on-chain
 ```
+
+### Continuous integration
+
+One command runs **every** suite — the three template `cargo test`s, the Python SDK `pytest`, the web
+dashboard's Node security suite, and a `tsc` build of the TS client — and prints a single pass/fail
+summary with counts:
+
+```bash
+make ci        # or: make test   (same thing).  From Windows: wsl -d Ubuntu-24.04 -u root -- bash -lc 'bash /mnt/f/oolte/scripts/ci-local.sh'
+```
+
+It builds in native-ext4 warm dirs (first run is a cold build; later runs are seconds) and **touches
+no running swarm**. A GitHub Actions workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml))
+mirrors these suites on `ubuntu-latest`; it is **prepared but not yet activated** — there is no GitHub
+remote yet, so it is correct-by-construction and will run on the first push. Full details, per-suite
+coverage, and the warm-dir mechanics are in [`docs/ci.md`](docs/ci.md).
 
 ### Status & verification
 
@@ -154,6 +171,20 @@ python ../scripts/otc_stake_demo.py <OtcBoard模板地址>    # OTC 仲裁人质
 
 > 带质押/罚没的 OtcBoard 已发布到本地链：`template_dd8e9b31…2fd32c97`
 > （`python scripts/otc_stake_demo.py template_dd8e9b31…` 跑完整演示）。
+
+### 持续集成（CI）
+
+一条命令跑**全部**套件——三个模板的 `cargo test`、Python SDK 的 `pytest`、web 仪表盘的 Node 安全测试、
+以及 TS 客户端的 `tsc` 构建——并打印统一的通过/失败汇总 + 计数：
+
+```bash
+make ci        # 或 make test（等价）。Windows 上：wsl -d Ubuntu-24.04 -u root -- bash -lc 'bash /mnt/f/oolte/scripts/ci-local.sh'
+```
+
+脚本在原生 ext4 的「热目录」里构建（首次冷编译较慢，之后几秒），且**不碰正在运行的 swarm**。
+GitHub Actions 工作流（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）在 `ubuntu-latest` 上镜像这些套件，
+**已就绪但尚未激活**——目前还没配 GitHub 远程，所以它是 correct-by-construction，连上远程后首次 push 自动生效。
+完整说明、各套件覆盖范围与热目录机制见 [`docs/ci.md`](docs/ci.md)。
 
 ### 直观上手（推荐先玩这两个）
 

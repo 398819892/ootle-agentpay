@@ -47,7 +47,11 @@ class FakeWalletd(WalletdClient):
 
     def dry_run(self, manifest, variables, max_fee=200_000):
         self.runs.append((manifest, variables))
-        return {"error": {"message": "Template error: Amount exceeds the per-transaction cap"}}
+        # walletd surfaces a dry-run rejection as an RPC error whose message is the engine's
+        # free-text form; _clean_reason extracts the template's own wording from it.
+        return {"error": {"message": "Application error: 5: Dry-run transaction rejected: "
+                          "Execution failure (AssertionFailed): At instruction #2: "
+                          "Panic! Amount exceeds the per-transaction cap"}}
 
 
 def _budget(**over) -> OnChainBudget:
@@ -93,7 +97,8 @@ def test_pay_builds_manifest_with_proof_and_memo():
     b.pay(SHOP, 500, memo="ap1|inv1|tag")
     manifest, variables = b.client.runs[-1]
     assert f'create_proof_for_resource(address!("{AGENT_BADGE}"))' in manifest
-    assert f'budget.pay(address!("{SHOP}"), amount!(500), "ap1|inv1|tag")' in manifest
+    # `pay` takes the session-badge proof as its first arg (so it can identify / refuse a revoked session)
+    assert f'budget.pay(proof, address!("{SHOP}"), amount!(500), "ap1|inv1|tag")' in manifest
     assert "drop_all_proofs!();" in manifest
     assert variables == {"agent": OWNER, "budget": b.component}
 
