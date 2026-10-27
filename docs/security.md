@@ -62,6 +62,14 @@ isolation — and the target custody architecture plus the remaining gaps (separ
 multisig, tamper-proof audit) are written up honestly in **[`custody.md`](custody.md)**. It is
 **testnet hardening, not production-grade custody.**
 
+**The chain — not the server's local file — is the authority for money.** Displayed balances
+(treasury = vault balance, spend-in-window, caps, whitelist, revoked) are read live from chain; the
+local file is only an **operation journal** with a `pending → confirmed | rejected | unknown`
+lifecycle, idempotency keys (no double-spend on retry), startup reconciliation against the chain, and
+atomic, fail-loud persistence. A timed-out submit is recorded `unknown`, never success. The full
+state model, what is verified, and what is still missing (event/block scan, multi-instance locking)
+are in **[`custody.md` §4](custody.md)**.
+
 ## Known limitations
 
 1. **Confidential amounts can't be range-checked inside a template → balances are public.** The

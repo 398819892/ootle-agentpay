@@ -1,8 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.WalletdClient = exports.DEFAULT_WALLETD_URL = void 0;
-exports.finalizedOutcome = finalizedOutcome;
-exports.rejectReason = rejectReason;
+exports.WalletdClient = exports.rejectReason = exports.finalizedOutcome = exports.DEFAULT_WALLETD_URL = void 0;
 /**
  * Minimal JSON-RPC client for a Tari Ootle wallet daemon (auth = `none` devnet mode).
  *
@@ -97,15 +95,25 @@ function finalizedOutcome(rpcResult) {
     }
     return null;
 }
+exports.finalizedOutcome = finalizedOutcome;
 /** Extract a human reject reason from a finalized-but-rejected result tree, or null if not rejected. */
 function rejectReason(result) {
     const outcome = finalizedOutcome(result);
     return outcome && outcome[0] === "reject" ? outcome[1] : null;
 }
+exports.rejectReason = rejectReason;
 class WalletdClient {
-    constructor(url = exports.DEFAULT_WALLETD_URL) {
+    constructor(url = exports.DEFAULT_WALLETD_URL, opts = {}) {
         this.token = null;
+        /**
+         * The transaction id of the most recent `run`/`submit` on this client. The dashboard server
+         * serialises all chain ops, so right after an op resolves this is unambiguously that op's tx —
+         * letting the caller journal the tx id even when the op later rejects or times out.
+         */
+        this.lastTxId = null;
         this.url = url;
+        this.finalizeTries = opts.finalizeTries ?? 120;
+        this.finalizeDelayMs = opts.finalizeDelayMs ?? 1500;
     }
     async rpc(method, params, retriedAuth = false) {
         const headers = { "Content-Type": "application/json" };
@@ -217,28 +225,58 @@ class WalletdClient {
         return this.submitManifest(manifest, variables, maxFee, true);
     }
     /**
-     * Submit a manifest for real and wait for it to finalize. Returns the finalized result
-     * (a dict containing `Accept`). Throws ChainError on rejection.
+     * Submit a manifest for real (no waiting) and return its transaction id. Also records it as
+     * `lastTxId`. Splitting submit from the finalize-wait lets a caller persist the tx id to a
+     * journal *before* it blocks on finalization, so a crash mid-wait leaves a reconcilable record.
      */
-    async run(manifest, variables, maxFee = 200000) {
+    async submit(manifest, variables, maxFee = 200000) {
         const r = await this.submitManifest(manifest, variables, maxFee, false);
         if (r.error)
             throw new errors_1.ChainError(r.error.message ?? "submit_manifest failed");
         const txId = r.result?.transaction_id ?? r.result?.hash;
-        for (let i = 0; i < 120; i++) { // esmeralda finalization can be slow under congestion
-            const got = await this.rpc("transactions.get_result", { transaction_id: txId });
+        if (!txId)
+            throw new errors_1.ChainError("submit_manifest did not return a transaction id");
+        this.lastTxId = String(txId);
+        return this.lastTxId;
+    }
+    /**
+     * Read-only: resolve a transaction id to `{ accept | reject | pending }` by a single
+     * `get_result` call. Never submits or signs anything — this is what a reconciler uses on
+     * startup to settle a previously-submitted (persisted) tx id against the chain's verdict.
+     */
+    async getResult(transactionId) {
+        const got = await this.rpc("transactions.get_result", { transaction_id: transactionId });
+        const outcome = finalizedOutcome(got.result);
+        if (!outcome)
+            return { status: "pending", reason: null, result: got.result ?? null };
+        return outcome[0] === "accept"
+            ? { status: "accept", reason: null, result: got.result }
+            : { status: "reject", reason: outcome[1], result: got.result };
+    }
+    /**
+     * Submit a manifest for real and wait for it to finalize. Returns the finalized result
+     * (a dict containing `Accept`). Throws ChainError on rejection. If it does not finalize within
+     * the configured budget the thrown ChainError carries `pending = true` so the caller can record
+     * the tx as *unknown* (submitted, not yet confirmed) and reconcile it later by `lastTxId` —
+     * never as a success.
+     */
+    async run(manifest, variables, maxFee = 200000) {
+        const txId = await this.submit(manifest, variables, maxFee);
+        for (let i = 0; i < this.finalizeTries; i++) { // esmeralda finalization can be slow under congestion
             // Decide accept/reject from the structured TransactionResult, not by searching the JSON blob:
             // `AcceptFeeRejectRest` (fee taken, rest rejected) contains the substring "Accept" yet is a
             // FAILURE, and reject reasons are now objects a substring scan can't read.
-            const outcome = finalizedOutcome(got.result);
-            if (outcome) {
-                if (outcome[0] === "accept")
-                    return got.result;
-                throw new errors_1.ChainError(outcome[1]);
-            }
-            await sleep(1500);
+            const got = await this.getResult(txId);
+            if (got.status === "accept")
+                return got.result;
+            if (got.status === "reject")
+                throw new errors_1.ChainError(got.reason ?? "transaction rejected");
+            await sleep(this.finalizeDelayMs);
         }
-        throw new errors_1.ChainError(`transaction ${txId} did not finalize in time`);
+        const err = new errors_1.ChainError(`transaction ${txId} did not finalize within the confirmation window`);
+        err.pending = true;
+        err.txId = txId;
+        throw err;
     }
 }
 exports.WalletdClient = WalletdClient;

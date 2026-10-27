@@ -1,8 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MAX_MEMO_BYTES = exports.MEMO_PREFIX = void 0;
-exports.newInvoiceId = newInvoiceId;
-exports.encodeMemo = encodeMemo;
+exports.encodeMemo = exports.newInvoiceId = exports.MAX_MEMO_BYTES = exports.MEMO_PREFIX = void 0;
 /**
  * Encrypted-memo codec — mirrors the parts of `agentpay.invoice` the on-chain path uses.
  *
@@ -20,6 +18,7 @@ const TAG_RE = /^[A-Za-z0-9_.-]{0,32}$/;
 function newInvoiceId() {
     return (0, node_crypto_1.randomBytes)(8).toString("hex");
 }
+exports.newInvoiceId = newInvoiceId;
 function encodeMemo(invoiceId, agentTag = "") {
     if (!ID_RE.test(invoiceId))
         throw new errors_1.InvoiceError("bad invoice_id");
@@ -30,3 +29,4 @@ function encodeMemo(invoiceId, agentTag = "") {
         throw new errors_1.InvoiceError("memo too long");
     return { Message: text };
 }
+exports.encodeMemo = encodeMemo;

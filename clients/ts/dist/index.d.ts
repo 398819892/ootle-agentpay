@@ -9,6 +9,7 @@
  * event parsing).
  */
 export { WalletdClient, DEFAULT_WALLETD_URL, rejectReason } from "./walletd";
+export type { TxResult, WalletdClientOptions } from "./walletd";
 export { OnChainBudget, XTR } from "./budget";
 export type { LedgerEntry, OnChainBudgetOptions } from "./budget";
 export { windowStatus, formatEta, EPOCH_MINUTES } from "./window";

@@ -169,7 +169,111 @@ All of the following is zero-dependency Node (`node:*` only), enabled without br
 
 ---
 
-## 4. Still missing (honest to-do before production / high value)
+## 4. State model & reconciliation — the chain is the authority
+
+**Problem this fixes.** The dashboard used to treat a local JSON file as the *authority* for the
+budget's money: it tracked `funded`, `withdrawn` and a local ledger and computed
+`treasury = funded − spent − withdrawn`, rebuilding its whole picture from that file. A local file is
+not on-chain truth. It drifts on a crash, an unconfirmed or timed-out submit, an external payment, or
+a second instance; a serial in-process lock prevents interleaving within one process but is no
+substitute for reconciliation, idempotency and state recovery. Worse, the persist step only *warned*
+on failure — a request could succeed while its state was never written.
+
+**Principle.** The local file is, at most, an **operation journal** — a durable record of what the
+server asked the chain to do and what it last heard back. It is **never** the source of truth for
+balances. Money state is read **live from chain** every time.
+
+### 4.1 Chain-authoritative reads (`readChainBudget` in `web/server/server.js`)
+
+On every `/api/state`, the displayed figures are derived from chain, not accumulated locally:
+
+| Figure | Source |
+|---|---|
+| **treasury** | the budget **vault substate**'s balance (`vault_…` → `revealed_amount`), exact (string/BigInt) |
+| **spend-in-window** | the component substate's `spent_in_window` scalar |
+| **per-tx / daily cap** | the component substate's cap scalars |
+| **whitelist** | the component substate's address list |
+| **revoked** | the component substate's flag |
+| **window / reset ETA** | component epochs + current epoch (`windowStatus`) |
+
+The AgentBudget component state is a positional array
+`[vault, agentBadgeRes, ownerBadgeRes, perTxCap, dailyCap, spentInWindow, windowStartEpoch,
+epochsPerWindow, [whitelist…], revoked, …]`; the vault is a child substate read for its balance.
+Each response carries a `budget.source` map stating whether each figure came from `chain` or a
+`cache` fallback, so a reviewer (and the UI) can see what is authoritative. Only the **historical**
+`funded` / `withdrawn` totals and the **payment ledger** come from the journal — because the chain
+exposes no lifetime total — and they are labelled as such.
+
+### 4.2 Transaction lifecycle + idempotency (`web/server/txlog.js`)
+
+Every fund-moving op gets **one journal record**, keyed by an **idempotency key**, with an explicit
+lifecycle:
+
+```
+pending ─submit→ (await finalize) ─accept→ confirmed
+                                  ─reject→ rejected
+                                  ─timeout→ unknown ──reconcile──→ confirmed | rejected
+```
+
+- **pending** is persisted *before* the chain submit, so a crash mid-flight leaves a reconcilable
+  trace (it carries the tx id once known).
+- **unknown** = submitted but no verdict within the confirmation window. It is **never** treated as
+  success; the response is `pending: true`, and the record is settled later by its tx id. The window
+  is `AGENTPAY_FINALIZE_TRIES × AGENTPAY_FINALIZE_DELAY_MS` (client option on `WalletdClient`).
+- **Idempotency:** a repeat with the same key returns the recorded outcome instead of re-submitting —
+  so a double-clicked button or a retried HTTP request does not double-spend. For payments the key
+  defaults to the **invoice id** (pay-the-same-invoice-twice is deduped); other ops accept an explicit
+  `idempotencyKey`. Records are scoped by budget `component` so history never leaks across budgets.
+- The client capture that makes this possible is a minimal, read-only-friendly addition to
+  `clients/ts` (`WalletdClient.lastTxId`, `getResult(txId)`, a configurable finalize budget, and a
+  `submit()` split); `run()`'s default behaviour is unchanged.
+
+### 4.3 Startup reconciliation
+
+On boot (and via `POST /api/reconcile`), every record left `pending`/`unknown` by a previous run is
+settled against the chain by its tx id (`get_result`, read-only) → `confirmed`/`rejected`, or left
+open if the chain still has no verdict. The ledger is then rebuilt from confirmed on-chain `pay`
+events, not from any local running total.
+
+### 4.4 Atomic, non-silent persistence
+
+`writeJsonAtomic` writes to a temp file, `fsync`s, then atomically renames over the target — a crash
+leaves the old or the new file, never a torn one. A failed write **throws**, so the request that
+triggered it cannot report success (closing the old "warn-and-return-200" bug). Both the state
+snapshot and the journal persist this way.
+
+### 4.5 Verified on the local swarm
+
+A self-contained harness (`node` driving the real server against isolated state files) checks, green:
+① displayed treasury/spend/caps/ledger equal live `substates.get` reads (`8697` / `1303`, ledger sum
+= spend) — not local accumulation; ② the same idempotency key submits **one** on-chain tx and replays
+the stored outcome; ③ a restart reconciles an `unknown` record to its chain verdict and rebuilds the
+ledger from chain; ④ a zero-window submit is recorded `unknown` (never success); plus a fresh
+`createBudget` whose treasury equals the freshly-funded chain vault, and the atomic/throwing-persist
+unit checks. (On this restarted swarm the on-chain `pay`/owner methods reject due to a pre-existing
+template-version drift — unrelated to this change — so the money-op evidence uses real submitted
+transactions that finalize as *reject*; a reject is a real finalized tx and exercises the full
+lifecycle identically to an accept, which the fresh-budget case demonstrates.)
+
+### 4.6 Still missing here (noted, not done)
+
+- [ ] **Event subscription / block scan.** The ledger is rebuilt from the journal's confirmed `pay`
+      events, not from an independent scan of all `pay` events for the component. walletd exposes no
+      "list events for a component" RPC, so a payment made **outside** this server (by another client
+      holding the agent badge) would not appear until such a scan or an indexer subscription exists.
+      The authoritative *balances* (treasury, spend-in-window) still reflect it immediately.
+- [ ] **Multi-instance coordination.** The serial lock, the journal file and reconciliation are
+      per-process. Two instances sharing a budget need a shared journal + a distributed lock (or an
+      on-chain idempotency guard) to stay safe; today this is single-instance.
+- [ ] **On-chain idempotency.** Dedup is server-side; the template does not reject a replayed invoice
+      id on chain. A fully compromised/duplicated server could still submit twice.
+- [ ] **Large-value read precision.** Caps/spend read back from the CBOR substate as JS numbers
+      (precision loss above 2^53 on the read path only); treasury is exact (string). Amounts on the
+      *write* path are already BigInt-exact end to end.
+
+---
+
+## 5. Still missing (honest to-do before production / high value)
 
 This pass **shrinks the attack surface and makes incidents stoppable and reconstructable**. It does
 **not** make the backend a non-custodial or production-grade signer. Before this holds real value:
@@ -196,7 +300,7 @@ This pass **shrinks the attack surface and makes incidents stoppable and reconst
 
 ---
 
-## 5. One-line summary
+## 6. One-line summary
 
 The chain stops the **agent** from overspending; this pass stops a compromised **web layer or stolen
 session** from quietly doing owner-level damage — by funnelling every signature through one reviewed,
