@@ -775,13 +775,18 @@ const S = {
   authed: true,
   // Whether high-risk actions need a step-up confirmation (set from /api/session; true iff auth on).
   stepUpRequired: false,
+  // CSRF synchronizer token for this session (from /api/session or the login response). Echoed in the
+  // X-CSRF-Token header on every POST so the cookie alone is not enough to drive a state change.
+  csrf: null,
 };
 
 /* ---- API client ----------------------------------------------------------- */
 async function api(path, body) {
+  const headers = body ? { "Content-Type": "application/json" } : {};
+  if (body && S.csrf) headers["X-CSRF-Token"] = S.csrf; // CSRF token on every state-changing call
   const res = await fetch(path, {
     method: body ? "POST" : "GET",
-    headers: body ? { "Content-Type": "application/json" } : {},
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   let payload = {};
@@ -892,7 +897,10 @@ function confirmDialog({ tone = "danger", icon: ic = "alert", title, body, confi
       try {
         const res = await fetch("/api/confirm", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(S.csrf ? { "X-CSRF-Token": S.csrf } : {}),
+          },
           body: JSON.stringify({ op: stepUp, password }),
         });
         const data = await res.json().catch(() => ({}));
@@ -1643,6 +1651,11 @@ function renderLogin() {
       });
       if (res.ok) {
         S.authed = true;
+        try {
+          S.csrf = (await res.json()).csrfToken || null; // use the token immediately
+        } catch {
+          /* boot() re-fetches /api/session which also returns it */
+        }
         boot(); // re-enter: connect + render the dashboard
         return;
       }
@@ -1789,6 +1802,7 @@ async function handleAction(action, btn) {
     }
     S.authed = false;
     S.data = null;
+    S.csrf = null;
     renderLogin();
     return;
   }
@@ -2123,6 +2137,7 @@ async function boot() {
     S.authRequired = Boolean(sess.authRequired);
     S.authed = Boolean(sess.authed);
     S.stepUpRequired = Boolean(sess.stepUpRequired);
+    S.csrf = sess.csrfToken || null;
   } catch {
     S.authRequired = false;
     S.authed = true;

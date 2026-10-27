@@ -84,6 +84,23 @@ const COOKIE_NAME = "ap_session";
 // X-Forwarded-Proto a TLS-terminating proxy sets (so cookies still work on plain-http localhost).
 const COOKIE_SECURE_ENV = process.env.COOKIE_SECURE; // "true" | "false" | undefined
 
+// ---- web-security boundary (CSRF / origin / trusted proxy) -----------------------------------
+// Trusted-proxy policy for deriving the real client IP used by the login/operation throttles. The
+// X-Forwarded-For header is client-controlled, so we do NOT trust it by default — an attacker could
+// otherwise rotate a fake XFF to dodge the per-IP lockout. Values:
+//   unset/"false" → never trust XFF; use the direct socket peer (correct for a directly-exposed box)
+//   "true"        → trust the proxy in front of us; take the left-most XFF entry (the original client)
+//   "ip,ip,…"     → trust XFF ONLY when the direct peer is one of these proxy IPs; then take the
+//                   right-most entry that is not itself a listed proxy (defeats appended spoofing)
+const TRUSTED_PROXY = String(process.env.TRUSTED_PROXY || "").trim();
+// Extra allowed origins for the CSRF origin check (comma-separated full origins, e.g.
+// "https://pay.example.com"). The request's own Host is always allowed; set this only when the
+// browser-facing origin differs from the Host header the app sees (some proxy setups).
+const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
 // ---- hardening config (custody boundary) ----------------------------------------------------
 // High-risk owner actions (withdraw, revoke, change whitelist, mint/revoke an agent badge, reset,
 // freeze/unfreeze) require a SECOND confirmation that is independent of the login session: the
@@ -124,6 +141,17 @@ function parseCookies(req) {
   }
   return out;
 }
+// Server-side revocation of session ids. Sessions are stateless signed tokens, so a logout cannot
+// "unsign" a cookie; instead we remember the revoked sid until its own expiry and reject it here.
+// This genuinely invalidates a logged-out token ON THIS INSTANCE. NOTE: like the rate limiter this
+// is in-memory and per-process — it does not span replicas or survive a restart (see docs/security.md
+// "Operational assumptions"). Keep SESSION_TTL modest and front multi-instance deploys with a shared
+// session store if you need cross-replica revocation.
+const revokedSids = new Map(); // sid -> exp (ms)
+function pruneRevokedSids() {
+  const now = Date.now();
+  for (const [sid, exp] of revokedSids) if (exp <= now) revokedSids.delete(sid);
+}
 function signSession(payload) {
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const mac = crypto.createHmac("sha256", SESSION_SECRET).update(body).digest("base64url");
@@ -138,7 +166,10 @@ function verifySession(token) {
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
     const p = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-    if (p && typeof p.exp === "number" && Date.now() < p.exp) return p;
+    if (p && typeof p.exp === "number" && Date.now() < p.exp) {
+      if (p.sid && revokedSids.has(p.sid)) return null; // explicitly logged out on this instance
+      return p;
+    }
   } catch {
     /* tampered */
   }
@@ -165,13 +196,118 @@ function clearSessionCookie(req, res) {
   res.setHeader("Set-Cookie", parts.join("; "));
 }
 
+// ---- CSRF (synchronizer token bound to the session) ------------------------------------------
+// A cookie-authenticated API is exposed to CSRF: a malicious page can make the browser POST with the
+// session cookie attached. We defend with TWO independent checks on every state-changing request
+// (enforced only when AUTH_ON — in open local-dev there is no ambient credential to abuse):
+//   1. Origin/Referer must match (below) — a cross-site POST is refused outright.
+//   2. a CSRF token derived from the session's sid must be presented in the X-CSRF-Token header.
+// The token is NOT a secret cookie (so it is immune to a sibling-subdomain cookie-injection), it is an
+// HMAC over the sid that only a holder of a valid session (who can also read it from /api/session or
+// the login response) can produce. A stolen *token* without the cookie is useless, and a stolen
+// *cookie* without the token (the CSRF case) is refused.
+function csrfTokenFor(sid) {
+  return crypto.createHmac("sha256", SESSION_SECRET).update("csrf:" + String(sid)).digest("base64url");
+}
+function csrfTokenOk(req, sid) {
+  if (!sid) return false;
+  const sent = String(req.headers["x-csrf-token"] || "");
+  const expected = csrfTokenFor(sid);
+  const a = Buffer.from(sent);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// ---- Origin / Referer check ------------------------------------------------------------------
+// Browsers always send `Origin` on cross-origin POSTs (and modern ones on same-origin POSTs too), so a
+// cross-site forgery is caught here even before the CSRF token. A request with neither header is a
+// non-browser client (curl, server-to-server) which is not subject to ambient-cookie CSRF — it is
+// allowed through to the token/auth checks, which still apply.
+function hostMatches(urlStr, host) {
+  try {
+    const u = new URL(urlStr);
+    if (ALLOWED_ORIGINS.includes((u.protocol + "//" + u.host).toLowerCase())) return true;
+    return u.host.toLowerCase() === host; // host includes the port
+  } catch {
+    return false;
+  }
+}
+function originAllowed(req) {
+  const host = String(req.headers.host || "").toLowerCase();
+  if (!host) return false;
+  const origin = req.headers.origin;
+  if (origin) return origin !== "null" && hostMatches(origin, host);
+  const ref = req.headers.referer || req.headers.referrer;
+  if (ref) return hostMatches(ref, host);
+  return true; // no Origin/Referer: not a browser cross-site POST
+}
+
+// ---- security response headers ---------------------------------------------------------------
+// Applied to EVERY response (static assets and API). The CSP is strict on scripts — `script-src
+// 'self'`, no inline/eval — which this zero-dependency SPA satisfies (no inline <script>, no inline
+// handlers, no eval; app.js and styles.css are same-origin files). Inline *style attributes* are used
+// throughout the hand-written markup, so `style-src` permits 'unsafe-inline'; this does NOT enable
+// script injection. Google Fonts are the only third-party origin (style + font). `frame-ancestors
+// 'none'` + X-Frame-Options block clickjacking; `object-src`/`base-uri 'none'` close common injection
+// vectors; `connect-src 'self'` keeps the SPA talking only to its own backend.
+const CSP = [
+  "default-src 'self'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+].join("; ");
+function applySecurityHeaders(req, res) {
+  res.setHeader("Content-Security-Policy", CSP);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=(), usb=()");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  // HSTS only when the connection is (or terminates as) HTTPS, so we never pin plain-http localhost.
+  if (cookieIsSecure(req)) {
+    res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+  }
+}
+
 // Simple per-IP throttle on failed logins.
 const LOGIN_MAX_FAILS = Number(process.env.LOGIN_MAX_FAILS) || 8;
 const LOGIN_LOCK_MS = (Number(process.env.LOGIN_LOCK_MINUTES) || 10) * 60 * 1000;
 const loginFails = new Map(); // ip -> { fails, lockUntil }
+function normalizeIp(ip) {
+  // Strip the IPv4-mapped-IPv6 prefix so "::ffff:1.2.3.4" and "1.2.3.4" compare equal.
+  return String(ip || "").replace(/^::ffff:/i, "").trim();
+}
+const TRUSTED_PROXY_IPS =
+  TRUSTED_PROXY && TRUSTED_PROXY.toLowerCase() !== "true" && TRUSTED_PROXY.toLowerCase() !== "false"
+    ? new Set(TRUSTED_PROXY.split(",").map((s) => normalizeIp(s)).filter(Boolean))
+    : null;
+/**
+ * The client IP used for rate-limiting / lockout. Trusts X-Forwarded-For ONLY per TRUSTED_PROXY, so
+ * a forged XFF cannot be used to evade the per-IP throttle on a directly-exposed deployment.
+ */
 function clientIp(req) {
+  const peer = normalizeIp(req.socket && req.socket.remoteAddress);
+  const mode = TRUSTED_PROXY.toLowerCase();
+  if (!TRUSTED_PROXY || mode === "false") return peer || "?"; // default: ignore XFF entirely
   const xff = req.headers["x-forwarded-for"];
-  return (xff ? String(xff).split(",")[0].trim() : req.socket.remoteAddress) || "?";
+  if (!xff) return peer || "?";
+  const chain = String(xff).split(",").map((s) => normalizeIp(s)).filter(Boolean);
+  if (mode === "true") return chain[0] || peer || "?"; // single trusted hop → left-most is the client
+  // IP-list mode: only honour XFF when the direct peer is a configured proxy, then walk right-to-left
+  // past any further trusted proxies to the first address we did not place there ourselves.
+  if (TRUSTED_PROXY_IPS && TRUSTED_PROXY_IPS.has(peer)) {
+    for (let i = chain.length - 1; i >= 0; i--) {
+      if (!TRUSTED_PROXY_IPS.has(chain[i])) return chain[i];
+    }
+  }
+  return peer || "?";
 }
 function loginLocked(ip) {
   const e = loginFails.get(ip);
@@ -1142,21 +1278,55 @@ function readBody(req) {
 }
 
 const server = http.createServer(async (req, res) => {
+  applySecurityHeaders(req, res); // every response: static and API
   const urlPath = (req.url || "/").split("?")[0];
   if (!urlPath.startsWith("/api/")) return serveStatic(req, res);
 
   const key = `${req.method} ${urlPath}`;
 
+  // --- CSRF / cross-origin defense for cookie-authenticated, state-changing requests -----------
+  // Only meaningful when AUTH_ON (a cookie is the ambient credential being abused). Applies to all
+  // POSTs. Login is exempt from the TOKEN check (no session exists yet) but NOT from the Origin check,
+  // so login-CSRF from another origin is still refused. Reads (GET) carry no side effects.
+  if (AUTH_ON && req.method === "POST") {
+    if (!originAllowed(req)) {
+      audit.append({ actor: "?", ip: clientIp(req), op: "request", tier: "auth", status: "denied", reason: "bad_origin" });
+      return sendJson(res, 403, { error: "Cross-origin request refused." });
+    }
+    const session = verifySession(parseCookies(req)[COOKIE_NAME]);
+    if (key !== "POST /api/login" && session && !csrfTokenOk(req, session.sid)) {
+      audit.append({
+        actor: `op:${session.sid.slice(0, 8)}`,
+        sid: session.sid,
+        ip: clientIp(req),
+        op: "request",
+        tier: "auth",
+        status: "denied",
+        reason: "missing_csrf",
+      });
+      return sendJson(res, 403, { error: "Missing or invalid CSRF token.", csrf: true });
+    }
+  }
+
   // --- public auth endpoints (no session required) -----------------------------------------
   if (key === "GET /api/session") {
+    const session = AUTH_ON ? verifySession(parseCookies(req)[COOKIE_NAME]) : null;
     return sendJson(res, 200, {
       authRequired: AUTH_ON,
-      authed: isAuthed(req),
+      authed: AUTH_ON ? session !== null : true,
       stepUpRequired: STEP_UP_ON,
       frozen: Boolean(store.frozen),
+      // The CSRF token for this session; the SPA echoes it in the X-CSRF-Token header on every POST.
+      csrfToken: session && session.sid ? csrfTokenFor(session.sid) : null,
     });
   }
   if (key === "POST /api/logout") {
+    // Truly invalidate the token on this instance: remember its sid as revoked until it would expire.
+    const session = verifySession(parseCookies(req)[COOKIE_NAME]);
+    if (session && session.sid && typeof session.exp === "number") {
+      pruneRevokedSids();
+      revokedSids.set(session.sid, session.exp);
+    }
     clearSessionCookie(req, res);
     return sendJson(res, 200, { authed: false });
   }
@@ -1172,10 +1342,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (passwordMatches(body.password)) {
       noteLoginOk(ip);
+      // Session rotation: every successful login mints a brand-new random sid and a freshly signed
+      // cookie, so there is no attacker-chosen identifier to fixate (and the token is server-minted —
+      // a pre-set cookie can't be forged without SESSION_SECRET).
       const sid = crypto.randomUUID();
-      setSessionCookie(req, res, signSession({ exp: Date.now() + SESSION_TTL_MS, sid }), SESSION_TTL_MS);
+      setSessionCookie(req, res, signSession({ iat: Date.now(), exp: Date.now() + SESSION_TTL_MS, sid }), SESSION_TTL_MS);
       audit.append({ actor: `op:${sid.slice(0, 8)}`, sid, ip, op: "login", tier: "auth", status: "ok" });
-      return sendJson(res, 200, { authed: true });
+      return sendJson(res, 200, { authed: true, csrfToken: csrfTokenFor(sid) });
     }
     noteLoginFail(ip);
     return sendJson(res, 401, { error: "Incorrect password." }); // never log the attempt/value
@@ -1241,11 +1414,24 @@ server.listen(PORT, HOST, () => {
   console.log(`  ├─ walletd ${WALLETD_URL}`);
   console.log(`  ├─ owner   ${OWNER}`);
   console.log(`  ├─ auth    ${AUTH_ON ? "ON (DASHBOARD_PASSWORD set)" : "OFF — local dev mode, do NOT expose"}`);
+  console.log(`  ├─ csrf    ${AUTH_ON ? "ON — Origin check + X-CSRF-Token on every POST" : "OFF (no auth)"}`);
+  console.log(
+    `  ├─ proxy   ${
+      !TRUSTED_PROXY || TRUSTED_PROXY.toLowerCase() === "false"
+        ? "direct (X-Forwarded-For ignored; client IP = socket peer)"
+        : TRUSTED_PROXY.toLowerCase() === "true"
+          ? "trusted (left-most X-Forwarded-For = client IP)"
+          : `trusted IPs [${[...(TRUSTED_PROXY_IPS || [])].join(", ")}]`
+    }`,
+  );
   console.log(`  ├─ step-up ${STEP_UP_ON ? "ON — high-risk actions need a fresh confirmation" : "OFF (no password set)"}`);
   console.log(`  ├─ frozen  ${store.frozen ? "YES — fund-moving actions are blocked" : "no"}`);
   console.log(`  ├─ audit   ${audit.file}`);
   if (AUTH_ON && !process.env.SESSION_SECRET) {
     console.log("  │          note: SESSION_SECRET unset — using an ephemeral secret (sessions reset on restart)");
+  }
+  if (AUTH_ON && (!TRUSTED_PROXY || TRUSTED_PROXY.toLowerCase() === "false")) {
+    console.log("  │          note: login/op throttle + logout revocation are in-memory, single-instance (testnet assumption — see docs/security.md). Behind a proxy set TRUSTED_PROXY so the real client IP is used.");
   }
   if (AUTH_ON && !process.env.AGENTPAY_ADMIN_PASSWORD) {
     console.log("  │          note: AGENTPAY_ADMIN_PASSWORD unset — step-up reuses DASHBOARD_PASSWORD (set a distinct one to separate operate vs. move-funds)");

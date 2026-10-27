@@ -70,6 +70,65 @@ atomic, fail-loud persistence. A timed-out submit is recorded `unknown`, never s
 state model, what is verified, and what is still missing (event/block scan, multi-instance locking)
 are in **[`custody.md` §4](custody.md)**.
 
+### Web-security boundary (beyond login)
+
+A password login with a signed HttpOnly cookie is the *base*; on top of it the dashboard adds the
+systematic web hardening a cookie-authenticated, fund-moving app needs. All of the following are
+active **whenever `DASHBOARD_PASSWORD` is set**; in open local-dev mode (no password) there is no
+ambient credential to abuse, so the CSRF/origin gate is off and the dev experience is unchanged.
+
+- **CSRF defense (two independent checks on every state-changing POST).**
+  1. **Origin/Referer check** — a cross-site POST (`Origin` present and not matching the Host, or a
+     non-matching `Referer`) is refused with **403** before anything else. The request's own Host is
+     always allowed; `ALLOWED_ORIGINS` adds others for split-origin proxies. A request with *neither*
+     header is a non-browser client (curl, server-to-server), which is not subject to ambient-cookie
+     CSRF and still faces the auth + token checks.
+  2. **Synchronizer token** — a CSRF token bound to the session (`HMAC(SESSION_SECRET, "csrf:"+sid)`)
+     must be echoed in the `X-CSRF-Token` header. The SPA gets it from `/api/login` and
+     `/api/session`. It is **not** a readable secret cookie (so it is immune to sibling-subdomain
+     cookie injection): a stolen cookie *without* the token — the CSRF case — is refused **403**.
+  The session cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` whenever the connection is HTTPS
+  (forced with `COOKIE_SECURE=true`, else inferred from `X-Forwarded-Proto`).
+- **Security response headers (every response, static + API).** A strict **CSP** —
+  `script-src 'self'`, no inline/eval, `object-src`/`base-uri 'none'`, `frame-ancestors 'none'`,
+  `connect-src 'self'` — which this zero-dependency SPA satisfies (no inline `<script>`, no inline
+  handlers, no eval). Inline **style attributes** are used throughout the hand-written markup, so
+  `style-src` permits `'unsafe-inline'`; this does not enable script injection (a future refinement is
+  nonce-/hash-based styles to drop it). Plus `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`
+  (clickjacking, with CSP `frame-ancestors`), `Referrer-Policy`, `Permissions-Policy`, COOP/CORP, and
+  **HSTS** when the connection is HTTPS.
+- **Trusted-proxy boundary (fixes the rate-limit bypass).** The client IP used by the login lockout
+  and operation throttle comes from the **socket peer by default** — `X-Forwarded-For` is ignored, so
+  an attacker cannot rotate a forged XFF to dodge the per-IP lockout. Behind a real proxy, set
+  `TRUSTED_PROXY=true` (single hop → left-most XFF) or `TRUSTED_PROXY=<proxy-ip,…>` (trust XFF only
+  when the direct peer is a listed proxy, then take the right-most non-proxy entry).
+- **Session rotation + logout invalidation.** Every successful login mints a **fresh random `sid`**
+  and a newly signed cookie (no attacker-fixable identifier; a pre-set cookie can't be forged without
+  `SESSION_SECRET`). Logout **revokes the `sid`** server-side until its own expiry, so a reused
+  logged-out cookie is rejected (**401**) rather than lingering until the TTL. (In-memory — see
+  "Operational assumptions".)
+
+**Automated tests:** `node web/server/security.test.js` boots a real auth-on server and asserts the
+headers, the 401/403 outcomes for unauthenticated / cross-origin / missing-CSRF requests, that a
+cookie + correct token + same origin passes the security layer, that logout invalidates the token, and
+that a forged XFF cannot evade the lockout. 22 checks, no walletd required.
+
+### Operational assumptions (testnet-grade, be honest)
+
+- The **login throttle, operation rate limiter and logout token-revocation are in-memory and
+  single-instance.** They reset on restart and do not span replicas. For a multi-instance deploy,
+  enforce rate limiting at the proxy/WAF and move sessions + the revocation set to a shared store
+  (e.g. Redis). This is a deliberate testnet simplification, not a production control.
+- CSP keeps `style-src 'unsafe-inline'` to accommodate the hand-written SPA's inline style attributes
+  (scripts remain strict `'self'`). Tightening to nonce/hash-based styles is future work.
+
+**Out of scope for this pass (genuine production gaps — do NOT assume they exist):** centralized
+security monitoring / alerting / SIEM, intrusion detection, a WAF/edge rate-limit tier, DDoS
+protection, a third-party penetration test, automated dependency/secret scanning in CI, TLS
+termination + certificate management, and a distributed session/rate-limit store for horizontal
+scale. The custody-side gaps (separate signer service, HSM/KMS, multisig, tamper-proof off-box audit)
+are tracked in **[`custody.md`](custody.md)**.
+
 ## Known limitations
 
 1. **Confidential amounts can't be range-checked inside a template → balances are public.** The

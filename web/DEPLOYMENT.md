@@ -52,6 +52,8 @@ All via environment variables.
 | `AGENTPAY_ADMIN_PASSWORD` | recommended | Step-up secret for high-risk actions. Keep **different** from `DASHBOARD_PASSWORD`; falls back to it if unset. |
 | `AGENTPAY_AUDIT_FILE` | recommended | Append-only audit log path (mount a volume; ship off-box in prod). Default `web/server/audit.log`. |
 | `COOKIE_SECURE` | recommended | `true` behind HTTPS (forces the `Secure` cookie flag). Otherwise inferred from `X-Forwarded-Proto`. |
+| `TRUSTED_PROXY` | **behind a proxy** | How to read the real client IP for the throttles. Default ignores `X-Forwarded-For` (uses the socket peer, so a forged XFF can't dodge the lockout). Set `true` (single hop) or a proxy IP list. See [`../docs/security.md`](../docs/security.md). |
+| `ALLOWED_ORIGINS` | no | Extra browser-facing origins for the CSRF origin check (the request Host is always allowed). Only for split-origin proxy setups. |
 | `AGENTPAY_WALLETD_URL` | yes | walletd JSON-RPC URL, e.g. `http://walletd:5100/json_rpc`. |
 | `AGENTPAY_BUDGET_TEMPLATE` | yes | esmeralda AgentBudget template (below). |
 | `AGENTPAY_OWNER_ACCOUNT` | yes | Funded owner account name (`dev` on esmeralda). |
@@ -251,6 +253,9 @@ reasons.
 - [ ] The audit log (`AGENTPAY_AUDIT_FILE`) is on a mounted volume and (prod) shipped off-box to an
       append-only sink; a dedicated owner/treasury account is used, not the wallet `default`.
 - [ ] HTTPS everywhere; `COOKIE_SECURE=true` (or a proxy that sets `X-Forwarded-Proto: https`).
+- [ ] Behind a proxy, `TRUSTED_PROXY` is set so the per-IP login/operation throttles see the real
+      client IP (otherwise a forged `X-Forwarded-For` is ignored and everyone shares the proxy's IP).
+      CSRF + security headers verified: `node web/server/security.test.js` (22 checks).
 - [ ] `walletd`'s port (`5100`) is bound to localhost / a private network and has **no** public
       mapping (`docker compose ps` shows no host port for it; `ss -tlnp` on the host shows it on
       `127.0.0.1`/the private iface only).
