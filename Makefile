@@ -46,6 +46,29 @@ test-web: ## node security test suite for the dashboard (zero deps, no walletd)
 test-ts: ## tsc type-check build of the clients/ts client
 	cd clients/ts && npm install --no-audit --no-fund && npm run build
 
+# ---------------------------------------------------------------- stability / reliability (B-6)
+# Drives the UNMODIFIED dashboard backend against a controllable MOCK walletd (scripts/stability/),
+# so faults (walletd down / timeout / unknown verdict), crash recovery and concurrency are exercised
+# deterministically WITHOUT ever touching the resident local swarm. See docs/stability.md.
+.PHONY: stability soak stability-fault stability-crash stability-idem stability-multi
+stability: ## Run the whole stability harness (soak + fault + crash + idempotency + multi-instance)
+	node scripts/stability/run_all.js
+
+soak: ## Long-run soak only (SOAK_ROUNDS=N to lengthen; default 300)
+	node scripts/stability/soak.js
+
+stability-fault: ## Fault injection only (walletd down / timeout / unknown verdict)
+	node scripts/stability/fault_injection.js
+
+stability-crash: ## Crash-recovery only (SIGKILL the backend mid-flight, restart, reconcile)
+	node scripts/stability/crash_recovery.js
+
+stability-idem: ## Idempotency-under-retry only (same key → one on-chain effect)
+	node scripts/stability/idempotency.js
+
+stability-multi: ## Multi-instance concurrency diagnostics (documents the shared-store limit)
+	node scripts/stability/multi_instance.js
+
 # ---------------------------------------------------------------- local swarm
 .PHONY: swarm-up swarm-down
 swarm-up: ## Start the local swarm (prebuilt binaries; see docs/devnet.md)

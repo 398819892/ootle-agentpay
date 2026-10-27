@@ -717,11 +717,19 @@ async function runChainOp(key, opName, component, params, submitFn) {
   }
 
   txlog.begin({ key, op: opName, params, component }); // persist pending BEFORE the chain submit (throws on fail)
+  // Snapshot the client's last tx id BEFORE we submit. `wd.lastTxId` is sticky — it holds the id of
+  // the most recent *successful* submit on this shared client. An op that fails WITHOUT submitting
+  // (a client-side precheck rejection, or a fault before submit_manifest returns) must NOT inherit
+  // that previous op's tx id, or its journal record / receipt would point at an unrelated tx. So we
+  // only attribute a tx id to this op when lastTxId actually advanced, or the error carries one
+  // explicitly (the timeout/pending case, where run() stamps e.txId on the tx it did submit).
+  const txIdBefore = wd && wd.lastTxId;
+  const submittedTxId = () => (wd && wd.lastTxId && wd.lastTxId !== txIdBefore ? wd.lastTxId : null);
   let res;
   try {
     res = await submitFn();
   } catch (e) {
-    const txId = (wd && wd.lastTxId) || (e && e.txId) || null;
+    const txId = (e && e.txId) || submittedTxId();
     if (e && e.pending) {
       // Submitted, but not confirmed within the window → UNKNOWN (never success). Reconciled later.
       const record = txlog.settle(key, { status: "unknown", txId, reason: "submitted; not confirmed within the window" });
@@ -731,7 +739,7 @@ async function runChainOp(key, opName, component, params, submitFn) {
     txlog.settle(key, { status: "rejected", txId, reason: chainMessage(e) });
     throw e;
   }
-  const txId = (wd && wd.lastTxId) || null;
+  const txId = submittedTxId();
   const event = opName === "pay" ? firstPayEvent(res) : null;
   const record = txlog.settle(key, { status: "confirmed", txId, event });
   return { outcome: "confirmed", record, res };
