@@ -16,3 +16,8 @@ export { windowStatus, formatEta, EPOCH_MINUTES } from "./window";
 export type { WindowStatus, BudgetWindowInput } from "./window";
 export { encodeMemo, newInvoiceId, MEMO_PREFIX, MAX_MEMO_BYTES } from "./invoice";
 export { AgentPayError, PolicyViolation, ChainError, InvoiceError } from "./errors";
+
+// Thin client for the hosted integration API (/api/v1) — for third-party / agent callers who use
+// the owner's hosted HTTP service with an API key and never touch walletd. See api.ts / docs/api.md.
+export { AgentPayApiClient, AgentPayApiError } from "./api";
+export type { Receipt, Merchant, Budget, PayParams, ApiRole, AgentPayApiOptions } from "./api";

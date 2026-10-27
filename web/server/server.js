@@ -21,6 +21,7 @@ const crypto = require("node:crypto");
 const { createAuthorizer, createRateLimiter, TIERS } = require("./authorizer");
 const { createAudit } = require("./audit");
 const { createTxLog, writeJsonAtomic } = require("./txlog");
+const { createApiKeys } = require("./apikeys");
 
 // ---- locate and load the committed TS client (its compiled dist) -----------------------------
 const CLIENT_DIR = path.resolve(__dirname, "..", "..", "clients", "ts", "dist");
@@ -408,6 +409,8 @@ function loadStore() {
   if (!raw || typeof raw !== "object") return;
   store.merchants = raw.merchants && typeof raw.merchants === "object" ? raw.merchants : {};
   store.frozen = Boolean(raw.frozen);
+  // API-key revocations persist across restarts (the key list itself stays in env).
+  store.apiKeys = raw.apiKeys && typeof raw.apiKeys === "object" ? raw.apiKeys : {};
   if (raw.budget) {
     const b = raw.budget;
     store.budget = {
@@ -447,6 +450,12 @@ function saveStore() {
   writeJsonAtomic(STATE_FILE, store);
 }
 loadStore();
+
+// ---- machine-to-machine API keys (independent of the browser session) ------------------------
+// The /api/v1 integration surface authenticates third-party / agent callers with a bearer API key
+// instead of a login cookie. Keys come from env (AGENTPAY_API_KEYS="role:id:secret, …"); the surface
+// is DISABLED unless at least one key is configured. See apikeys.js and docs/api.md.
+const apiKeys = createApiKeys({ raw: process.env.AGENTPAY_API_KEYS || "", store, save: saveStore, audit });
 
 // name <-> address bookkeeping for friendly labels
 const nameByAddr = () => {
@@ -914,10 +923,13 @@ const OPS = {
       const amount = toAmount(body.amount, "amount");
       const agentTag = (body.agentTag || "agent").toString().slice(0, 24);
       const invoiceId = body.invoiceId ? String(body.invoiceId) : newInvoiceId();
+      // Free-text memo is recorded in the journal/receipt for the caller's reference. (It is NOT the
+      // on-chain stealth memo — that carries the encoded invoice id + agent tag; see invoice.ts.)
+      const memo = body.memo != null ? String(body.memo).slice(0, 120) : undefined;
       const key = idemKey(body, "pay:" + invoiceId);
       let r;
       try {
-        r = await runChainOp(key, "pay", b.component, { merchant, amount, invoiceId }, () =>
+        r = await runChainOp(key, "pay", b.component, { merchant, amount, invoiceId, memo }, () =>
           b.payInvoice({ merchant, invoiceId, amount, agentTag }),
         );
       } catch (e) {
@@ -925,7 +937,7 @@ const OPS = {
         throw httpError(422, chainMessage(e));
       }
       ctx.meta.txId = (r.record && r.record.txId) || invoiceId;
-      ctx.meta.params = { merchant, amount, invoiceId };
+      ctx.meta.params = { merchant, amount, invoiceId, memo };
       // No snapshotBudget: the ledger + spend are rebuilt from chain / the journal, not persisted here.
       if (r.outcome === "unknown") return await pendingResult(r.record, "Payment");
       return { ...(await dashboardState()), paid: { amount, merchant, invoiceId }, replayed: Boolean(r.replay) };
@@ -1277,9 +1289,287 @@ function readBody(req) {
   });
 }
 
+// ================================================================================================
+// Machine-to-machine integration API (/api/v1/*) — API-key authenticated.
+//
+// This is a SECOND, independent entry surface that sits on the SAME foundations as the browser
+// dashboard and re-uses them rather than re-implementing anything:
+//   • the restricted authorizer (authz.execute) — same whitelist / kill switch / rate limit / audit;
+//   • the tx journal (txlog) — same pending→confirmed|rejected|unknown lifecycle + idempotency;
+//   • chain-authoritative reads (dashboardState / readChainBudget) — same live balances/caps.
+//
+// It does NOT touch the browser's session cookie, CSRF or login throttle: a v1 request is dispatched
+// here BEFORE those gates, and it authenticates with a bearer API key instead. Tiered access:
+//   • an `agent` key may create payments and read (payments / budget / merchants);
+//   • an `admin` key may additionally open a budget, register merchants and read the audit log.
+// The on-chain AgentBudget still enforces the real spend limits regardless of which key calls.
+// See docs/api.md for the full reference + integration guide.
+// ================================================================================================
+const V1 = "/api/v1";
+
+/** Extract the presented API key from `Authorization: Bearer …` or `X-API-Key`. */
+function bearerKey(req) {
+  const h = req.headers["authorization"];
+  if (h && /^bearer\s+/i.test(h)) return h.replace(/^bearer\s+/i, "").trim();
+  const x = req.headers["x-api-key"];
+  return x ? String(x).trim() : "";
+}
+/** An invoice id valid for the on-chain stealth memo codec, or null. */
+function validInvoiceId(v) {
+  const s = String(v == null ? "" : v).trim();
+  return /^[a-z0-9]{8,32}$/.test(s) ? s : null;
+}
+/**
+ * Execute an authorizer op on behalf of an API key. High-risk ops require a step-up confirmation in
+ * the browser world (a human re-enters the admin secret); for machine-to-machine there is no human
+ * second factor — the admin API key IS the strong, out-of-band credential. So when step-up is on and
+ * the op is high-risk, we mint the single-use confirm token server-side. The v1 role gate upstream
+ * guarantees ONLY an admin key ever reaches a high-risk op, so this does not widen access.
+ */
+async function executeAsKey(opName, body, ctx) {
+  const op = OPS[opName];
+  if (op && op.highRisk && STEP_UP_ON) ctx = { ...ctx, confirmToken: issueConfirmToken(opName) };
+  return await authz.execute(opName, body, ctx);
+}
+/** Build a public payment receipt from a tx-journal record (status is chain-authoritative). */
+function receiptOf(rec) {
+  if (!rec) return null;
+  const names = nameByAddr();
+  const p = rec.params || {};
+  const ev = rec.event || null;
+  const merchant = (ev && ev.merchant) || p.merchant || null;
+  return {
+    id: rec.key, // the idempotency key is the stable payment id
+    status: rec.status, // pending | confirmed | rejected | unknown
+    txId: rec.txId || null,
+    amount: ev && ev.amount != null ? String(ev.amount) : p.amount != null ? String(p.amount) : null,
+    merchant,
+    merchantName: merchant ? names[merchant] || null : null,
+    memo: (ev && ev.memo) || p.memo || null,
+    invoiceId: p.invoiceId || null,
+    reason: rec.reason || null,
+    createdAt: rec.createdAt || null,
+    updatedAt: rec.updatedAt || null,
+  };
+}
+/** Project the dashboard state into the compact v1 budget shape (all values chain-derived). */
+function v1Budget(st) {
+  if (!st.budget) return null;
+  const b = st.budget;
+  return {
+    component: b.component,
+    perTxCap: b.perTxCap,
+    dailyCap: b.dailyCap,
+    spent: b.spent,
+    dailyRemaining: b.dailyRemaining,
+    treasury: b.treasury,
+    balance: b.treasury, // alias
+    revoked: b.revoked,
+    frozen: Boolean(st.frozen),
+    window: b.window,
+    whitelist: b.whitelist,
+    funded: b.funded,
+    withdrawn: b.withdrawn,
+    source: b.source, // provenance of each figure (chain / cache / journal)
+  };
+}
+
+async function handleApiV1(req, res, urlPath) {
+  const ip = clientIp(req);
+  const method = req.method;
+  const sub = urlPath.slice(V1.length).replace(/\/+$/, "") || "/"; // "/payments", "/payments/:id", …
+
+  // --- public (no key): discovery + the OpenAPI spec --------------------------------------------
+  if (method === "GET" && sub === "/") {
+    return sendJson(res, 200, {
+      name: "AgentPay integration API",
+      version: "v1",
+      enabled: apiKeys.configured(),
+      auth: "Bearer API key (Authorization: Bearer <key>, or X-API-Key). Roles: agent, admin.",
+      endpoints: [
+        "POST   /api/v1/payments        (agent) — make a capped payment; honours Idempotency-Key",
+        "GET    /api/v1/payments        (agent) — list payment receipts",
+        "GET    /api/v1/payments/:id    (agent) — one receipt / status",
+        "GET    /api/v1/budget          (agent) — caps, remaining window, treasury (chain-derived)",
+        "GET    /api/v1/merchants       (agent) — the on-chain whitelist",
+        "POST   /api/v1/merchants       (admin) — add a merchant to the whitelist",
+        "DELETE /api/v1/merchants/:name (admin) — remove a local merchant alias",
+        "POST   /api/v1/budgets         (admin) — open/fund a budget",
+        "GET    /api/v1/audit           (admin) — recent audit entries",
+      ],
+      spec: "/api/v1/openapi.json",
+      docs: "docs/api.md",
+    });
+  }
+  if (method === "GET" && sub === "/openapi.json") {
+    try {
+      const spec = fs.readFileSync(path.join(PUBLIC_DIR, "openapi.json"));
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(spec);
+    } catch {
+      return sendJson(res, 404, { error: "OpenAPI spec unavailable." });
+    }
+  }
+
+  // --- the surface is disabled unless keys are configured ---------------------------------------
+  if (!apiKeys.configured()) {
+    return sendJson(res, 503, {
+      error: "The integration API is not enabled on this deployment. Set AGENTPAY_API_KEYS to enable /api/v1.",
+    });
+  }
+
+  // --- authenticate the API key -----------------------------------------------------------------
+  const presented = bearerKey(req);
+  const who = apiKeys.verify(presented);
+  if (!who) {
+    audit.append({ actor: "api", ip, op: `${method} ${sub}`, tier: "api", status: "denied", reason: presented ? "bad_api_key" : "missing_api_key" });
+    res.setHeader("WWW-Authenticate", 'Bearer realm="AgentPay"');
+    return sendJson(res, 401, { error: "Missing or invalid API key.", authenticate: "Bearer" });
+  }
+
+  const ctx = { actor: `key:${who.id}`, sid: null, ip, rateKey: `key:${who.id}`, apiKeyId: who.id, apiRole: who.role };
+  // Deny + audit an admin-only endpoint reached by a non-admin key.
+  function denyIfNotAdmin(op) {
+    if (who.role === apiKeys.ROLES.ADMIN) return false;
+    audit.append({ actor: `key:${who.id}`, ip, op: op || `${method} ${sub}`, tier: "api", status: "denied", reason: "insufficient_role" });
+    sendJson(res, 403, { error: "This endpoint requires an admin API key." });
+    return true;
+  }
+
+  let body = {};
+  if (method === "POST" || method === "DELETE") {
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      return sendJson(res, e.status || 400, { error: e.message });
+    }
+  }
+  const query = Object.fromEntries(new URL(req.url, "http://localhost").searchParams);
+
+  try {
+    // ---- payments -------------------------------------------------------------------------------
+    if (sub === "/payments" && method === "POST") {
+      const idemHeader = String(req.headers["idempotency-key"] || "").trim();
+      const invoiceId = validInvoiceId(body.invoiceId) || newInvoiceId();
+      // Payment id = the idempotency key: the client's Idempotency-Key header if given, else a stable
+      // per-invoice default. A repeat with the same key never re-submits to chain (txlog enforces it).
+      const key = idemHeader ? idemHeader.slice(0, 128) : "pay:" + invoiceId;
+      const payBody = {
+        merchant: body.merchant,
+        amount: body.amount,
+        memo: body.memo,
+        agentTag: body.agentTag,
+        invoiceId,
+        idempotencyKey: key,
+      };
+      // A journaled key already present means this request is a replay (idempotent hit), whatever the
+      // recorded outcome — including a prior rejection, where the op re-throws the chain's reason.
+      const priorExisted = Boolean(txlog.get(key));
+      let replayed = priorExisted;
+      try {
+        const r = await serialize(() => authz.execute("pay", payBody, ctx));
+        replayed = priorExisted || Boolean(r && r.replayed);
+      } catch (e) {
+        // A chain REJECTION still produces a receipt (status=rejected). Only a record-less failure
+        // (bad request, frozen, rate-limited, no budget) is surfaced as an error.
+        if (!txlog.get(key)) throw e;
+      }
+      const rec = txlog.get(key);
+      const receipt = receiptOf(rec);
+      const status =
+        rec && rec.status === "confirmed" ? 201 : rec && rec.status === "rejected" ? 402 : 202; // pending/unknown
+      return sendJson(res, status, { receipt, replayed });
+    }
+    if (sub === "/payments" && method === "GET") {
+      const payments = txlog
+        .list()
+        .filter((r) => r.op === "pay")
+        .map(receiptOf);
+      return sendJson(res, 200, { payments });
+    }
+    if (sub.startsWith("/payments/") && method === "GET") {
+      const id = decodeURIComponent(sub.slice("/payments/".length));
+      let rec = txlog.get(id) || txlog.list().find((r) => r.op === "pay" && r.txId === id) || null;
+      // Status tracking: advance an open record by settling it against chain (read-only get_result).
+      if (rec && txlog.isOpen(rec.status) && rec.txId) {
+        try {
+          rec = await serialize(() => reconcileRecord(rec));
+        } catch {
+          /* leave it open; the caller can poll again */
+        }
+      }
+      if (!rec) return sendJson(res, 404, { error: "No payment with that id." });
+      return sendJson(res, 200, { receipt: receiptOf(rec) });
+    }
+
+    // ---- budget ---------------------------------------------------------------------------------
+    if (sub === "/budget" && method === "GET") {
+      const st = await serialize(() => dashboardState());
+      return sendJson(res, 200, { budget: v1Budget(st) });
+    }
+    if (sub === "/budgets" && method === "POST") {
+      if (denyIfNotAdmin("createBudget")) return;
+      await serialize(() => executeAsKey("createBudget", body, ctx));
+      const st = await dashboardState();
+      return sendJson(res, 201, { budget: v1Budget(st) });
+    }
+
+    // ---- merchants (whitelist) ------------------------------------------------------------------
+    if (sub === "/merchants" && method === "GET") {
+      const st = await serialize(() => dashboardState());
+      const whitelist = (st.budget && st.budget.whitelist) || [];
+      return sendJson(res, 200, { merchants: whitelist, source: st.budget ? "chain" : "none" });
+    }
+    if (sub === "/merchants" && method === "POST") {
+      if (denyIfNotAdmin("addMerchant")) return;
+      await serialize(() => executeAsKey("addMerchant", { merchant: body.merchant }, ctx));
+      const st = await dashboardState();
+      return sendJson(res, 201, { merchants: (st.budget && st.budget.whitelist) || [] });
+    }
+    if (sub.startsWith("/merchants/") && method === "DELETE") {
+      if (denyIfNotAdmin("deleteMerchantAlias")) return;
+      const name = decodeURIComponent(sub.slice("/merchants/".length)).trim().toLowerCase();
+      const existed = Object.prototype.hasOwnProperty.call(store.merchants, name);
+      if (existed) {
+        delete store.merchants[name];
+        saveStore();
+      }
+      audit.append({ actor: `key:${who.id}`, ip, op: "deleteMerchantAlias", tier: "admin", status: "ok", params: { name } });
+      return sendJson(res, 200, {
+        removedAlias: existed,
+        name,
+        notice:
+          "Removed the local merchant alias. NOTE: this AgentBudget template has no on-chain " +
+          "whitelist-remove — a whitelisted address stays spendable on chain until you revoke the " +
+          "agent (POST a revoke) or open a new budget. See docs/api.md 'Known limitations'.",
+      });
+    }
+
+    // ---- audit ----------------------------------------------------------------------------------
+    if (sub === "/audit" && method === "GET") {
+      if (denyIfNotAdmin("audit")) return;
+      const limit = Math.max(1, Math.min(500, Number(query.limit) || 100));
+      return sendJson(res, 200, { entries: audit.recent(limit) });
+    }
+
+    return sendJson(res, 404, { error: "Unknown API endpoint. GET /api/v1 lists the available ones." });
+  } catch (e) {
+    const status = e.status || 500;
+    if (status >= 500) console.error(`v1 ${method} ${sub} failed:`, e);
+    const payload = { error: chainMessage(e) };
+    if (e.frozen) payload.frozen = true;
+    if (e.rateLimited) payload.rateLimited = true;
+    if (e.confirmRequired) payload.confirmRequired = true; // not expected for admin keys (token auto-minted)
+    return sendJson(res, status, payload);
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   applySecurityHeaders(req, res); // every response: static and API
   const urlPath = (req.url || "/").split("?")[0];
+  // Machine-to-machine API: dispatched BEFORE the browser session/CSRF/auth gate (it authenticates
+  // with an API key, not a cookie), so it neither relies on nor weakens the dashboard's gate.
+  if (urlPath === V1 || urlPath.startsWith(V1 + "/")) return handleApiV1(req, res, urlPath);
   if (!urlPath.startsWith("/api/")) return serveStatic(req, res);
 
   const key = `${req.method} ${urlPath}`;
@@ -1441,6 +1731,13 @@ server.listen(PORT, HOST, () => {
   if (AUTH_ON && /change-me/i.test(DASHBOARD_PASSWORD)) {
     console.log("  │          ⚠ DASHBOARD_PASSWORD looks like the .env.example placeholder — set a long random value!");
   }
+  console.log(
+    `  ├─ api/v1  ${
+      apiKeys.configured()
+        ? `ON — ${apiKeys.list().length} key(s): ${apiKeys.list().map((k) => `${k.id}(${k.role}${k.revoked ? ",revoked" : ""})`).join(", ")}`
+        : "OFF — set AGENTPAY_API_KEYS to enable the machine-to-machine API"
+    }`,
+  );
   console.log(`  ├─ journal ${txlog.file}`);
   const openCount = txlog.pendingOrUnknown().length;
   console.log(`  └─ template ${BUDGET_TEMPLATE.slice(0, 24)}…\n`);

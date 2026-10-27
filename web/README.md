@@ -99,6 +99,28 @@ To put this on the internet (HTTPS, pointed at esmeralda, with walletd kept priv
 (localhost / a private network — never a public port). A [`docker-compose.yml`](docker-compose.yml)
 and [`.env.example`](.env.example) are included; esmeralda env values are in the deploy guide.
 
+## Integration API (`/api/v1`) — for third-party apps & agents
+
+Besides the browser dashboard, the backend exposes a **machine-to-machine REST API** so external
+developers and autonomous agents can integrate AgentPay without ever touching walletd. It is
+authenticated with **bearer API keys** (independent of the login cookie), tiered into `agent`
+(pay + read) and `admin` (also open budgets, register merchants, read the audit log), and reuses the
+same authorizer, tx journal (idempotency + lifecycle), audit log and chain-authoritative reads as the
+dashboard. It is **off** until you set `AGENTPAY_API_KEYS`.
+
+```bash
+# enable it: role:id:secret, comma/newline separated
+export AGENTPAY_API_KEYS="agent:bot1:sk_agent_$(openssl rand -hex 24), admin:ops:sk_admin_$(openssl rand -hex 24)"
+# then, as an agent:
+curl -s -X POST localhost:8787/api/v1/payments -H "Authorization: Bearer sk_agent_..." \
+  -H 'Content-Type: application/json' -H 'Idempotency-Key: order-42' \
+  -d '{"merchant":"shop","amount":"250"}'
+```
+
+Full reference + integration guide: **[docs/api.md](../docs/api.md)**. Machine spec:
+`GET /api/v1/openapi.json`. Copy-paste examples (curl / Node / Python): **[examples/](../examples/)**.
+The browser dashboard and its auth/CSRF/kill-switch are unchanged by this surface.
+
 ## What you can do
 
 - **Overview** — budget status (Active / Revoked), the on-chain component address (truncated +

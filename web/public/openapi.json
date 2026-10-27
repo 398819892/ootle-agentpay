@@ -1,0 +1,242 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "AgentPay integration API",
+    "version": "1.0.0",
+    "description": "Machine-to-machine REST API for AgentPay on Tari Ootle. The owner runs this hosted service; third-party developers and autonomous agents call it with a bearer API key to make payments that are capped and enforced ON CHAIN by the AgentBudget template (per-transaction cap, rolling daily cap, merchant whitelist, kill switch). Callers never touch the wallet daemon or hold keys. This is a testnet-grade API; see docs/api.md for the integration guide and the out-of-scope follow-up list (per-key rate limits/quotas, webhooks, key rotation).",
+    "license": { "name": "see repository" }
+  },
+  "servers": [
+    { "url": "http://localhost:8787", "description": "Local dev / swarm" },
+    { "url": "https://pay.example.com", "description": "Your hosted deployment" }
+  ],
+  "security": [{ "ApiKeyAuth": [] }, { "BearerAuth": [] }],
+  "tags": [
+    { "name": "payments", "description": "Capped payments and their receipts" },
+    { "name": "budget", "description": "Budget status (chain-derived)" },
+    { "name": "merchants", "description": "The on-chain merchant whitelist" },
+    { "name": "audit", "description": "Operator audit trail (admin)" },
+    { "name": "meta", "description": "Discovery" }
+  ],
+  "paths": {
+    "/api/v1": {
+      "get": {
+        "tags": ["meta"],
+        "summary": "API index (no auth)",
+        "security": [],
+        "responses": { "200": { "description": "Endpoint index", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/api/v1/payments": {
+      "post": {
+        "tags": ["payments"],
+        "summary": "Make a capped payment",
+        "description": "Submits a payment to a whitelisted merchant. The on-chain AgentBudget enforces the per-tx cap, daily cap, whitelist and revoke; a violation comes back as a receipt with status `rejected`. Provide an `Idempotency-Key` header to make retries safe: a repeat with the same key never submits twice and returns the original receipt. Requires an agent or admin key.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": { "type": "string", "maxLength": 128 },
+            "description": "Client-chosen key that makes this payment idempotent. Strongly recommended."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PaymentRequest" },
+              "example": { "merchant": "shop", "amount": "250", "memo": "order #4821" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Confirmed on chain", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentResponse" } } } },
+          "202": { "description": "Submitted, not yet confirmed (poll GET /payments/{id})", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentResponse" } } } },
+          "402": { "description": "Rejected on chain (over a cap, not whitelisted, revoked, …) — still a receipt", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentResponse" } } } },
+          "400": { "description": "Bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "description": "Missing/invalid API key", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "No budget is open", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "423": { "description": "Dashboard frozen (kill switch)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "description": "Rate limited", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "get": {
+        "tags": ["payments"],
+        "summary": "List payment receipts",
+        "responses": {
+          "200": {
+            "description": "All payment receipts (newest-last)",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "payments": { "type": "array", "items": { "$ref": "#/components/schemas/Receipt" } } } } } }
+          }
+        }
+      }
+    },
+    "/api/v1/payments/{id}": {
+      "get": {
+        "tags": ["payments"],
+        "summary": "Get one payment receipt / status",
+        "description": "Returns the receipt for a payment id (the idempotency key). If the payment is still open, the server settles it against chain (read-only) before replying, so the status tracks the chain.",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Receipt", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentResponse" } } } },
+          "404": { "description": "No such payment", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/budget": {
+      "get": {
+        "tags": ["budget"],
+        "summary": "Budget status (chain-derived)",
+        "description": "Caps, spend-in-window, remaining this window, treasury balance and the whitelist — all read live from chain. `source` records the provenance of each figure.",
+        "responses": {
+          "200": { "description": "Budget", "content": { "application/json": { "schema": { "type": "object", "properties": { "budget": { "$ref": "#/components/schemas/Budget" } } } } } }
+        }
+      }
+    },
+    "/api/v1/budgets": {
+      "post": {
+        "tags": ["budget"],
+        "summary": "Open/fund a budget (admin)",
+        "description": "Owner-side provisioning: funds the vault and sets the on-chain rules. Admin key only.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BudgetRequest" },
+              "example": { "fund": "10000", "perTxCap": "1000", "dailyCap": "1500", "epochsPerWindow": 10, "whitelist": ["shop"] }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Opened", "content": { "application/json": { "schema": { "type": "object", "properties": { "budget": { "$ref": "#/components/schemas/Budget" } } } } } },
+          "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "A budget is already open", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/merchants": {
+      "get": {
+        "tags": ["merchants"],
+        "summary": "List the whitelist",
+        "responses": { "200": { "description": "Whitelist", "content": { "application/json": { "schema": { "type": "object", "properties": { "merchants": { "type": "array", "items": { "$ref": "#/components/schemas/Merchant" } }, "source": { "type": "string" } } } } } } }
+      },
+      "post": {
+        "tags": ["merchants"],
+        "summary": "Add a merchant to the whitelist (admin)",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["merchant"], "properties": { "merchant": { "type": "string", "description": "A friendly name or a component_… address" } } } } } },
+        "responses": {
+          "201": { "description": "Added", "content": { "application/json": { "schema": { "type": "object", "properties": { "merchants": { "type": "array", "items": { "$ref": "#/components/schemas/Merchant" } } } } } } },
+          "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/merchants/{name}": {
+      "delete": {
+        "tags": ["merchants"],
+        "summary": "Remove a local merchant alias (admin)",
+        "description": "Removes the friendly name→address mapping. NOTE: this template has no on-chain whitelist-remove, so the address stays spendable on chain until the agent is revoked or a new budget is opened. See docs/api.md.",
+        "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Alias removed (with a note about on-chain scope)", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/audit": {
+      "get": {
+        "tags": ["audit"],
+        "summary": "Recent audit entries (admin)",
+        "parameters": [{ "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 } }],
+        "responses": {
+          "200": { "description": "Entries", "content": { "application/json": { "schema": { "type": "object", "properties": { "entries": { "type": "array", "items": { "type": "object" } } } } } } },
+          "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-API-Key" },
+      "BearerAuth": { "type": "http", "scheme": "bearer" }
+    },
+    "schemas": {
+      "PaymentRequest": {
+        "type": "object",
+        "required": ["merchant", "amount"],
+        "properties": {
+          "merchant": { "type": "string", "description": "Whitelisted merchant: a friendly name or a component_… address" },
+          "amount": { "type": "string", "description": "Base-unit integer as a decimal STRING (BigInt-safe)" },
+          "memo": { "type": "string", "description": "Free-text reference, recorded in the receipt" },
+          "invoiceId": { "type": "string", "pattern": "^[a-z0-9]{8,32}$", "description": "Optional; auto-generated if omitted" },
+          "agentTag": { "type": "string", "description": "Optional label for the paying agent session" }
+        }
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "Payment id (= the idempotency key)" },
+          "status": { "type": "string", "enum": ["pending", "confirmed", "rejected", "unknown"] },
+          "txId": { "type": "string", "nullable": true },
+          "amount": { "type": "string", "nullable": true },
+          "merchant": { "type": "string", "nullable": true },
+          "merchantName": { "type": "string", "nullable": true },
+          "memo": { "type": "string", "nullable": true },
+          "invoiceId": { "type": "string", "nullable": true },
+          "reason": { "type": "string", "nullable": true, "description": "Chain's reason when rejected" },
+          "createdAt": { "type": "string", "nullable": true },
+          "updatedAt": { "type": "string", "nullable": true }
+        }
+      },
+      "PaymentResponse": {
+        "type": "object",
+        "properties": {
+          "receipt": { "$ref": "#/components/schemas/Receipt" },
+          "replayed": { "type": "boolean", "description": "true if returned from idempotency cache (not re-submitted)" }
+        }
+      },
+      "Budget": {
+        "type": "object",
+        "properties": {
+          "component": { "type": "string" },
+          "perTxCap": { "type": "string" },
+          "dailyCap": { "type": "string" },
+          "spent": { "type": "string" },
+          "dailyRemaining": { "type": "string" },
+          "treasury": { "type": "string" },
+          "balance": { "type": "string" },
+          "revoked": { "type": "boolean" },
+          "frozen": { "type": "boolean" },
+          "window": { "type": "object", "nullable": true },
+          "whitelist": { "type": "array", "items": { "$ref": "#/components/schemas/Merchant" } },
+          "funded": { "type": "string" },
+          "withdrawn": { "type": "string" },
+          "source": { "type": "object", "description": "Provenance of each figure (chain / cache / journal)" }
+        }
+      },
+      "BudgetRequest": {
+        "type": "object",
+        "required": ["fund", "perTxCap", "dailyCap"],
+        "properties": {
+          "fund": { "type": "string" },
+          "perTxCap": { "type": "string" },
+          "dailyCap": { "type": "string" },
+          "epochsPerWindow": { "type": "integer", "default": 10 },
+          "whitelist": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "Merchant": {
+        "type": "object",
+        "properties": { "address": { "type": "string" }, "name": { "type": "string", "nullable": true } }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" },
+          "frozen": { "type": "boolean" },
+          "rateLimited": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

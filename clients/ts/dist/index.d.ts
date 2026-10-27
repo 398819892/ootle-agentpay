@@ -16,3 +16,5 @@ export { windowStatus, formatEta, EPOCH_MINUTES } from "./window";
 export type { WindowStatus, BudgetWindowInput } from "./window";
 export { encodeMemo, newInvoiceId, MEMO_PREFIX, MAX_MEMO_BYTES } from "./invoice";
 export { AgentPayError, PolicyViolation, ChainError, InvoiceError } from "./errors";
+export { AgentPayApiClient, AgentPayApiError } from "./api";
+export type { Receipt, Merchant, Budget, PayParams, ApiRole, AgentPayApiOptions } from "./api";
