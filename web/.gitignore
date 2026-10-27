@@ -1,6 +1,9 @@
 node_modules/
 server/state.json
 server/txlog.json
+server/claims/
+*.claim
+*.lock
 *.log
 .env
 walletd/

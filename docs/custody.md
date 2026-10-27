@@ -224,6 +224,12 @@ pending ─submit→ (await finalize) ─accept→ confirmed
   so a double-clicked button or a retried HTTP request does not double-spend. For payments the key
   defaults to the **invoice id** (pay-the-same-invoice-twice is deduped); other ops accept an explicit
   `idempotencyKey`. Records are scoped by budget `component` so history never leaks across budgets.
+  This holds **within one process** (an in-memory map) **and across multiple processes that share the
+  filesystem**: before submitting, `runChainOp` takes a cross-process **claim** on the key —
+  `fs.open(…,"wx")` in a shared `claims/` dir (see `web/server/claims.js`) — so exactly one instance
+  submits and any racing instance replays the shared journal's outcome. Journal writes also merge under
+  a cross-process lock, so concurrent instances cannot clobber each other's records. (Cross-**host**
+  instances with separate filesystems still need a shared store — see §4.6 and `docs/stability.md`.)
 - The client capture that makes this possible is a minimal, read-only-friendly addition to
   `clients/ts` (`WalletdClient.lastTxId`, `getResult(txId)`, a configurable finalize budget, and a
   `submit()` split); `run()`'s default behaviour is unchanged.
@@ -262,9 +268,14 @@ lifecycle identically to an accept, which the fresh-budget case demonstrates.)
       "list events for a component" RPC, so a payment made **outside** this server (by another client
       holding the agent badge) would not appear until such a scan or an indexer subscription exists.
       The authoritative *balances* (treasury, spend-in-window) still reflect it immediately.
-- [ ] **Multi-instance coordination.** The serial lock, the journal file and reconciliation are
-      per-process. Two instances sharing a budget need a shared journal + a distributed lock (or an
-      on-chain idempotency guard) to stay safe; today this is single-instance.
+- [x] **Multi-instance coordination (same host).** Instances sharing one filesystem are now safe: a
+      cross-process filesystem claim before submit (`web/server/claims.js`) stops duplicate-key
+      double-spend, and a merge-under-lock journal persist stops concurrent-writer clobber. Proven by
+      `scripts/stability/multi_instance.js` (9/9). See `docs/stability.md` §5.
+- [ ] **Multi-instance coordination (cross host).** The filesystem claim/lock only coordinate processes
+      that share a directory. Instances on **separate hosts** still need a shared transactional store +
+      distributed lock (or an on-chain idempotency guard). `runChainOp`'s claim/replay seam is where that
+      store would plug in.
 - [ ] **On-chain idempotency.** Dedup is server-side; the template does not reject a replayed invoice
       id on chain. A fully compromised/duplicated server could still submit twice.
 - [ ] **Large-value read precision.** Caps/spend read back from the CBOR substate as JS numbers

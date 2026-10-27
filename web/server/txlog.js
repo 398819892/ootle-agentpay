@@ -28,6 +28,60 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 /**
+ * Synchronous sleep that parks the thread (does not spin a CPU core). Used only to back off a few
+ * milliseconds while contending for the cross-process journal lock below — critical sections are a
+ * single small read+write, so the wait is sub-millisecond in practice.
+ */
+function sleepSync(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { /* fallback busy-wait if SharedArrayBuffer is unavailable */ }
+  }
+}
+
+/**
+ * Hold a cross-process advisory lock (an exclusive lockfile) for the duration of `fn`, so that when
+ * MULTIPLE backend instances share one journal file the read-merge-write below cannot interleave and
+ * lose each other's records. Safety valves so it can never deadlock or starve:
+ *   - a STALE lock (owner crashed holding it) older than `staleMs` is stolen;
+ *   - if we cannot acquire within `timeoutMs` we proceed WITHOUT the lock (best-effort) rather than
+ *     block the event loop — bounded progress always wins over a hang. (The critical section is tiny,
+ *     so real contention is milliseconds; a multi-second wait means something is wrong, not busy.)
+ * Single-instance deployments never contend, so this is one extra create+unlink per persist.
+ */
+function withFileLock(lockFile, fn, { timeoutMs = 3000, staleMs = 10000, pollMs = 8 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let held = false;
+  for (;;) {
+    try {
+      const fd = fs.openSync(lockFile, "wx"); // atomic exclusive create — only one process holds it
+      try { fs.writeSync(fd, `${process.pid} ${Date.now()}`); } catch { /* best effort */ }
+      fs.closeSync(fd);
+      held = true;
+      break;
+    } catch (e) {
+      if (e && e.code !== "EEXIST") throw e;
+      let stale = false;
+      try {
+        stale = Date.now() - fs.statSync(lockFile).mtimeMs > staleMs;
+      } catch {
+        continue; // lock vanished between open and stat — retry immediately
+      }
+      if (stale) { try { fs.unlinkSync(lockFile); } catch { /* someone else stole it */ } continue; }
+      if (Date.now() >= deadline) break; // give up waiting; proceed unlocked (bounded progress)
+      sleepSync(pollMs);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (held) { try { fs.unlinkSync(lockFile); } catch { /* already gone */ } }
+  }
+}
+
+/**
  * Write `obj` as pretty JSON to `file` atomically: a crash can leave the old file or the new file,
  * never a half-written one. THROWS if the bytes could not be durably written (callers treat a
  * persistence failure as a failed request — never a silent success).
@@ -61,6 +115,22 @@ function readJson(file, fallback) {
 const TERMINAL = new Set(["confirmed", "rejected"]);
 const OPEN = new Set(["pending", "unknown"]);
 
+// Lifecycle rank: a terminal verdict beats an open one; among equals, the later update wins. Used to
+// MERGE a record that exists both on disk (written by a peer instance) and in our memory, so a
+// concurrent peer can never clobber a more-advanced record with a staler one.
+function rank(status) {
+  return TERMINAL.has(status) ? 2 : OPEN.has(status) ? 1 : 0;
+}
+function mostAdvanced(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const ra = rank(a.status), rb = rank(b.status);
+  if (ra !== rb) return ra > rb ? a : b;
+  const ua = Date.parse(a.updatedAt || a.createdAt || 0) || 0;
+  const ub = Date.parse(b.updatedAt || b.createdAt || 0) || 0;
+  return ub > ua ? b : a;
+}
+
 /**
  * The journal. Records are held in insertion order and indexed by idempotency key. The whole set is
  * rewritten atomically on every transition (a dashboard's volume is tiny; see docs for when an
@@ -82,14 +152,50 @@ function createTxLog(file = process.env.AGENTPAY_TXLOG_FILE || path.resolve(__di
     }
   }
 
-  function load() {
+  const lockFile = file + ".lock";
+
+  function readArray() {
     const data = readJson(file, null);
-    records = Array.isArray(data) ? data : Array.isArray(data && data.records) ? data.records : [];
+    return Array.isArray(data) ? data : Array.isArray(data && data.records) ? data.records : [];
+  }
+
+  // Fold an on-disk record set into whatever we already hold, keeping the more-advanced record per
+  // key, and re-index. `ours` decides the tie-break seed order (memory first vs disk first).
+  function merge(diskArr, { preferMemory }) {
+    const m = new Map();
+    const first = preferMemory ? records : diskArr;
+    const second = preferMemory ? diskArr : records;
+    for (const r of first) m.set(r.key, r);
+    for (const r of second) m.set(r.key, mostAdvanced(m.get(r.key), r));
+    records = [...m.values()].sort(
+      (a, b) => (a.seq || 0) - (b.seq || 0) || String(a.createdAt).localeCompare(String(b.createdAt)),
+    );
     index();
   }
 
+  function load() {
+    records = readArray();
+    index();
+  }
+
+  /**
+   * Re-read the shared journal from disk and merge it into memory WITHOUT writing. A loser in a
+   * cross-process idempotency race calls this to observe the winner's recorded outcome; it never
+   * discards our own in-memory records (both sides merge by most-advanced).
+   */
+  function reload() {
+    merge(readArray(), { preferMemory: true });
+  }
+
+  // Persist under the cross-process lock, re-reading and MERGING the on-disk set first so a peer
+  // instance that wrote between our load and now is not clobbered. Single-instance: the disk set
+  // equals ours, so the merge is a no-op and the file is written exactly as before. THROWS on a
+  // write failure — intentional (a persistence failure must not be reported as success).
   function persist() {
-    writeJsonAtomic(file, records); // THROWS on failure — intentional
+    withFileLock(lockFile, () => {
+      merge(readArray(), { preferMemory: true });
+      writeJsonAtomic(file, records);
+    });
   }
 
   function get(key) {
@@ -186,6 +292,7 @@ function createTxLog(file = process.env.AGENTPAY_TXLOG_FILE || path.resolve(__di
   return {
     file,
     load,
+    reload,
     get,
     list,
     begin,
@@ -198,4 +305,4 @@ function createTxLog(file = process.env.AGENTPAY_TXLOG_FILE || path.resolve(__di
   };
 }
 
-module.exports = { createTxLog, writeJsonAtomic, readJson };
+module.exports = { createTxLog, writeJsonAtomic, readJson, withFileLock };

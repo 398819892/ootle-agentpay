@@ -21,6 +21,7 @@ const crypto = require("node:crypto");
 const { createAuthorizer, createRateLimiter, TIERS } = require("./authorizer");
 const { createAudit } = require("./audit");
 const { createTxLog, writeJsonAtomic } = require("./txlog");
+const { createClaimStore } = require("./claims");
 const { createApiKeys } = require("./apikeys");
 
 // ---- locate and load the committed TS client (its compiled dist) -----------------------------
@@ -399,6 +400,17 @@ let store = { budget: null, merchants: {}, frozen: false };
 // the chain. See txlog.js.
 const txlog = createTxLog();
 
+// Cross-process idempotency claims (see claims.js). Markers live in a shared directory next to the
+// journal file so that two backend instances sharing one filesystem coordinate on who may submit a
+// given idempotency key — closing the multi-instance double-spend the B-6 harness reproduced. The
+// dir is overridable for containers that mount the journal on a volume.
+const CLAIMS_DIR = process.env.AGENTPAY_CLAIMS_DIR || path.join(path.dirname(txlog.file), "claims");
+const claims = createClaimStore(CLAIMS_DIR);
+// How long a loser in a cross-process race waits for the winner's outcome to land in the shared
+// journal before giving up and reporting `unknown` (never a resubmit). Scaled off the finalize
+// budget so it comfortably covers a slow winner, with a floor and an env override.
+const CLAIM_WAIT_MS = Number(process.env.AGENTPAY_CLAIM_WAIT_MS || Math.max(5000, FINALIZE_TRIES * FINALIZE_DELAY_MS + 2000));
+
 function loadStore() {
   let raw = null;
   try {
@@ -697,24 +709,85 @@ async function reconcileRecord(rec) {
   return rec; // still pending on chain
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const CLAIM_POLL_MS = 25;
+
+/** Replay the outcome of a journal record that already exists, settling it against chain first if
+ *  it is still open. Never resubmits — an unresolved open record is reported as `unknown`. */
+async function replayPrior(prior) {
+  if (prior.status === "confirmed") return { outcome: "confirmed", record: prior, replay: true };
+  if (prior.status === "rejected") throw httpError(422, prior.reason || "Previously rejected.");
+  // pending / unknown — try to settle it before considering a resubmit.
+  const settled = await reconcileRecord(prior);
+  if (settled.status === "confirmed") return { outcome: "confirmed", record: settled, replay: true };
+  if (settled.status === "rejected") throw httpError(422, settled.reason || "Previously rejected.");
+  // Still unresolved on chain: do NOT resubmit (that would double-spend). Report it as unknown.
+  return { outcome: "unknown", record: settled, replay: true };
+}
+
+/**
+ * A different instance holds the claim for this key, so we must NOT submit. Observe the SHARED
+ * journal until the winner's outcome is terminal, then replay it. If it carries a tx id while still
+ * open we may settle it against chain ourselves (read-only, idempotent). If it never resolves within
+ * the wait budget (winner slow, or crashed mid-flight), report `unknown` — the existing startup
+ * reconcile settles it later by its tx id, and we NEVER resubmit (that is the double-spend we block).
+ */
+async function replayForeignClaim(key, claim) {
+  const deadline = Date.now() + CLAIM_WAIT_MS;
+  for (;;) {
+    txlog.reload(); // merge whatever the winner has persisted into our view
+    const rec = txlog.get(key);
+    if (rec) {
+      if (txlog.isTerminal(rec.status)) return await replayPrior(rec);
+      if (rec.txId) {
+        const settled = await reconcileRecord(rec); // read-only get_result; promotes if chain has a verdict
+        if (txlog.isTerminal(settled.status)) return await replayPrior(settled);
+      }
+    }
+    if (Date.now() >= deadline) {
+      const record = rec || {
+        key,
+        op: null,
+        component: null,
+        status: "unknown",
+        txId: null,
+        reason: "claimed by another instance; outcome not yet observed within the wait budget",
+      };
+      return { outcome: "unknown", record, replay: true };
+    }
+    await sleep(CLAIM_POLL_MS);
+  }
+}
+
 /**
  * Run a fund-moving op exactly once per idempotency key, journaling its full lifecycle:
  *   pending (persisted before submit) → confirmed | rejected | unknown.
  * `submitFn` performs the chain call (an OnChainBudget method) and returns the finalized result;
  * it sets `wd.lastTxId` as a side effect. Returns { outcome, record, res, replay }.
+ *
+ * Idempotency is enforced at two layers: an in-process journal (fast, single-instance) AND a
+ * cross-process filesystem claim (claims.js) so that multiple instances sharing one filesystem never
+ * submit the same key twice. See docs/stability.md for the cross-HOST limit that remains.
  */
 async function runChainOp(key, opName, component, params, submitFn) {
+  // Fast path — a record already visible IN THIS PROCESS (a same-process replay, or one recovered
+  // from the journal at startup). This is the single-instance idempotency guarantee, unchanged.
   const prior = txlog.get(key);
-  if (prior) {
-    if (prior.status === "confirmed") return { outcome: "confirmed", record: prior, replay: true };
-    if (prior.status === "rejected") throw httpError(422, prior.reason || "Previously rejected.");
-    // pending / unknown — try to settle it before considering a resubmit.
-    const settled = await reconcileRecord(prior);
-    if (settled.status === "confirmed") return { outcome: "confirmed", record: settled, replay: true };
-    if (settled.status === "rejected") throw httpError(422, settled.reason || "Previously rejected.");
-    // Still unresolved on chain: do NOT resubmit (that would double-spend). Report it as unknown.
-    return { outcome: "unknown", record: settled, replay: true };
+  if (prior) return await replayPrior(prior);
+
+  // No local record yet. Before submitting anything, take the CROSS-PROCESS claim on this key. On a
+  // shared filesystem `fs.open(…,"wx")` lets exactly one instance win; every other instance that
+  // races the same key loses and must NOT submit — otherwise the chain (which has no invoice dedup)
+  // executes the payment twice. This is the multi-instance double-spend the B-6 harness reproduced.
+  let claim;
+  try {
+    claim = claims.tryClaim(key, { op: opName });
+  } catch (e) {
+    // We could not take the claim for a reason other than "already claimed" (e.g. the shared dir is
+    // unwritable). Fail safe: do not submit on an unproven claim.
+    throw httpError(503, "Could not take the idempotency claim (shared store unavailable): " + e.message);
   }
+  if (!claim.won) return await replayForeignClaim(key, claim);
 
   txlog.begin({ key, op: opName, params, component }); // persist pending BEFORE the chain submit (throws on fail)
   // Snapshot the client's last tx id BEFORE we submit. `wd.lastTxId` is sticky — it holds the id of

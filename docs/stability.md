@@ -5,10 +5,14 @@
 > reconciliation, from A-1/A-2/A-3) was put under soak, fault injection, crash recovery, multi-instance
 > concurrency and retry/timeout tests. **Single-instance behaviour is sound:** no state drift, no leak,
 > no double-spend, unconfirmed outcomes are never counted as success, and a crash mid-flight recovers
-> correctly against the chain. **Two findings** came out of it (one fixed, one logged) and **one hard
-> limit** is confirmed: the backend must run as **a single instance per budget/account** until it has a
-> shared idempotency store + distributed lock. The on-chain caps are the real backstop and hold even
-> when the hosted layer races. This is a verification report, not a "ship it" — see the go-live gate.
+> correctly against the chain. The multi-instance suite originally surfaced **two findings** (double-submit
+> of the same idempotency key, and shared-journal clobber). **Both are now fixed for instances that share
+> one filesystem** (the scenario the suite reproduces) via a cross-process filesystem **claim** before
+> submit + a merge-under-lock journal persist — see "Bugs found" and suite 5. **One limit remains:**
+> instances on **different hosts** with separate filesystems still need a real shared store (DB/Redis) +
+> distributed lock; the filesystem claim cannot coordinate across hosts. The on-chain caps are the real
+> backstop and hold even when the hosted layer races. This is a verification report, not a "ship it" —
+> see the go-live gate.
 
 ## How this was tested (and why it is safe)
 
@@ -81,24 +85,48 @@ Within one instance, the same `Idempotency-Key` maps to **at most one on-chain e
 - retry of a chain-rejected key → refused, **not** resubmitted, stays rejected (deterministic);
 - 6 distinct keys → 6 submits (no accidental collapsing).
 
-### 5. Multi-instance concurrency — the hard limit (`multi_instance.js`) ⚠️ findings
-Two backends share one `state.json` + `txlog.json` and one chain, hit concurrently.
+### 5. Multi-instance concurrency — same-host now safe; cross-host limited (`multi_instance.js`) ✅ (one documented limit)
+Two backends share one `state.json` + `txlog.json` + `claims/` dir and one chain, hit concurrently.
 
-- **Holds (on-chain backstop):** two instances racing payments can **never** push on-chain spend past
-  the daily cap (measured: cap 900, 10×300 concurrent pays across both instances → chain accepts exactly
-  3 = 900, rest rejected on-chain). Both instances stay up.
-- **Does NOT hold (hosted layer):** the **same idempotency key sent to both instances concurrently is
-  submitted to chain twice → a double payment of one invoice** (measured: 2 submits, double-spend of
-  1000). Invoice-level idempotency is per-process (in-memory map + whole-file rewrite); the chain has no
-  invoice dedup. Concurrent writers also **clobber the shared journal** (measured: 5 of 10 records
-  survived), because each process rewrites the entire file from its own in-memory copy.
+- **Same key to both instances → exactly ONE submit (FIXED).** Over 10 rounds, a fresh key fired at both
+  instances at once produces **one** chain submit and **one** payment each round (measured: 10 submits for
+  10 rounds, on-chain spend exactly 10×500; the loser **replays the winner's receipt** — both responses
+  confirmed with the **same tx id**). Before the fix this reliably double-submitted. The guarantee is a
+  cross-process **claim** (`web/server/claims.js`): `fs.open(…,"wx")` lets exactly one instance win the key
+  and submit; the loser reads the shared journal and replays.
+- **No shared-journal clobber (FIXED).** 10 distinct keys fired concurrently across both instances →
+  **all 10 records survive** in the shared file (was 5 of 10). The journal persist now re-reads and
+  **merges** the on-disk set under a stale-aware cross-process lock before writing, so a peer's records are
+  never overwritten.
+- **Distinct keys stay independent:** 10 distinct keys → 10 submits (no accidental collapsing).
+- **Holds (on-chain backstop):** two instances racing payments can **never** push on-chain spend past the
+  daily cap (measured: cap 900, 10×300 concurrent pays across both → chain accepts exactly 3 = 900). Both
+  instances stay up across every race.
 
-**Conclusion:** run **one backend instance per budget/account**. Horizontal scaling needs a shared store
-with atomic idempotency (DB / Redis) and a distributed lock — logged below.
+**Conclusion:** multiple instances that **share one filesystem** (same host, shared state dir) are now
+safe — the claim closes the double-spend and the merge closes the clobber. **Cross-HOST** instances with
+separate filesystems are NOT covered (the filesystem claim cannot see another host's claims) and still
+need a real shared store with atomic idempotency (DB / Redis) + a distributed lock — logged below.
 
 ## Bugs found
 
 ### Fixed this round
+- **Multi-instance double-spend of the same idempotency key (the one hard go-live gate).** Idempotency
+  was enforced only *per process* (an in-memory map keyed by the Idempotency-Key). Two instances sharing
+  one journal did not share that map, so the **same key sent concurrently to both was submitted to chain
+  twice** — a double payment the chain cannot dedup. Fixed with a **cross-process claim** taken before the
+  submit: `fs.open(path,"wx")` (atomic exclusive create) in a shared `claims/` dir lets exactly one
+  instance win a key and submit; every other caller loses (`EEXIST`), does **not** submit, and instead
+  replays the winner's outcome from the shared journal — polling while it is still pending, and reporting
+  `unknown` (never a resubmit) if the winner is slow or crashed mid-flight, which the existing A-2 startup
+  reconcile then settles by tx id. Also closed the companion **shared-journal clobber**: the journal
+  persist now re-reads and **merges** the on-disk record set (keeping the most-advanced record per key)
+  under a stale-aware cross-process file lock before the atomic write, so concurrent writers no longer
+  overwrite each other's records. Single-instance behaviour is unchanged (no contention → the merge is a
+  no-op and the fast in-memory idempotency path is taken first). **Scope:** same host / shared filesystem
+  only; cross-host remains known-issue #1. New module `web/server/claims.js`; changes in
+  `web/server/txlog.js` (merge-under-lock persist + `reload`) and `web/server/server.js` (`runChainOp`).
+  Proven by the rewritten `scripts/stability/multi_instance.js` (9/9).
 - **Stale tx id attributed to a non-submitting op.** `runChainOp` set a failed op's journal `txId` from
   the shared client's sticky `wd.lastTxId`, so an op that failed **before submitting** (a client-side
   precheck rejection, or a pre-submit fault) inherited the **previous** op's tx id — a misleading
@@ -110,13 +138,20 @@ with atomic idempotency (DB / Redis) and a distributed lock — logged below.
 
 ## Known issues / limitations (not fixed this round)
 
-1. **No horizontal scaling (single-instance only).** *(architectural — highest priority before multi-node)*
-   The journal is a single JSON file rewritten atomically per op, with an in-memory idempotency map
-   loaded once at boot. Safe and correct for **one** instance; with two instances, duplicate-key requests
-   double-submit and concurrent writes clobber the file (see suite 5). **Recommendation:** a shared
-   transactional store (Postgres/SQLite-WAL/Redis) with a unique constraint on the idempotency key and a
-   per-budget advisory/distributed lock before submit. Until then, deploy one instance per account and
-   document it as an operational constraint.
+1. **Cross-HOST horizontal scaling still needs a shared store.** *(architectural — the remaining multi-node gap)*
+   *Same-host* multi-instance is now safe: a cross-process filesystem claim (`claims/`) makes duplicate-key
+   requests submit exactly once, and a merge-under-lock journal persist stops concurrent writers clobbering
+   the file (see suite 5, now 9/9). **What this does NOT cover:** instances on **different hosts** with
+   **separate filesystems**. `fs.open(…,"wx")` and a lockfile only coordinate processes that can see the
+   same directory; two hosts each have their own `claims/` and their own journal, so the same key could win
+   on both and double-submit. For true multi-host scale-out, move the journal + claim to a shared
+   transactional store (Postgres/SQLite-WAL/Redis) with a **unique constraint on the idempotency key** and a
+   **per-budget distributed lock** before submit; the claim/replay logic in `runChainOp` is the seam to swap
+   the backing store behind. Until then: either keep all instances on one shared filesystem (now supported),
+   or run one instance per budget/account across hosts, as an operational constraint.
+   *(Also note: the claim dir accumulates one small marker per key, like the journal; a compaction/rotation
+   pass — dropping markers whose journal record is already terminal — is a low-priority follow-up, same as
+   issue #4 for the journal.)*
 
 2. **Pre-submit infrastructure failure is journaled as terminal `rejected`.** *(correctness, medium)*
    When walletd is unreachable, the pay never reaches the chain but is recorded as `rejected` (a terminal
@@ -152,16 +187,25 @@ with atomic idempotency (DB / Redis) and a distributed lock — logged below.
 - [x] Crash mid-flight → startup reconcile settles against chain with **no double-spend, no lost record**.
 - [x] Idempotency: same key under retry/timeout/concurrency → **one** on-chain effect; rejected keys not resubmitted.
 - [x] On-chain caps hold under concurrency (the backstop).
-- [ ] **Single-instance deployment enforced** (process manager runs exactly one backend per budget/account),
-      **or** known-issue #1 resolved (shared store + distributed lock) and the multi-instance suite extended
-      to prove cross-instance idempotency. **← the one thing standing between here and multi-node.**
+- [x] **Same-host multi-instance idempotency enforced** — same key across instances submits once, no
+      shared-journal clobber (cross-process claim + merge-under-lock persist; multi-instance suite extended
+      to prove it, 9/9). *Was the one hard gate; now closed for shared-filesystem deployments.*
+- [ ] **Cross-HOST** multi-instance (separate filesystems) needs a shared store + distributed lock
+      (known-issue #1). Until then, either keep all instances on **one shared filesystem** (now supported)
+      or run **one instance per budget/account** per host. **← the remaining gap before multi-host scale-out.**
 
 **Should-fix before go-live (not blocking a single-instance pilot):**
 - [ ] Known-issue #2: transport/pre-submit failures become retryable, not terminal `rejected`.
 - [ ] Rate limits sized for the expected agent throughput and load-tested at that rate.
 - [ ] Backup/restore runbook for `state.json` + `txlog.json` (atomic snapshot; restore → run `POST /api/reconcile` to re-settle against chain). Reconcile is idempotent and chain-authoritative, so a restored-stale journal self-heals; this should be drilled, not assumed.
 
-**Operational guardrails for a single-instance pilot:**
-- One instance per budget/account; a process manager that restarts on crash (reconcile runs on boot).
+**Operational guardrails for a pilot:**
+- Instances may now share one host / filesystem safely (cross-process claim + merge persist); across
+  separate hosts, still one instance per budget/account until known-issue #1 (shared store) is done. A
+  process manager that restarts on crash (reconcile runs on boot) either way.
+- The shared `claims/` dir must live on the **same filesystem** as the journal (it defaults next to it;
+  override both consistently via `AGENTPAY_TXLOG_FILE` / `AGENTPAY_CLAIMS_DIR`). A claim marker left by a
+  crashed instance with no resolved outcome surfaces as an `unknown`/needs-attention record, never an
+  auto-resubmit.
 - Alert on `txlog.summary().needsAttention` (unknown txs / open-without-tx-id) — these need an operator.
 - Keep walletd reachable; a sustained outage currently poisons in-flight keys (known-issue #2).
