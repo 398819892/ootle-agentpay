@@ -29,6 +29,17 @@ def _pay_event(merchant: str, amount: int, memo: str, spent: int) -> dict:
             "result2": {"Accept": {"receipt": {"events": [ev]}}}}  # second copy, different path
 
 
+def _component_substate(owner_badge: str, agent_badge: str) -> dict:
+    """A minimal AgentBudget component substate shaped like walletd's `substates.get`, with the two
+    badge ResourceAddresses in struct order (owner, agent) as CBOR tag-131 entries."""
+    def res(addr: str) -> dict:
+        return {"@cbor": "tag", "tag": 131, "value": {"@cbor": "bytes", "hex": addr.split("_", 1)[1]}}
+    vault = {"@cbor": "tag", "tag": 132, "value": {"@cbor": "bytes", "hex": "ab" * 32}}
+    return {"substate_from_remote": {"substate": {"Component": {"body": {"state": [
+        vault, res(owner_badge), res(agent_badge), 1000, 3000, 0, 1, 48, [], False, [],
+    ]}}}}}
+
+
 class FakeWalletd(WalletdClient):
     """Records manifests; returns canned results instead of talking to a daemon."""
 
@@ -36,6 +47,7 @@ class FakeWalletd(WalletdClient):
         super().__init__("http://fake")
         self.runs: list[tuple[str, dict]] = []
         self.next_result: dict = {"result": {"Accept": {}}}
+        self.substate: dict = {}
 
     def connect(self):  # no network
         self._token = "fake"
@@ -44,6 +56,9 @@ class FakeWalletd(WalletdClient):
     def run(self, manifest, variables, max_fee=200_000):
         self.runs.append((manifest, variables))
         return self.next_result
+
+    def get_substate(self, substate_id):  # canned component state for open()'s badge resolution
+        return self.substate
 
     def dry_run(self, manifest, variables, max_fee=200_000):
         self.runs.append((manifest, variables))
@@ -128,6 +143,35 @@ def test_pay_events_extracts_and_dedupes():
 def test_pay_events_empty_on_unrelated_result():
     assert OnChainBudget.pay_events({"result": {"Accept": {"events": [
         {"topic": "pay_fee", "payload": {"amount": 100}}]}}}) == []
+
+
+# -- open() resolves badges from component state, not address sort order --------------
+
+def test_open_resolves_badges_from_state_not_sort():
+    """Regression guard for the on-chain "Proof of resource did not match" bug: open() must read
+    which badge is owner vs agent from the component's struct state, never from sorted address order.
+    Here the AGENT badge sorts BEFORE the owner badge, so a sort-based guess would swap them and
+    `pay` would prove the wrong resource (rejected on chain)."""
+    owner_badge = "resource_" + "f" * 64   # sorts AFTER the agent badge
+    agent_badge = "resource_" + "a" * 64   # sorts FIRST
+    new_comp = "component_" + "c" * 64
+    assert sorted([owner_badge, agent_badge]) == [agent_badge, owner_badge]  # sort would mislead
+
+    b = OnChainBudget(FakeWalletd().connect(), TPL, OWNER)
+    # The open() run result only needs to surface a new component + two badge resources for the
+    # existence guard; the owner/agent *mapping* comes from the component state below.
+    b.client.next_result = {"result": {"Accept": {
+        "component": new_comp, "owner_badge": owner_badge, "agent_badge": agent_badge}}}
+    b.client.substate = _component_substate(owner_badge, agent_badge)
+
+    b.open(fund=5000, per_tx_cap=1000, daily_cap=3000, epochs_per_window=48, whitelist=[SHOP])
+
+    assert b.component == new_comp
+    assert b.owner_badge == owner_badge        # struct order, not sort order
+    assert b.agent_badge == agent_badge
+    # and the pay proof must target the real agent badge (what the template asserts)
+    manifest = b._pay_manifest(SHOP, 100, "m")
+    assert f'create_proof_for_resource(address!("{agent_badge}"))' in manifest
 
 
 # -- would_reject surfaces the validator's reason -------------------------------------

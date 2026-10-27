@@ -46,6 +46,10 @@ test-web: ## node security test suite for the dashboard (zero deps, no walletd)
 test-ts: ## tsc type-check build of the clients/ts client
 	cd clients/ts && npm install --no-audit --no-fund && npm run build
 
+.PHONY: e2e
+e2e: ## Real on-chain e2e: open a budget + make a CONFIRMED payment vs a local swarm (needs WALLETD_URL)
+	RUN_E2E=1 WALLETD_URL=$(WALLETD_URL) $(PYTHON) scripts/e2e_onchain_pay.py
+
 # ---------------------------------------------------------------- stability / reliability (B-6)
 # Drives the UNMODIFIED dashboard backend against a controllable MOCK walletd (scripts/stability/),
 # so faults (walletd down / timeout / unknown verdict), crash recovery and concurrency are exercised

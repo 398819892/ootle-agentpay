@@ -256,10 +256,9 @@ A self-contained harness (`node` driving the real server against isolated state 
 the stored outcome; ③ a restart reconciles an `unknown` record to its chain verdict and rebuilds the
 ledger from chain; ④ a zero-window submit is recorded `unknown` (never success); plus a fresh
 `createBudget` whose treasury equals the freshly-funded chain vault, and the atomic/throwing-persist
-unit checks. (On this restarted swarm the on-chain `pay`/owner methods reject due to a pre-existing
-template-version drift — unrelated to this change — so the money-op evidence uses real submitted
-transactions that finalize as *reject*; a reject is a real finalized tx and exercises the full
-lifecycle identically to an accept, which the fresh-budget case demonstrates.)
+unit checks. (A real on-chain `pay` now finalizes as *accept* end-to-end on the current template —
+see `scripts/e2e_onchain_pay.py` / `docs/api.md`; a *reject* is still a real finalized tx that
+exercises the same lifecycle, used here for the deliberately-rejected cases.)
 
 ### 4.6 Still missing here (noted, not done)
 

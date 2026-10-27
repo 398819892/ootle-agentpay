@@ -104,6 +104,22 @@ function findComponentState(node: any): any[] | null {
   return null;
 }
 
+// Addresses in a component's state are CBOR-tagged: tag 131 = ResourceAddress, 132 = VaultId,
+// 128 = ComponentAddress. The AgentBudget struct lays its two ResourceAddress fields out in order
+// (owner_badge, agent_badge), so the two tag-131 entries are, in order, owner then agent.
+const CBOR_TAG_RESOURCE = 131;
+
+/** ResourceAddresses (CBOR tag 131) in a state array, in struct order: [ownerBadge, agentBadge]. */
+function taggedResources(state: any[]): string[] {
+  const out: string[] = [];
+  for (const x of state) {
+    if (x && typeof x === "object" && x.tag === CBOR_TAG_RESOURCE && typeof x.value?.hex === "string") {
+      out.push("resource_" + x.value.hex);
+    }
+  }
+  return out;
+}
+
 /** Yield every event-shaped object (has a `payload`) anywhere in a result tree. */
 function* iterEvents(result: any): Generator<any> {
   if (result && typeof result === "object" && !Array.isArray(result)) {
@@ -180,13 +196,26 @@ export class OnChainBudget {
       throw new ChainError("could not locate the new budget component / badges in the result");
     }
     this.component = comps[0];
-    // owner badge minted first, agent badge second; sort is stable but not creation order,
-    // so for devnet (one account holds both) either proof authorizes. Record both.
-    [this.ownerBadge, this.agentBadge] = [badges[0], badges[1]];
+    // Resolve which badge is which from the component's on-chain state, NOT from address sort order.
+    // The owner and agent badges are two distinct non-fungible resources; `pay` asserts the *agent*
+    // badge resource specifically, so proving the wrong one is rejected on chain ("Proof of resource
+    // did not match"). The struct lays them out as (owner_badge, agent_badge).
+    [this.ownerBadge, this.agentBadge] = await this.readBadges();
     this.perTxCap = amt(perTxCap);
     this.dailyCap = amt(dailyCap);
     this.whitelist = [...whitelist];
     return this;
+  }
+
+  /** Read `[ownerBadge, agentBadge]` authoritatively from the component's on-chain state. */
+  private async readBadges(): Promise<[string, string]> {
+    const state = findComponentState(await this.client.getSubstate(this.component!));
+    if (!state) throw new ChainError("could not read the budget component state to resolve badges");
+    const resources = taggedResources(state);
+    if (resources.length < 2) {
+      throw new ChainError("budget component state did not expose the owner and agent badges");
+    }
+    return [resources[0], resources[1]]; // struct order: owner_badge, agent_badge
   }
 
   async revoke(): Promise<void> {

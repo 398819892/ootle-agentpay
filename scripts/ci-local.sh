@@ -194,6 +194,34 @@ run_ts() {
   fi
 }
 
+# ================================================================ e2e (real chain)
+# Integration suite: drives the real SDK against a running swarm and asserts a CONFIRMED payment
+# moved funds. It is the guard against "unit tests green but a real pay is rejected on chain".
+# Gated: only runs with RUN_E2E=1 AND a reachable walletd. Otherwise SKIP (never FAIL) — so the
+# swarm-free GitHub runner stays honest instead of fake-green. Exit 3 from the script = unreachable.
+run_e2e() {
+  step "Real on-chain e2e — confirmed payment (integration; needs a local swarm)"
+  local script="$REPO_ROOT/scripts/e2e_onchain_pay.py"
+  if [ -z "${RUN_E2E:-}" ]; then
+    record "e2e (real chain)" SKIP "" "set RUN_E2E=1 to run (needs a local swarm)"
+    return
+  fi
+  if [ ! -f "$script" ]; then record "e2e (real chain)" FAIL "" "missing $script"; return; fi
+  if ! command -v "$PYTHON" >/dev/null 2>&1; then record "e2e (real chain)" FAIL "" "$PYTHON not found"; return; fi
+  local log="$LOGDIR/e2e.log"
+  "$PYTHON" "$script" >"$log" 2>&1
+  local rc=$?
+  if [ $rc -eq 0 ]; then
+    record "e2e (real chain)" PASS "1" "confirmed payment verified on chain"
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
+  elif [ $rc -eq 3 ]; then
+    record "e2e (real chain)" SKIP "" "walletd unreachable (RUN_E2E set but no swarm)"
+  else
+    record "e2e (real chain)" FAIL "" "on-chain payment NOT confirmed — see tail below"
+    tail -n 25 "$log" | sed 's/^/        /'
+  fi
+}
+
 # ================================================================ main
 printf '%s╔══════════════════════════════════════════════════════╗%s\n' "$BOLD" "$RST"
 printf '%s║  Local CI — Ootle AgentPay / OTC Escrow                ║%s\n' "$BOLD" "$RST"
@@ -205,6 +233,7 @@ info "warm dir:  $TEMPLATE_BUILD_DIR"
 [ -n "${SKIP_SDK:-}" ]       || run_sdk
 [ -n "${SKIP_WEB:-}" ]       || run_web
 [ -n "${SKIP_TS:-}" ]        || run_ts
+[ -n "${SKIP_E2E:-}" ]       || run_e2e
 
 # ---------------------------------------------------------------- summary
 green=0; total=0; failed=0

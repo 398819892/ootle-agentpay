@@ -44,6 +44,8 @@ export declare class OnChainBudget {
         epochsPerWindow: number;
         whitelist: string[];
     }): Promise<this>;
+    /** Read `[ownerBadge, agentBadge]` authoritatively from the component's on-chain state. */
+    private readBadges;
     revoke(): Promise<void>;
     withdraw(amount: AmountInput): Promise<void>;
     addMerchant(merchant: string): Promise<void>;

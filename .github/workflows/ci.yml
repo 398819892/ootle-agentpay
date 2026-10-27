@@ -16,6 +16,10 @@
 # Why Linux only: the Tari engine's template test tooling pins wasmer's cranelift backend,
 # which does not compile on Windows/macOS (see docs/devnet.md). Upstream tari-project CI is
 # ubuntu-only for the same reason.
+#
+# NOT run here: the real on-chain e2e (scripts/e2e_onchain_pay.py, `make e2e`). It needs a live
+# Tari swarm to make a CONFIRMED payment, which a GitHub runner has not got, so it is an opt-in
+# integration test (RUN_E2E=1) that the swarm-free CI skips rather than fakes. See docs/ci.md.
 
 name: CI
 

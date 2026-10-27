@@ -90,6 +90,13 @@ class WalletdClient:
                 return int(b["balance"])
         return 0
 
+    def get_substate(self, substate_id: str) -> dict:
+        """Fetch a substate (component / resource / vault) by its address. Read-only."""
+        r = self._rpc("substates.get", {"substate_id": substate_id})
+        if "error" in r:
+            raise ChainError(r["error"].get("message", "substates.get failed"))
+        return r["result"]
+
     # -- transactions ---------------------------------------------------------------
     def _submit_manifest(self, manifest: str, variables: dict[str, str], max_fee: int,
                          dry_run: bool) -> dict:
@@ -205,9 +212,50 @@ def _components(blob: str, exclude: set[str]) -> list[str]:
 
 def _badge_resources(blob: str) -> list[str]:
     # non-fungible badge resources minted by the template (exclude the native XTR resource 0101..
-    # and the zero template address resource 0000..)
+    # and the zero template address resource 0000..). Used only to sanity-check that `new` minted
+    # two badges; the owner/agent *mapping* is read authoritatively from component state, never from
+    # address sort order (see `_read_badges`).
     return sorted(x for x in set(re.findall(r"resource_[0-9a-f]{64}", blob))
                   if not x.startswith("resource_0101") and not x.startswith("resource_0000"))
+
+
+# The AgentBudget component's state is a positional array matching its struct fields, in order:
+#   (vault, owner_badge, agent_badge, per_tx_cap, daily_cap, spent_in_window, window_start_epoch,
+#    epochs_per_window, merchant_whitelist, revoked, revoked_sessions, escrow_* …).
+# Addresses are CBOR-tagged objects: tag 131 = ResourceAddress, 132 = VaultId, 128 = ComponentAddress.
+# So the two tag-131 entries are, in order, the owner badge then the agent badge.
+_CBOR_TAG_RESOURCE = 131
+
+
+def _find_component_state(node: Any) -> list | None:
+    """Find the AgentBudget component's positional state array anywhere in a substates.get result."""
+    if isinstance(node, dict):
+        comp = node.get("Component")
+        if isinstance(comp, dict):
+            body = comp.get("body")
+            if isinstance(body, dict) and isinstance(body.get("state"), list):
+                return body["state"]
+        for v in node.values():
+            r = _find_component_state(v)
+            if r is not None:
+                return r
+    elif isinstance(node, list):
+        for v in node:
+            r = _find_component_state(v)
+            if r is not None:
+                return r
+    return None
+
+
+def _tagged_resources(state: list) -> list[str]:
+    """ResourceAddresses (CBOR tag 131) in the state array, in struct order: [owner_badge, agent_badge]."""
+    out: list[str] = []
+    for x in state:
+        if isinstance(x, dict) and x.get("tag") == _CBOR_TAG_RESOURCE:
+            hexv = (x.get("value") or {}).get("hex")
+            if isinstance(hexv, str):
+                out.append("resource_" + hexv)
+    return out
 
 
 @dataclass
@@ -272,11 +320,23 @@ class OnChainBudget:
         if not comps or len(badges) < 2:
             raise ChainError("could not locate the new budget component / badges in the result")
         self.component = comps[0]
-        # owner badge minted first, agent badge second; sorted() is stable but not creation order,
-        # so for devnet (one account holds both) either proof authorizes. Record both.
-        self.owner_badge, self.agent_badge = badges[0], badges[1]
+        # Resolve which badge is which from the component's on-chain state, NOT from address sort
+        # order. The owner and agent badges are two distinct non-fungible resources; `pay` asserts
+        # the *agent* badge resource specifically, so proving the wrong one is rejected on chain
+        # ("Proof of resource did not match"). The struct lays them out as (owner_badge, agent_badge).
+        self.owner_badge, self.agent_badge = self._read_badges()
         self.per_tx_cap, self.daily_cap, self.whitelist = per_tx_cap, daily_cap, list(whitelist)
         return self
+
+    def _read_badges(self) -> tuple[str, str]:
+        """Read `(owner_badge, agent_badge)` authoritatively from the component's on-chain state."""
+        state = _find_component_state(self.client.get_substate(self.component))
+        if not state:
+            raise ChainError("could not read the budget component state to resolve badges")
+        resources = _tagged_resources(state)
+        if len(resources) < 2:
+            raise ChainError("budget component state did not expose the owner and agent badges")
+        return resources[0], resources[1]  # struct order: owner_badge, agent_badge
 
     def revoke(self) -> None:
         self._owner_call("revoke()")

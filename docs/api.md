@@ -231,11 +231,17 @@ chain's as truth.
   stop payments to an address, `revoke` the agent or open a new budget. (Tracked for the template.)
 - **No cap change in place.** Changing `perTxCap`/`dailyCap` means opening a new budget; there is no
   update-caps endpoint because the template has no such method.
-- **Testnet template drift.** On the long-running local swarm the deployed template is older than the
-  client's `pay` manifest, so `pay` finalizes as *Reject* (`"Function 'pay' expected 4 arguments, but
-  got 5"`). The API handles this exactly as designed — a `rejected` receipt with that `reason` — and
-  the same code path returns `confirmed` against a matching template. (`createBudget` accepts on the
-  swarm, so the confirmed lifecycle is exercised end-to-end there.)
+- **Keep the client and the deployed template in step.** `pay` is driven by a transaction manifest,
+  so the client (SDK / TS / web) must match the AgentBudget template deployed on the swarm. A real
+  confirmed payment on the current multi-session template **is** exercised end-to-end — `POST
+  /api/v1/payments` returns a `201 confirmed` receipt and the funds move on chain — and the
+  `scripts/e2e_onchain_pay.py` integration test (run with `make e2e` against a local swarm) asserts
+  exactly that, so a client/template mismatch shows up as a red test rather than a silent reject.
+  (Earlier builds hit two such mismatches, both now fixed: a `pay` arg-count change, and the
+  multi-session agent badge where the client proved the wrong badge resource — "Proof of resource
+  did not match". The badge the template authorizes is now read from the component's on-chain state,
+  never guessed from address sort order.) If `pay` ever finalizes as *Reject*, the API still handles
+  it as designed: a `rejected` receipt carrying the chain's own reason.
 
 ## Out of scope (TODO)
 

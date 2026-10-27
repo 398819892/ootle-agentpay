@@ -20,13 +20,19 @@ wasmer's cranelift backend, which does not build on Windows or macOS (see
 | `templates/escrow` | `cargo test` | Escrow lock/release/refund/dispute/resolve + fee, adversarial/boundary cases | **17** |
 | `templates/agent_budget` | `cargo test` | AgentBudget per-tx / daily caps, whitelist, revoke, multi-session badges, top-up, set-window | **14** |
 | `templates/otc_board` | `cargo test` | OTC list→take→confirm, arbiter stake/slash, the unstake-during-dispute guard | **18** |
-| `sdk` | `pytest` | Business logic + the stdlib JSON-RPC adapter (`agentpay.onchain`): policy, invoices, manifests, event decoding | **~46** |
+| `sdk` | `pytest` | Business logic + the stdlib JSON-RPC adapter (`agentpay.onchain`): policy, invoices, manifests, event decoding, badge resolution from component state | **~47** |
 | `web` | `node server/security.test.js` | The dashboard's web-security boundary end-to-end (auth, CSRF, CORS, headers, session, IP lockout) | **22** |
 | `clients/ts` | `tsc` build | A clean type-checked compile of the zero-dependency TS client (it has no unit tests) | build |
+| `e2e (real chain)` | `make e2e` / `RUN_E2E=1` | **Integration, opt-in:** opens a budget and makes a *confirmed* payment against a **live swarm**, asserting funds moved (vault down, merchant up). Guards "unit-green but real pay rejected". | 1 |
 
 Template unit tests run the compiled template **in wasmer in-process** — no chain, no swarm. The web
-suite boots a **throwaway** server on a random port against temp state — no walletd. So **no suite
-touches a running swarm**; the local script is safe to run while a devnet is up.
+suite boots a **throwaway** server on a random port against temp state — no walletd. So **none of the
+default suites touches a running swarm**; the local script is safe to run while a devnet is up.
+
+The `e2e (real chain)` suite is the one exception and is therefore **gated**: `ci-local.sh` runs it
+only with `RUN_E2E=1` **and** a reachable walletd, and otherwise marks it SKIP (never FAIL). The
+GitHub workflow never sets `RUN_E2E`, so the swarm-free runner skips it rather than faking a pass —
+run it locally (`make e2e`) against your devnet to exercise the real confirmed-payment path.
 
 ---
 

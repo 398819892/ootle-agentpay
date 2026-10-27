@@ -594,7 +594,7 @@ async function readChainBudget(component) {
   const [sub, currentEpoch] = await Promise.all([c.getSubstate(component), c.currentEpoch()]);
   const state = findComponentState(sub);
   if (!state) throw new Error("could not read the budget component state");
-  // Layout (see docs/custody.md §state-model): [vault, agentBadgeRes, ownerBadgeRes,
+  // Layout (struct order, see docs/custody.md §state-model): [vault, ownerBadgeRes, agentBadgeRes,
   //   perTxCap, dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow, [whitelist…], revoked, …]
   const nums = state.filter((x) => typeof x === "number");
   if (nums.length < 5) throw new Error("unexpected budget component layout");
