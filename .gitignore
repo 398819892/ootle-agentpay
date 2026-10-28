@@ -54,3 +54,8 @@ Thumbs.db
 *.zip
 *.rar
 新建文件夹/
+
+# Review / working documents — keep local, not in the (possibly public) repo
+*.docx
+*.doc
+*.pdf
