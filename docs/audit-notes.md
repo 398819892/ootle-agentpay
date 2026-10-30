@@ -343,16 +343,52 @@ matches just before a trailing `\n`, so `"component_<64hex>\n"` passed. Not expl
 literal stays closed), but a gap in the hardening layer. **Fix:** switched to `re.fullmatch`.
 **Test:** the trailing-newline case added to `test_pay_manifest_rejects_non_hex_merchant`.
 
-### Still open (disclosed, not fixed this round)
-- #4 back-half: `revoke` does not retroactively close escrows already opened by a leaked agent key
-  (architectural — a revoked key still releases until timeout). #5: AgentBudget fixed-window lets a
-  boundary spend ~2× the daily cap (documented, set caps at half). #8: `agentAccount` defaults to
-  `ownerAccount` in the reference web deployment (on-chain caps only bind agents that hold their own
-  keys in their own environment). Minor: listing bond is never actually slashed; owner-decided
-  `slash_arbiter` is a conflict of interest; listings grow unbounded in one component; `amount *
-  fee_bps` could overflow a 64-bit `Amount` at 18-decimal precision (use checked math).
+### Fee-multiplication overflow (escrow + otc_board) — fixed
+**Was:** `amount * fee_bps / 10000` multiplies first; on a large (e.g. 18-decimal) resource
+`amount * fee_bps` can exceed `i64::MAX` and overflow, even though the fee itself (≤ amount) never
+does. **Fix:** a shared overflow-safe `fee_on(amount, fee_bps)` computes it as `q*fee_bps +
+r*fee_bps/10000` with `q = amount/10000`, `r = amount - q*10000` (r < 10000) — each term stays
+bounded and the result is identical to the naive expression. Used by escrow `release`/`resolve` and
+otc_board `confirm`/`resolve`. **Test:** `fee_floors_on_indivisible_amount` (1234 @ 5% → 61) plus the
+existing fee-bearing settlement tests, which now exercise the split.
+
+## Known limitations & mitigations (disclosed, by design — not code bugs)
+
+These are architectural trade-offs, not fixable by a localised patch. They are disclosed here and in
+the relevant module docs; the mitigations are the honest answer rather than bolting on risky
+half-fixes.
+
+- **#5 — AgentBudget is a fixed window, not sliding.** The daily cap can bind ~2× across a window
+  boundary (full cap in the last epoch, full cap again in the first epoch of the next). A true sliding
+  window would need an on-chain timestamped spend history. **Mitigation (now in the module docs):**
+  set `daily_cap` to half the real ceiling and/or a tight `per_tx_cap`; treat `daily_cap` as a rate
+  guard — the hard rails that never over-spend are `per_tx_cap` (per payment) and `revoke` (freeze).
+- **#8 — custodial reference deployment.** The web server signs with one walletd account, so it holds
+  the owner and agent badges together; on-chain caps then only bind agents that come *through the
+  API*, not the server operator. The chain-enforced limits deliver their full value only when the
+  agent holds its **own** key in its own environment (non-custodial). This is inherent to the
+  custodial reference server (see `docs/custody.md`), not a config toggle.
+- **#4 back-half — revoke doesn't retroactively close open escrows.** `revoke` freezes the budget's
+  `pay`/`pay_via_escrow`, but an escrow a leaked agent key *already opened* still releases to the
+  payee (or refunds to the fixed `payer_account` after timeout) — the escrow has no link back to the
+  budget's revocation flag. Mitigation: keep `timeout_epochs` short for agent-opened escrows so a
+  leaked key's window is bounded; the refund destination is always the owner's account.
+- **OTC listing bond is never slashed.** The bond round-trips to the seller on every terminal path;
+  it deters spam (skin-in-the-game) but is not a penalty fund. Slashing it on an adverse resolve was
+  considered and rejected: "adverse" has no crisp on-chain definition and auto-slashing would deter
+  legitimate sellers from accepting disputes. The arbiter *stake* (slashable, incl. on timeout) is
+  the penalty mechanism.
+- **OTC `slash_arbiter` is owner-discretion → conflict of interest.** The owner decides, and the
+  slashed stake goes to the owner's treasury, so an owner could grief an honest arbiter. Mitigation:
+  the objective, non-discretionary `claim_dispute_timeout` auto-slash (this round's A) is the primary
+  deterrent; owner-discretion slash is a backstop whose abuse is bounded by the owner being the
+  reputationally-exposed platform operator. A future hardening could burn the owner-slashed stake
+  instead of banking it.
+- **OTC listings grow unbounded in one component.** All listings live in one `HashMap` in one
+  component, and `unstake_arbiter` scans them. Fees/latency grow with history. The clean fix is one
+  component per listing (a larger refactor), tracked for later.
 
 ### cargo test (WSL, all green)
-escrow **26** (authz 4, conservation 4, edge 4, test 14) · otc_board **41** (authz 19, conservation 4,
-test 18) · agent_budget **25** (conservation 3, escrow_integration 8, test 14). Total **92**.
-_(Counts refreshed after the WSL run below; otc_board +3 for this round's A/C regression tests.)_
+escrow **26** (authz 4, conservation 4, edge 4, test 14) · otc_board **42** (authz 19, conservation 4,
+test 19) · agent_budget **25** (conservation 3, escrow_integration 8, test 14). Total **93**.
+_(otc_board +1 this step for `fee_floors_on_indivisible_amount`; earlier +3 for the A/C regression tests.)_

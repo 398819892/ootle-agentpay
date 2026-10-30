@@ -65,6 +65,17 @@ use tari_template_lib::prelude::*;
 /// fund-safety bug — see `docs/audit-notes.md`).
 const MAX_FEE_BPS: u64 = 1000;
 
+/// `amount * fee_bps / 10000`, computed as a split so no intermediate overflows a 64-bit `Amount` on
+/// a large (e.g. 18-decimal) resource: `amount * fee_bps` can exceed `i64::MAX` even though the fee
+/// itself (≤ amount) never does. With `q = amount / 10000` and `r = amount - q*10000` (r < 10000),
+/// `fee = q*fee_bps + r*fee_bps/10000`; each term stays bounded and the result equals the naive
+/// expression. See `docs/audit-notes.md`.
+fn fee_on(amount: Amount, fee_bps: u64) -> Amount {
+    let q = amount / 10000;
+    let r = amount - q * 10000;
+    q * fee_bps + r * fee_bps / 10000
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 pub enum ListingState {
     #[n(0)]
@@ -372,7 +383,7 @@ mod otc_board {
             let buyer_account = listing.buyer_account.expect("no buyer");
             let seller_account = listing.seller_account;
             let total = listing.asset.balance();
-            let fee = total * fee_bps / 10000;
+            let fee = fee_on(total, fee_bps);
             let to_buyer = total - fee;
 
             if !fee.is_zero() {
@@ -498,7 +509,7 @@ mod otc_board {
             assert!(to_buyer_amount >= amount![0], "amount cannot be negative");
             assert!(to_buyer_amount <= total, "amount exceeds the escrowed asset");
 
-            let fee = to_buyer_amount * fee_bps / 10000;
+            let fee = fee_on(to_buyer_amount, fee_bps);
             let buyer_net = to_buyer_amount - fee;
             let seller_amount = total - to_buyer_amount;
             let buyer_account = listing.buyer_account.expect("no buyer");

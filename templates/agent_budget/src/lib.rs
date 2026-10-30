@@ -24,6 +24,17 @@
 //! **Time = epochs.** "Daily" is a rolling window of `epochs_per_window` epochs (≈30 min each), since
 //! the Ootle has no wall-clock time. The window resets lazily on the first `pay` after it elapses.
 //!
+//! **⚠ Fixed window, not a sliding one — the cap binds ~2× across a boundary.** `daily_cap` limits
+//! spend *within* each fixed `epochs_per_window` window, not over any trailing window. An agent can
+//! spend the full cap in the last epoch of one window and the full cap again in the first epoch of the
+//! next — up to ~2× the cap within a short real-time span straddling the boundary. This is deliberate:
+//! a true sliding window would need the chain to store a timestamped spend history and bound fees by
+//! it, which the fixed-window counter avoids. If an absolute ceiling over any ~24h span matters, set
+//! `daily_cap` to **half** the real limit (so 2× the cap is the real limit), and/or set a tight
+//! `per_tx_cap`. The hard safety rails that never over-spend are `per_tx_cap` (every single payment)
+//! and `revoke` (instant freeze); treat `daily_cap` as a rate guard, not a hard cumulative ceiling.
+//! See `docs/audit-notes.md` (#5).
+//!
 //! **Many agents / sessions.** All agent badges are non-fungible tokens of one agent-badge *resource*
 //! (so `pay` only ever honours that resource). `new` mints a first badge (the `"default"` session, so
 //! the one-badge flow is unchanged); the owner can `issue_agent_badge` more — one per agent or session

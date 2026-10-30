@@ -171,6 +171,34 @@ fn list_take_confirm_pays_buyer_minus_fee() {
     assert_eq!(bal(&mut ctx.test, &seller), seller_before + amount![100]); // bond returned
 }
 
+/// Fee math (reviewer: `amount * fee_bps` overflow pass): the overflow-safe split computes the SAME
+/// truncated fee as the naive expression on an indivisible amount. 1234 @ 5% = 61.7 → floors to 61,
+/// so the buyer gets 1173 and the treasury 61 (bond returns to the seller).
+#[test]
+fn fee_floors_on_indivisible_amount() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = empty(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+    let buyer = empty(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 500);
+    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1234], amount![100], 10);
+    take(&mut ctx, &board, &buyer, id);
+
+    let buyer_before = bal(&mut ctx.test, &buyer);
+    let treasury_before = bal(&mut ctx.test, &treasury);
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .call_method(board.component, "confirm", args![id, None::<Vec<u8>>])
+            .build_and_seal(&seller.key),
+        vec![seller.owner_token.clone()],
+    );
+    assert_eq!(bal(&mut ctx.test, &buyer), buyer_before + amount![1173]);     // 1234 - 61
+    assert_eq!(bal(&mut ctx.test, &treasury), treasury_before + amount![61]); // floor(1234*500/10000)
+}
+
 #[test]
 fn confirm_by_preimage_holder() {
     let mut ctx = setup();

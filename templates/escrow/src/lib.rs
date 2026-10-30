@@ -365,8 +365,16 @@ mod escrow {
         }
 
         /// fee = amount * fee_bps / 10000 (integer math, truncated).
+        ///
+        /// Computed as a split so no intermediate overflows a 64-bit `Amount` on a large (e.g.
+        /// 18-decimal) resource: `amount * fee_bps` can exceed `i64::MAX` even though the fee itself
+        /// (≤ amount) never does. With `q = amount / 10000` and `r = amount - q*10000` (r < 10000),
+        /// `fee = q*fee_bps + r*fee_bps/10000` — each term stays bounded (≈ amount and < 1e8), and the
+        /// result is identical to the naive expression.
         fn fee_on(&self, amount: Amount) -> Amount {
-            amount * self.fee_bps / 10000
+            let q = amount / 10000;
+            let r = amount - q * 10000;
+            q * self.fee_bps + r * self.fee_bps / 10000
         }
 
         /// Deposits `fee` into the treasury account, unless it is zero.
