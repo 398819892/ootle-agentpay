@@ -485,8 +485,11 @@ fn stake_arbiter(ctx: &mut Ctx, board: &Board, arbiter: &Account, stake: Amount)
     );
 }
 
+/// With a required arbiter stake, the stake must be present *at take* (it is locked to the deal then),
+/// not merely by resolve time. A buyer cannot take a listing whose arbiter has not posted enough free
+/// stake; once the arbiter stakes, the take succeeds and the dispute resolves.
 #[test]
-fn arbiter_must_stake_before_resolving_when_required() {
+fn take_requires_arbiter_free_stake_when_required() {
     let mut ctx = setup();
     let owner = funded(&mut ctx.test);
     let treasury = empty(&mut ctx.test);
@@ -498,20 +501,21 @@ fn arbiter_must_stake_before_resolving_when_required() {
     set_arbiter_stake(&mut ctx, &board, &owner, amount![500]);
 
     let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
-    take(&mut ctx, &board, &buyer, id);
-    simple(&mut ctx, &board, &buyer, "open_dispute", id);
 
-    // arbiter has not staked -> resolve is rejected
+    // the arbiter has NOT staked -> the buyer cannot take (no collateral would back this deal)
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
-            .call_method(board.component, "resolve", args![id, amount![600]])
-            .build_and_seal(&arbiter.key),
-        vec![arbiter.owner_token.clone()],
+            .call_method(board.component, "take",
+                args![id, buyer.component, buyer.public_key, arbiter.public_key])
+            .build_and_seal(&buyer.key),
+        vec![buyer.owner_token.clone()],
     );
-    assert_reject_reason(reason, "Arbiter has not staked enough to resolve");
+    assert_reject_reason(reason, "Arbiter has insufficient free stake to cover this deal");
 
-    // arbiter posts the stake -> resolve now succeeds
+    // arbiter posts the stake -> take now succeeds, and the dispute resolves
     stake_arbiter(&mut ctx, &board, &arbiter, amount![500]);
+    take(&mut ctx, &board, &buyer, id);
+    simple(&mut ctx, &board, &buyer, "open_dispute", id);
     ctx.test.execute_expect_success(
         ctx.test.transaction()
             .call_method(board.component, "resolve", args![id, amount![600]])
@@ -630,7 +634,7 @@ fn arbiter_cannot_unstake_during_dispute_and_slash_still_works() {
             .build_and_seal(&arbiter.key),
         vec![arbiter.owner_token.clone()],
     );
-    assert_reject_reason(reason, "Cannot unstake while you are the arbiter on a listing under dispute");
+    assert_reject_reason(reason, "No free stake to withdraw: it is locked by your live listings (taken or disputed)");
 
     // the stake is still there, so slashing remains effective during the dispute
     ctx.test.execute_expect_success(

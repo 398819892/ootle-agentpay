@@ -43,13 +43,15 @@
 //! off-chain payment. Three things guard against that, and a buyer should check all three before
 //! paying: (1) the **buyer confirms the arbiter** at `take` (passes the arbiter key they are willing
 //! to trust; a listing whose arbiter they do not accept cannot be taken by accident — read it with
-//! `get_arbiter`); (2) a stalled arbiter is **slashed on timeout** — if the board requires an arbiter
-//! stake, `claim_dispute_timeout` moves that stake to the treasury, so an arbiter who goes dark loses
-//! money and a seller gains nothing by recruiting one; (3) arbiters are owner-whitelisted. For the
-//! slash deterrent to bite, the board owner must set `arbiter_stake` high enough to exceed any
-//! single deal's value. A board with no arbiter stake offers no economic protection against a
-//! seller–arbiter collusion on timeout — only the whitelist and the buyer's own arbiter check. See
-//! `docs/audit-notes.md`.
+//! `get_arbiter`); (2) a stalled arbiter is **slashed on timeout** — when the board requires an
+//! arbiter stake, that stake is *locked to the deal at `take`* (not just when a dispute opens, so it
+//! cannot be withdrawn in between — and each concurrent deal locks its own portion), and
+//! `claim_dispute_timeout` **burns** this deal's locked portion (moves it to a no-withdrawal sink, so
+//! the penalty neither enriches the owner nor rewards a possibly non-paying buyer); (3) arbiters are
+//! owner-whitelisted. For the burn deterrent to bite, the owner must set `arbiter_stake` to at least a
+//! single deal's value (`max_listing_amount` is a good floor), and may set a `min_timeout`. A board
+//! with no arbiter stake offers no economic protection against seller–arbiter collusion on timeout —
+//! only the whitelist and the buyer's own arbiter check. See `docs/audit-notes.md`.
 //!
 //! Anti-abuse (per the product plan): a **listing bond** (skin in the game to list), a
 //! **max listing amount** (per-deal cap), and an **arbiter whitelist** (only approved arbiters).
@@ -130,6 +132,14 @@ pub struct Listing {
     /// the asset forever.
     #[n(14)]
     dispute_deadline: u64,
+    /// The amount of the arbiter's stake locked for **this** listing — snapshotted from the board's
+    /// `arbiter_stake` at `take` time (0 when no stake was required then). It stays locked while the
+    /// listing is `Taken` or `Disputed` (so the arbiter cannot `unstake` it out from under a live
+    /// deal), and on a stalled-dispute timeout exactly this much is slashed/burned. Each concurrent
+    /// deal locks its own portion, so one stake can never "cover" several deals at once. See
+    /// `docs/audit-notes.md`.
+    #[n(15)]
+    arbiter_stake_locked: Amount,
 }
 
 #[template]
@@ -152,12 +162,19 @@ mod otc_board {
         /// the skin-in-the-game / slashing purpose. Managed by the owner via
         /// `add_tradable_asset` / `remove_tradable_asset`. See `docs/audit-notes.md`.
         asset_whitelist: Vec<ResourceAddress>,
-        /// Minimum stake an arbiter must post before they are allowed to `resolve`
-        /// (0 = staking disabled — the whitelist-only behaviour). Set by the owner.
+        /// Stake an arbiter must have **free** (unlocked) to be named on a new `take`, and the amount
+        /// locked per deal they are named on (0 = staking disabled — whitelist-only). Set by the owner.
         arbiter_stake: Amount,
-        /// Per-arbiter stake held by the board. Slashable by the owner if an arbiter misbehaves,
-        /// giving the arbiter skin in the game beyond being whitelisted.
+        /// Per-arbiter stake held by the board. Slashable by the owner, and burned per-deal on a
+        /// stalled-dispute timeout, giving the arbiter skin in the game beyond being whitelisted.
         arbiter_stakes: HashMap<RistrettoPublicKeyBytes, Vault>,
+        /// Minimum `timeout_epochs` a listing may set (0 = no minimum). Stops a seller choosing an
+        /// unreasonably short window. Set by the owner via `set_min_timeout`.
+        min_timeout_epochs: u64,
+        /// Burn sink for stake slashed on a stalled-dispute timeout. The funds are moved here and have
+        /// **no withdrawal path** — effectively burned — so the timeout penalty neither enriches the
+        /// owner (the conflict the audit flagged) nor rewards a possibly non-paying buyer.
+        slashed_pool: Option<Vault>,
         listings: HashMap<u64, Listing>,
         next_id: u64,
     }
@@ -192,6 +209,7 @@ mod otc_board {
                 .method("slash_arbiter", rule!(resource(owner_badge)))
                 .method("add_tradable_asset", rule!(resource(owner_badge)))
                 .method("remove_tradable_asset", rule!(resource(owner_badge)))
+                .method("set_min_timeout", rule!(resource(owner_badge)))
                 .default(rule!(allow_all));
 
             let component = Component::new(Self {
@@ -204,6 +222,8 @@ mod otc_board {
                 asset_whitelist,
                 arbiter_stake: amount![0],
                 arbiter_stakes: HashMap::new(),
+                min_timeout_epochs: 0,
+                slashed_pool: None,
                 listings: HashMap::new(),
                 next_id: 0,
             })
@@ -265,6 +285,10 @@ mod otc_board {
             assert!(bond.amount() >= self.listing_bond, "Bond below the minimum listing bond");
             assert!(timeout_epochs > 0, "timeout must be greater than zero");
             assert!(
+                timeout_epochs >= self.min_timeout_epochs,
+                "timeout is below the board minimum"
+            );
+            assert!(
                 self.arbiter_whitelist.contains(&arbiter),
                 "Arbiter is not whitelisted"
             );
@@ -290,6 +314,7 @@ mod otc_board {
                 state: ListingState::Open,
                 fee_bps,
                 dispute_deadline: 0,
+                arbiter_stake_locked: amount![0],
             });
             emit_event("list", metadata!["id" => id.to_string(), "amount" => amount.to_string()]);
             id
@@ -329,6 +354,14 @@ mod otc_board {
         /// dispute, the timeout defaults to refunding the *seller* (see `claim_dispute_timeout`), so a
         /// buyer must not commit to a listing without consenting to its arbiter. Read it beforehand
         /// with `get_arbiter`.
+        ///
+        /// **Stake coverage is checked and locked here.** When the board requires an arbiter stake
+        /// (`arbiter_stake > 0`), the listing's arbiter must have at least that much *free* (unlocked)
+        /// stake at take time, and exactly that much is then **locked to this listing** for as long as
+        /// it stays `Taken`/`Disputed`. This closes the hole where an arbiter staked, got taken, then
+        /// unstaked before a dispute was opened (the slash later found nothing): the stake can no
+        /// longer be withdrawn while the deal is live, and each concurrent deal needs its own free
+        /// stake — one stake can never cover several deals. See `docs/audit-notes.md`.
         pub fn take(
             &mut self,
             id: u64,
@@ -341,18 +374,33 @@ mod otc_board {
                 CallerContext::transaction_signer_public_key() == buyer,
                 "buyer must be the transaction signer"
             );
+            // Validate immutably (the arbiter must match; read the required stake) before any mutation.
+            let (arbiter, required) = {
+                let listing = self.listings.get(&id).expect("unknown listing");
+                assert!(listing.state == ListingState::Open, "Listing is not open");
+                // The buyer must explicitly consent to the arbiter the seller chose — a deliberate,
+                // on-chain act by the party the timeout default works against.
+                assert!(
+                    listing.arbiter == expected_arbiter,
+                    "Arbiter mismatch: the listing's arbiter is not the one the buyer confirmed"
+                );
+                (listing.arbiter, self.arbiter_stake)
+            };
+            // When a stake is required, the arbiter must have enough FREE stake (total minus what is
+            // already locked by their other live deals) to cover this one; that amount is locked below.
+            if required > amount![0] {
+                let free = self.staked_balance(&arbiter) - self.locked_stake_for(&arbiter);
+                assert!(
+                    free >= required,
+                    "Arbiter has insufficient free stake to cover this deal"
+                );
+            }
             let listing = self.get_mut(id);
-            assert!(listing.state == ListingState::Open, "Listing is not open");
-            // The buyer must explicitly consent to the arbiter the seller chose. This makes trusting
-            // the arbiter a deliberate, on-chain act by the party the timeout default works against.
-            assert!(
-                listing.arbiter == expected_arbiter,
-                "Arbiter mismatch: the listing's arbiter is not the one the buyer confirmed"
-            );
             listing.buyer_account = Some(buyer_account);
             listing.buyer = Some(buyer);
             listing.deadline_epoch = now + listing.timeout_epochs;
             listing.state = ListingState::Taken;
+            listing.arbiter_stake_locked = required; // snapshot (0 when no stake required)
             emit_event("take", metadata!["id" => id.to_string()]);
         }
 
@@ -446,33 +494,40 @@ mod otc_board {
         /// and bond return to the seller. A buyer who genuinely paid must get the arbiter to `resolve`
         /// within the dispute window; this backstop only runs once that window has fully elapsed.
         ///
-        /// **The stalled arbiter is slashed.** Because the default favours the seller, an unresolved
-        /// dispute is the arbiter failing the one job they were named (and possibly staked) for. If
-        /// the listing's arbiter has posted a stake, it is moved to the treasury here. This removes
-        /// the incentive for a seller to recruit a lazy or complicit arbiter to stall a deal they were
-        /// already paid for off chain: the colluding arbiter loses their stake, so the owner sizing
-        /// `arbiter_stake` above a single deal's value makes the collusion unprofitable. A board with
-        /// no arbiter stake has nothing to slash — see the module-level trust-model note.
+        /// **This deal's locked stake is burned.** Because the default favours the seller, an
+        /// unresolved dispute is the arbiter failing the one job they were named (and staked) for.
+        /// Exactly the stake **locked to this listing** at `take` (`arbiter_stake_locked`) is withdrawn
+        /// from the arbiter and moved to the burn sink (`slashed_pool`, no withdrawal path). Burning —
+        /// not paying the treasury or the buyer — means the penalty neither enriches the owner (the
+        /// conflict the audit flagged) nor rewards a possibly non-paying buyer, while a stalled or
+        /// colluding arbiter still loses the collateral that backed this deal. Only this deal's portion
+        /// is burned, so the arbiter's stake for their *other* live deals is untouched. A board with no
+        /// arbiter stake has nothing to burn — see the module-level trust-model note.
         pub fn claim_dispute_timeout(&mut self, id: u64) {
             let now = Consensus::current_epoch();
-            let treasury = self.treasury_account;
-            // Validate and read the arbiter before touching the (separate) stake map / listing vaults.
-            let arbiter = {
+            // Validate and read the arbiter + this deal's locked amount before touching the vaults.
+            let (arbiter, locked) = {
                 let listing = self.listings.get(&id).expect("unknown listing");
                 assert!(listing.state == ListingState::Disputed, "Listing is not under dispute");
                 assert!(
                     now >= listing.dispute_deadline,
                     "Cannot force-close before the dispute deadline"
                 );
-                listing.arbiter
+                (listing.arbiter, listing.arbiter_stake_locked)
             };
-            // Slash the stalled arbiter's stake (if any) to the treasury — they failed to resolve.
-            if let Some(v) = self.arbiter_stakes.get_mut(&arbiter) {
-                if !v.balance().is_zero() {
-                    let slashed = v.withdraw_all();
-                    let amt = slashed.amount();
-                    ComponentManager::get(treasury).invoke("deposit", args![slashed]);
-                    emit_event("slash_arbiter", metadata!["amount" => amt.to_string(), "reason" => "dispute_timeout".to_string()]);
+            // Burn this deal's locked stake from the stalled arbiter (bounded by what they still hold).
+            if locked > amount![0] {
+                if let Some(v) = self.arbiter_stakes.get_mut(&arbiter) {
+                    let take = if v.balance() < locked { v.balance() } else { locked };
+                    if !take.is_zero() {
+                        let burned = v.withdraw(take);
+                        let amt = burned.amount();
+                        match &mut self.slashed_pool {
+                            Some(p) => p.deposit(burned),
+                            None => self.slashed_pool = Some(Vault::from_bucket(burned)),
+                        }
+                        emit_event("slash_arbiter", metadata!["amount" => amt.to_string(), "reason" => "dispute_timeout_burned".to_string()]);
+                    }
                 }
             }
             let listing = self.get_mut(id);
@@ -560,6 +615,14 @@ mod otc_board {
             emit_event("remove_tradable_asset", metadata!["asset" => asset.to_string()]);
         }
 
+        /// Owner sets the minimum `timeout_epochs` any new listing may specify (0 = no minimum). Stops
+        /// a seller choosing an unreasonably short window that leaves the buyer and arbiter too little
+        /// time to pay / adjudicate. Existing listings are unaffected.
+        pub fn set_min_timeout(&mut self, min_timeout_epochs: u64) {
+            self.min_timeout_epochs = min_timeout_epochs;
+            emit_event("set_min_timeout", metadata!["min_timeout_epochs" => min_timeout_epochs.to_string()]);
+        }
+
         /// Updates board parameters. The fee is capped at `MAX_FEE_BPS`, and because each listing
         /// snapshots the fee at `list` time, a change here only affects *future* listings — it can
         /// never re-rate a deal already in flight.
@@ -605,20 +668,23 @@ mod otc_board {
             emit_event("stake_arbiter", metadata!["amount" => amt.to_string()]);
         }
 
-        /// An arbiter withdraws their entire posted stake (e.g. to retire). Returns the bucket.
+        /// An arbiter withdraws their **free** (unlocked) stake — the part not locked to any live
+        /// (`Taken`/`Disputed`) listing they are named on. Returns the bucket.
         ///
-        /// Guarded: an arbiter may NOT pull their stake while they are named on a listing with an
-        /// unresolved dispute. Without this an arbiter could dodge `slash_arbiter` by unstaking the
-        /// moment a dispute names them — defeating the whole point of the stake. They must let the
-        /// open dispute reach resolution (or be slashed) before retiring their collateral.
+        /// This is what stops an arbiter dodging a slash: a listing locks its stake at `take`, not just
+        /// at dispute, so the arbiter cannot unstake between take and dispute (the old guard only
+        /// looked at `Disputed` listings — the gap this closes). They must let every live deal settle
+        /// (or be slashed) before the stake backing it can leave.
         pub fn unstake_arbiter(&mut self) -> Bucket {
             let who = CallerContext::transaction_signer_public_key();
-            assert!(
-                !self.has_open_dispute_for(&who),
-                "Cannot unstake while you are the arbiter on a listing under dispute"
-            );
+            let locked = self.locked_stake_for(&who);
             let v = self.arbiter_stakes.get_mut(&who).expect("no stake posted");
-            let out = v.withdraw_all();
+            let free = v.balance() - locked;
+            assert!(
+                free > amount![0],
+                "No free stake to withdraw: it is locked by your live listings (taken or disputed)"
+            );
+            let out = v.withdraw(free);
             emit_event("unstake_arbiter", metadata!["amount" => out.amount().to_string()]);
             out
         }
@@ -671,12 +737,24 @@ mod otc_board {
             self.listings.get_mut(&id).expect("unknown listing")
         }
 
-        /// True if `who` is the arbiter on any listing currently under dispute, so their stake must
-        /// stay locked and slashable until it is resolved.
-        fn has_open_dispute_for(&self, who: &RistrettoPublicKeyBytes) -> bool {
-            self.listings
-                .values()
-                .any(|l| l.state == ListingState::Disputed && &l.arbiter == who)
+        /// Total stake `who` currently holds in the board (0 if they never staked).
+        fn staked_balance(&self, who: &RistrettoPublicKeyBytes) -> Amount {
+            self.arbiter_stakes.get(who).map(|v| v.balance()).unwrap_or(amount![0])
+        }
+
+        /// Stake locked to `who`'s **live** deals — the sum of `arbiter_stake_locked` over every
+        /// listing they arbitrate that is still `Taken` or `Disputed`. This is the portion that cannot
+        /// be unstaked and that backs each deal's timeout burn; the free portion is the rest.
+        fn locked_stake_for(&self, who: &RistrettoPublicKeyBytes) -> Amount {
+            let mut total = amount![0];
+            for l in self.listings.values() {
+                if &l.arbiter == who
+                    && (l.state == ListingState::Taken || l.state == ListingState::Disputed)
+                {
+                    total += l.arbiter_stake_locked;
+                }
+            }
+            total
         }
     }
 }

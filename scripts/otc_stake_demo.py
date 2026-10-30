@@ -128,7 +128,13 @@ def main():
     run(t, SET, {"o": DEFAULT, "b": board})
     print("  已设 arbiter_stake = 500")
 
-    print("\n【3】卖方挂单 1000 + 保证金 100,买方接单,开争议")
+    print("\n【3】仲裁人先质押 500(新规则:take 时必须已有足额【空闲】质押,否则买方无法接单)")
+    STAKE = ('fn main() { let mut a=var!["a"]; let s=a.withdraw(XTR, amount!(500)); '
+             'let mut b=var!["b"]; b.stake_arbiter(s); }')
+    run(t, STAKE, {"a": DEFAULT, "b": board})
+    print("  已质押 500")
+
+    print("\n【4】卖方挂单 1000 + 保证金 100,买方接单(质押被锁定到该单),开争议")
     LIST = ('fn main() { let mut s=var!["s"]; '
             'let asset=s.withdraw(XTR, amount!(1000)); let bond=s.withdraw(XTR, amount!(100)); '
             'let mut b=var!["b"]; '
@@ -138,27 +144,25 @@ def main():
     run(t, 'fn main() { let mut b=var!["b"]; b.open_dispute(0u64); }', {"b": board})
     print("  listing 0:已挂单→已接单→争议中")
 
-    print("\n【4】仲裁人【未质押】就想裁决 → 链应当拒绝")
-    RESOLVE = 'fn main() { let mut b=var!["b"]; b.resolve(0u64, amount!(600)); }'
-    dr = submit(t, RESOLVE, {"b": board}, True)
+    print("\n【5】仲裁人想在争议中取回质押逃避罚没 → 链应当拒绝(质押已锁定到活跃挂单)")
+    UNSTAKE = ('fn main() { let mut b=var!["b"]; let s=b.unstake_arbiter(); '
+               f'let mut a=var!["a"]; a.deposit(s); }}')
+    dr = submit(t, UNSTAKE, {"a": DEFAULT, "b": board}, True)
     blob = json.dumps(dr)
     if "error" in dr:
         print(f"  ✓ 被拒:{dr['error']['message'][:120]}")
     elif "Reject" in blob:
         print(f"  ✓ 被拒(链上理由):{reject_reason(blob)}")
     else:
-        print("  ✗ 意外:未质押竟然通过了 dry-run(检查模板逻辑)")
+        print("  ✗ 意外:争议中竟能取回质押(检查模板逻辑)")
 
-    print("\n【5】仲裁人质押 500(stake_arbiter)后再裁决")
-    STAKE = ('fn main() { let mut a=var!["a"]; let s=a.withdraw(XTR, amount!(500)); '
-             'let mut b=var!["b"]; b.stake_arbiter(s); }')
-    run(t, STAKE, {"a": DEFAULT, "b": board})
-    print("  已质押 500")
+    print("\n【6】仲裁人正常裁决 → 成功")
+    RESOLVE = 'fn main() { let mut b=var!["b"]; b.resolve(0u64, amount!(600)); }'
     bb = bal(t, "otc_stk_buyer")
     run(t, RESOLVE, {"b": board})
     print(f"  ✓ 裁决成功;买方到账 {bal(t,'otc_stk_buyer')-bb}(600 的 95% = 570)")
 
-    print("\n【6】owner 认定仲裁人作恶 → slash 掉其质押(slash_arbiter)")
+    print("\n【7】owner 认定仲裁人作恶 → slash 掉其质押(slash_arbiter)")
     tb = bal(t, "otc_stk_treasury")
     SLASH = ('fn main() { let mut o=var!["o"]; '
              f'let p=o.create_proof_for_resource(address!("{owner_badge}")); '

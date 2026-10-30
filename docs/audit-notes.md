@@ -352,6 +352,43 @@ bounded and the result is identical to the naive expression. Used by escrow `rel
 otc_board `confirm`/`resolve`. **Test:** `fee_floors_on_indivisible_amount` (1234 @ 5% → 61) plus the
 existing fee-bearing settlement tests, which now exercise the split.
 
+## Third external review (2026-10-30, follow-up) — the A fix was bypassable
+
+The reviewer found that last round's A (slash the stalled arbiter) could be dodged through the
+**arbiter-stake timing**, and raised three related points. All fixed in otc_board.
+
+### #1 — Stake could be pulled before a dispute, defeating the slash (serious)
+**Was:** `unstake_arbiter` only blocked while the arbiter was named on a `Disputed` listing, and
+neither `list` nor `take` checked the arbiter actually held stake. So a complicit arbiter could stake,
+get taken, then **unstake while the listing was merely `Taken`** (before the buyer disputed); on
+timeout the slash found an empty vault. With `arbiter_stake = 0` (default) there was nothing to slash
+at all. **Fix:** stake is now **locked to the deal at `take`**: `take` requires the arbiter to have
+≥ `arbiter_stake` *free* stake and snapshots that amount into `Listing.arbiter_stake_locked`;
+`unstake_arbiter` returns only the **free** (unlocked) part, where "locked" counts every `Taken` *or*
+`Disputed` listing the arbiter is named on. The stake therefore cannot leave between take and dispute.
+**Tests:** `arbiter_cannot_unstake_while_named_on_a_taken_listing`,
+`take_requires_arbiter_free_stake_when_required`.
+
+### #2 — One stake "covered" all concurrent deals
+**Was:** `claim_dispute_timeout` did `withdraw_all`, so a seller + arbiter could run N deals in
+parallel and the arbiter lost only one stake's worth. **Fix:** each deal locks its own
+`arbiter_stake_locked`; `take` requires *free* stake (total − already-locked) ≥ the requirement, so N
+concurrent deals need N× the stake, and the timeout burns only that deal's locked portion. **Test:**
+`one_stake_cannot_cover_two_concurrent_deals`.
+
+### #3 — Slashed stake enriched the owner (conflict of interest)
+**Was:** the timeout slash sent the stake to the treasury (the owner's), giving the owner an incentive
+to tolerate arbiter inaction — the very conflict this doc flagged. Paying the buyer instead would
+reward a possibly non-paying buyer. **Fix:** the timeout slash now **burns** the stake — moves it to
+`slashed_pool`, a vault with no withdrawal path — so it enriches no one while the arbiter still loses
+the collateral. (Owner-discretion `slash_arbiter` still banks to treasury; see limitations.) **Test:**
+`stalled_dispute_burns_the_absent_arbiters_stake` (asserts treasury and buyer both unchanged).
+
+### #4 — No minimum listing timeout (minor)
+**Was:** `timeout_epochs` was seller-set with no floor, so a seller could pick 1 epoch (~30 min),
+starving the buyer/arbiter of time. **Fix:** owner-set `min_timeout_epochs` via `set_min_timeout`
+(default 0 = none); `list` rejects a shorter window. **Test:** `listing_below_min_timeout_is_rejected`.
+
 ## Known limitations & mitigations (disclosed, by design — not code bugs)
 
 These are architectural trade-offs, not fixable by a localised patch. They are disclosed here and in
@@ -378,17 +415,17 @@ half-fixes.
   considered and rejected: "adverse" has no crisp on-chain definition and auto-slashing would deter
   legitimate sellers from accepting disputes. The arbiter *stake* (slashable, incl. on timeout) is
   the penalty mechanism.
-- **OTC `slash_arbiter` is owner-discretion → conflict of interest.** The owner decides, and the
-  slashed stake goes to the owner's treasury, so an owner could grief an honest arbiter. Mitigation:
-  the objective, non-discretionary `claim_dispute_timeout` auto-slash (this round's A) is the primary
-  deterrent; owner-discretion slash is a backstop whose abuse is bounded by the owner being the
-  reputationally-exposed platform operator. A future hardening could burn the owner-slashed stake
-  instead of banking it.
+- **OTC `slash_arbiter` (owner-discretion) still banks to treasury → residual conflict.** The
+  automatic, objective path (`claim_dispute_timeout`) now **burns** the stake, so the owner no longer
+  profits from arbiter inaction (that conflict is resolved). The remaining `slash_arbiter` is an
+  owner-discretion backstop that still sends the stake to the treasury; an owner could grief an honest
+  arbiter with it. Its abuse is bounded by the owner being the reputationally-exposed operator and by
+  the arbiter whitelist being the owner's own; a future hardening could burn this path too.
 - **OTC listings grow unbounded in one component.** All listings live in one `HashMap` in one
   component, and `unstake_arbiter` scans them. Fees/latency grow with history. The clean fix is one
   component per listing (a larger refactor), tracked for later.
 
 ### cargo test (WSL, all green)
-escrow **26** (authz 4, conservation 4, edge 4, test 14) · otc_board **42** (authz 19, conservation 4,
-test 19) · agent_budget **25** (conservation 3, escrow_integration 8, test 14). Total **93**.
-_(otc_board +1 this step for `fee_floors_on_indivisible_amount`; earlier +3 for the A/C regression tests.)_
+escrow **26** (authz 4, conservation 4, edge 4, test 14) · otc_board **45** (authz 22, conservation 4,
+test 19) · agent_budget **25** (conservation 3, escrow_integration 8, test 14). Total **96**.
+_(otc_board +3 this round for the #1/#2/#4 regression tests; the renamed timeout test now asserts burn.)_

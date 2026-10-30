@@ -783,13 +783,14 @@ fn take_with_wrong_arbiter_is_rejected() {
     assert_eq!(bal(&mut ctx.test, &buyer), buyer_before + amount![1000]); // 0 fee
 }
 
-/// A: a stalled dispute slashes the absent arbiter. With a required arbiter stake, letting the
-/// dispute time out (the arbiter never resolves) moves that stake to the treasury *and* returns the
-/// asset+bond to the seller — so a seller recruiting a lazy/complicit arbiter to stall a deal they
-/// were already paid for off chain costs that arbiter their whole stake. Sized above a deal's value,
-/// the collusion is unprofitable.
+/// A (this review): a stalled dispute BURNS the absent arbiter's deal-locked stake. With a required
+/// arbiter stake, letting the dispute time out (the arbiter never resolves) withdraws this deal's
+/// locked stake from the arbiter into the burn sink — NOT the treasury (which would enrich the owner)
+/// and NOT the buyer (who may not have paid) — and returns the asset+bond to the seller. So a seller
+/// recruiting a lazy/complicit arbiter to stall a deal they were already paid for off chain costs that
+/// arbiter the collateral. Sized ≥ a deal's value, the collusion is unprofitable.
 #[test]
-fn stalled_dispute_slashes_the_absent_arbiter() {
+fn stalled_dispute_burns_the_absent_arbiters_stake() {
     let mut ctx = setup();
     let owner = funded(&mut ctx.test);
     let treasury = empty(&mut ctx.test);
@@ -803,6 +804,7 @@ fn stalled_dispute_slashes_the_absent_arbiter() {
     stake_arbiter(&mut ctx, &board, &arbiter, amount![500]);
 
     let seller_before = bal(&mut ctx.test, &seller);
+    let buyer_before = bal(&mut ctx.test, &buyer);
     let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
     set_epoch(&mut ctx.test, 5);
     take(&mut ctx, &board, &buyer, id);
@@ -814,9 +816,10 @@ fn stalled_dispute_slashes_the_absent_arbiter() {
     simple_ok(&mut ctx, &board, &anyone, "claim_dispute_timeout", id);
 
     assert_eq!(bal(&mut ctx.test, &seller), seller_before);   // asset + bond returned to seller
-    assert_eq!(bal(&mut ctx.test, &treasury), amount![500]);  // stalled arbiter's stake slashed
+    assert_eq!(bal(&mut ctx.test, &treasury), amount![0]);    // NOT the treasury — burned
+    assert_eq!(bal(&mut ctx.test, &buyer), buyer_before);     // NOT the buyer — burned
 
-    // the arbiter's staked balance is now zero
+    // the arbiter's staked balance is now zero (the deal's locked 500 was burned)
     ctx.test.execute_expect_success(
         ctx.test.transaction()
             .call_method(board.component, "get_arbiter_stake", args![arbiter.public_key])
@@ -825,6 +828,114 @@ fn stalled_dispute_slashes_the_absent_arbiter() {
     );
     let (_required, staked) = ctx.test.expect_return::<(Amount, Amount)>(0);
     assert_eq!(staked, amount![0]);
+}
+
+/// A (this review) #1 — the unstake-timing bypass. An arbiter who staked and was taken CANNOT pull
+/// their stake before a dispute is opened (the old guard only blocked on `Disputed` listings, so the
+/// arbiter could unstake while merely `Taken`, then let the dispute time out and lose nothing). Now a
+/// `Taken` listing locks the stake too, so the unstake is rejected and the collateral is still there
+/// to be burned on timeout.
+#[test]
+fn arbiter_cannot_unstake_while_named_on_a_taken_listing() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = funded(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+    let buyer = empty(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 0);
+    set_arbiter_stake(&mut ctx, &board, &owner, amount![500]);
+    stake_arbiter(&mut ctx, &board, &arbiter, amount![500]);
+
+    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
+    take(&mut ctx, &board, &buyer, id); // listing is now Taken (NOT yet disputed)
+
+    // the arbiter tries to pull the stake while the deal is live-but-not-disputed -> rejected
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(board.component, "unstake_arbiter", args![])
+            .build_and_seal(&arbiter.key),
+        vec![arbiter.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "No free stake to withdraw: it is locked by your live listings (taken or disputed)");
+}
+
+/// A (this review) #2 — one stake cannot cover two concurrent deals. With a 500 stake requirement and
+/// only 500 staked, the first take locks all 500; a second listing with the same arbiter cannot be
+/// taken until more free stake is posted. This is what makes each concurrent deal separately
+/// collateralised (the old single `withdraw_all` slash covered only one of N deals).
+#[test]
+fn one_stake_cannot_cover_two_concurrent_deals() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = funded(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+    let buyer1 = empty(&mut ctx.test);
+    let buyer2 = empty(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 0);
+    set_arbiter_stake(&mut ctx, &board, &owner, amount![500]);
+    stake_arbiter(&mut ctx, &board, &arbiter, amount![500]); // exactly one deal's worth
+
+    let id1 = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
+    let id2 = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
+    take(&mut ctx, &board, &buyer1, id1); // locks all 500
+
+    // the second deal has no free stake left to cover it -> take rejected
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(board.component, "take",
+                args![id2, buyer2.component, buyer2.public_key, arbiter.public_key])
+            .build_and_seal(&buyer2.key),
+        vec![buyer2.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Arbiter has insufficient free stake to cover this deal");
+
+    // top up the stake to cover a second deal -> the second take now succeeds
+    stake_arbiter(&mut ctx, &board, &arbiter, amount![500]);
+    take(&mut ctx, &board, &buyer2, id2);
+}
+
+/// #4 — the owner can set a minimum listing timeout, rejecting a seller's too-short window.
+#[test]
+fn listing_below_min_timeout_is_rejected() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = empty(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 0);
+    // owner sets a minimum timeout of 10 epochs
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .create_proof(owner.component, board.owner_badge)
+            .put_last_instruction_output_on_workspace("p")
+            .call_method(board.component, "set_min_timeout", args![10u64])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+
+    // a listing with timeout 1 (below the minimum) is rejected
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(seller.component, "withdraw", args![XTR, amount![1000]])
+            .put_last_instruction_output_on_workspace("asset")
+            .call_method(seller.component, "withdraw", args![XTR, amount![100]])
+            .put_last_instruction_output_on_workspace("bond")
+            .call_method(board.component, "list",
+                args![Workspace("asset"), Workspace("bond"), seller.component,
+                      sha256(b"t"), arbiter.public_key, 1u64, None::<Hash32>])
+            .build_and_seal(&seller.key),
+        vec![seller.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "timeout is below the board minimum");
+
+    // a listing meeting the minimum is accepted
+    let _id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
 }
 
 /// C: with a non-empty tradable-asset whitelist, a seller cannot list a resource that is not on it.
