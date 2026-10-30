@@ -23,6 +23,17 @@
 //! payer is whoever signed its `new`, which does not compose when a board opens it on a buyer's
 //! behalf. Cross-template escrow instantiation is demonstrated elsewhere (`AgentBudget::pay_via_escrow`).
 //!
+//! **Settlement-security invariant:** without the seller's `confirm` (they received payment) or an
+//! arbiter's `resolve`, *nobody* can move the seller's locked asset to a buyer. Two rules enforce it:
+//! `take` binds the buyer to the transaction signer (you cannot take on someone else's behalf), and
+//! the optional payment **hashlock is set by the *seller* at `list` time** — the seller holds the
+//! preimage and only hands it to the buyer once paid off chain. This mirrors `Escrow`, where the
+//! party who will *not* receive the funds sets the lock and the payout destination is fixed, so a
+//! revealed preimage can only trigger the already-agreed payout, never redirect it. (A previous
+//! revision let the *taker* supply the hashlock in `take`; combined with the preimage path in
+//! `confirm`, any stranger could take a listing with a self-chosen lock and release the asset to
+//! themselves without paying — a P0 asset-theft bug, now fixed. See `docs/audit-notes.md`.)
+//!
 //! Anti-abuse (per the product plan): a **listing bond** (skin in the game to list), a
 //! **max listing amount** (per-deal cap), and an **arbiter whitelist** (only approved arbiters).
 //! Time is measured in epochs (`Consensus::current_epoch()`); "terms" are summarised on chain as a
@@ -149,6 +160,18 @@ mod otc_board {
         /// Seller lists `asset` for sale, posting a `bond`. Returns the listing id. The seller is the
         /// transaction signer. `arbiter` must be whitelisted; `asset` must be within the cap; `bond`
         /// must meet the minimum.
+        ///
+        /// `hashlock` is an **optional, seller-set** SHA-256 payment lock. When present, the seller
+        /// keeps the matching preimage and reveals it to the buyer only after being paid off chain;
+        /// the buyer (or anyone holding the preimage) can then `confirm` to release. Pass `None` to
+        /// require an explicit seller `confirm` instead. It must be set here by the seller and can
+        /// never be supplied by the taker — that was the P0 (see module docs). A seller who sets a
+        /// hashlock must keep its preimage secret until paid; a guessable/leaked preimage only ever
+        /// releases *this* listing's asset to the recorded buyer, not to anyone else.
+        ///
+        /// `seller_account` is chosen by the seller (the signer) and is where the asset/bond return
+        /// on `cancel`/`reclaim` and where the bond returns on settlement. Misdirecting it only
+        /// affects the seller's own funds — there is no cross-party path out of it.
         pub fn list(
             &mut self,
             asset: Bucket,
@@ -157,6 +180,7 @@ mod otc_board {
             terms_hash: Hash32,
             arbiter: RistrettoPublicKeyBytes,
             timeout_epochs: u64,
+            hashlock: Option<Hash32>,
         ) -> u64 {
             let amount = asset.amount();
             assert!(amount > amount![0], "Asset must be non-empty");
@@ -182,7 +206,7 @@ mod otc_board {
                 bond: Vault::from_bucket(bond),
                 buyer_account: None,
                 buyer: None,
-                hashlock: None,
+                hashlock,
                 deadline_epoch: 0,
                 state: ListingState::Open,
             });
@@ -210,27 +234,38 @@ mod otc_board {
         }
 
         /// Buyer takes an open listing. The buyer pays the seller off chain, then settlement happens
-        /// via `confirm`. `hashlock` (optional) lets the buyer release with a payment preimage.
+        /// via `confirm`.
+        ///
+        /// The declared `buyer` **must be the transaction signer** — you cannot take on another
+        /// party's behalf or impersonate a buyer. The listing's payment hashlock (if any) was fixed
+        /// by the seller at `list` time and is deliberately *not* a parameter here: a taker must not
+        /// be able to install their own lock and then release the asset to themselves (that was the
+        /// P0; see module docs).
         pub fn take(
             &mut self,
             id: u64,
             buyer_account: ComponentAddress,
             buyer: RistrettoPublicKeyBytes,
-            hashlock: Option<Hash32>,
         ) {
             let now = Consensus::current_epoch();
+            assert!(
+                CallerContext::transaction_signer_public_key() == buyer,
+                "buyer must be the transaction signer"
+            );
             let listing = self.get_mut(id);
             assert!(listing.state == ListingState::Open, "Listing is not open");
             listing.buyer_account = Some(buyer_account);
             listing.buyer = Some(buyer);
-            listing.hashlock = hashlock;
             listing.deadline_epoch = now + listing.timeout_epochs;
             listing.state = ListingState::Taken;
             emit_event("take", metadata!["id" => id.to_string()]);
         }
 
-        /// Releases the asset to the buyer, charging the platform fee. Authorised by the seller
-        /// (confirming they were paid) or by anyone presenting the payment preimage of the hashlock.
+        /// Releases the asset to the recorded buyer, charging the platform fee. Authorised by the
+        /// seller (confirming they were paid) or by anyone presenting the preimage of the listing's
+        /// **seller-set** hashlock. Because only the seller can set that lock (at `list`) and holds
+        /// its preimage until paid, a non-paying taker cannot forge this path; the payout always
+        /// goes to the recorded buyer regardless of who presents the preimage.
         pub fn confirm(&mut self, id: u64, preimage: Option<Vec<u8>>) {
             let treasury = self.treasury_account;
             let fee_bps = self.fee_bps;

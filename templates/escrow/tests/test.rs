@@ -512,3 +512,35 @@ fn zero_funds_is_rejected() {
     );
     assert_reject_reason(reason, "Escrow must be funded");
 }
+
+/// `get_parties` lets a payee verify, before relying on the escrow, that their own key/account are
+/// the recorded `payee` (the dispute identity) and `payee_account` (the release/resolve target).
+#[test]
+fn get_parties_exposes_recorded_identities() {
+    let mut ctx = setup();
+    let payer = new_account(&mut ctx.test);
+    let payee = new_account(&mut ctx.test);
+    let arbiter = new_account(&mut ctx.test);
+    let treasury = new_account(&mut ctx.test);
+
+    let escrow = create_escrow(&mut ctx, &payer, &payee, &arbiter, &treasury, &EscrowParams::default());
+
+    ctx.test.execute_expect_success(
+        ctx.test.transaction().call_method(escrow, "get_parties", args![]).build_and_seal(&payee.key),
+        vec![payee.owner_token.clone()],
+    );
+    let (r_payer, r_payee, r_arbiter, r_payee_acct, r_payer_acct) = ctx
+        .test
+        .expect_return::<(
+            RistrettoPublicKeyBytes,
+            RistrettoPublicKeyBytes,
+            Option<RistrettoPublicKeyBytes>,
+            ComponentAddress,
+            ComponentAddress,
+        )>(0);
+    assert_eq!(r_payer, payer.public_key);
+    assert_eq!(r_payee, payee.public_key);
+    assert_eq!(r_arbiter, Some(arbiter.public_key));
+    assert_eq!(r_payee_acct, payee.component);
+    assert_eq!(r_payer_acct, payer.component);
+}

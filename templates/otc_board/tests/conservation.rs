@@ -119,7 +119,7 @@ fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
-                      sha256(b"terms"), arbiter.public_key, timeout])
+                      sha256(b"terms"), arbiter.public_key, timeout, None::<Hash32>])
             .build_and_seal(&seller.key),
         vec![seller.owner_token.clone()],
     );
@@ -129,7 +129,7 @@ fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
 fn take(ctx: &mut Ctx, board: &Board, buyer: &Account, id: u64) {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(board.component, "take", args![id, buyer.component, buyer.public_key, None::<Hash32>])
+            .call_method(board.component, "take", args![id, buyer.component, buyer.public_key])
             .build_and_seal(&buyer.key),
         vec![buyer.owner_token.clone()],
     );

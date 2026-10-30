@@ -27,6 +27,12 @@
 //!   no wall-clock time on the Ootle.
 //! - **Fee in basis points.** `fee_bps` (0..=10000) of the amount delivered to the payee is routed
 //!   to the platform treasury account. A 0 bps fee charges nothing.
+//! - **Payee verification.** The payer sets both the `payee` public key (who may `dispute`) and the
+//!   `payee_account` (where `release`/`resolve` pays) at `new`; they are independent. The escrowed
+//!   funds belong to the payer and can only flow to `payee_account`, `payer_account` or the
+//!   treasury, so these never let funds reach a third party. But a payee who relies on being able
+//!   to dispute should first read `get_parties` and confirm their own key/account are the recorded
+//!   ones before delivering.
 
 use tari_template_lib::prelude::*;
 
@@ -271,6 +277,28 @@ mod escrow {
                 self.deadline_epoch,
                 self.fee_bps,
             )
+        }
+
+        /// Returns the recorded parties `(payer, payee, arbiter, payee_account, payer_account)`.
+        /// Readable by anyone.
+        ///
+        /// The payee should read this **before relying on the escrow** (e.g. before delivering) and
+        /// check that their own public key is the recorded `payee` — the identity allowed to
+        /// `dispute` — and that their account is the `payee_account` that `release`/`resolve` pays.
+        /// The payer sets both at `new`; they are independent, and the funds (which belong to the
+        /// payer) only ever flow to `payee_account`, `payer_account` or the treasury, so a mismatch
+        /// cannot divert funds to a third party — it would only leave the payee unable to dispute as
+        /// expected. Verifying here closes that gap.
+        pub fn get_parties(
+            &self,
+        ) -> (
+            RistrettoPublicKeyBytes,
+            RistrettoPublicKeyBytes,
+            Option<RistrettoPublicKeyBytes>,
+            ComponentAddress,
+            ComponentAddress,
+        ) {
+            (self.payer, self.payee, self.arbiter, self.payee_account, self.payer_account)
         }
 
         // ----------------------------- helpers ----------------------------- //

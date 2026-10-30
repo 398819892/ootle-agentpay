@@ -102,7 +102,7 @@ fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
-                      sha256(b"terms"), arbiter.public_key, timeout])
+                      sha256(b"terms"), arbiter.public_key, timeout, None::<Hash32>])
             .build_and_seal(&seller.key),
         vec![seller.owner_token.clone()],
     );
@@ -112,7 +112,7 @@ fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
 fn take(ctx: &mut Ctx, board: &Board, buyer: &Account, id: u64) {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(board.component, "take", args![id, buyer.component, buyer.public_key, None::<Hash32>])
+            .call_method(board.component, "take", args![id, buyer.component, buyer.public_key])
             .build_and_seal(&buyer.key),
         vec![buyer.owner_token.clone()],
     );
@@ -334,7 +334,7 @@ fn double_take_rejected_first_buyer_is_paid() {
 
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
-            .call_method(board.component, "take", args![id, buyer2.component, buyer2.public_key, None::<Hash32>])
+            .call_method(board.component, "take", args![id, buyer2.component, buyer2.public_key])
             .build_and_seal(&buyer2.key),
         vec![buyer2.owner_token.clone()],
     );
@@ -416,4 +416,143 @@ fn slashed_arbiter_mid_dispute_can_resolve_after_stake_requirement_lowered() {
     // fee_bps 0 -> buyer +600, seller +400 asset + 100 bond
     assert_eq!(bal(&mut ctx.test, &buyer), buyer_before + amount![600]);
     assert_eq!(bal(&mut ctx.test, &seller), seller_before + amount![400] + amount![100]);
+}
+
+// =============================================================================================
+// P0 regression: asset theft via unbound `take` + taker-supplied hashlock (fixed).
+//
+// Security goal re-asserted here: WITHOUT the seller's `confirm` (they were paid) or an arbiter's
+// `resolve`, nobody can move the seller's locked asset to a buyer. See `docs/audit-notes.md`.
+// =============================================================================================
+
+/// Lists with a seller-chosen payment hashlock (the only party that may set one).
+fn list_locked(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
+        amount: Amount, bond_amt: Amount, timeout: u64, hashlock: Option<Hash32>) -> u64 {
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .call_method(seller.component, "withdraw", args![XTR, amount])
+            .put_last_instruction_output_on_workspace("asset")
+            .call_method(seller.component, "withdraw", args![XTR, bond_amt])
+            .put_last_instruction_output_on_workspace("bond")
+            .call_method(board.component, "list",
+                args![Workspace("asset"), Workspace("bond"), seller.component,
+                      sha256(b"terms"), arbiter.public_key, timeout, hashlock])
+            .build_and_seal(&seller.key),
+        vec![seller.owner_token.clone()],
+    );
+    ctx.test.expect_return::<u64>(4)
+}
+
+/// FORGERY: an attacker signs the `take` but declares a *different* public key as the buyer (routing
+/// the deal to the attacker's own account). This must be rejected — the declared buyer has to be the
+/// transaction signer — and the listing must stay Open for the real buyer.
+#[test]
+fn take_cannot_impersonate_a_different_buyer() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = empty(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+    let victim = funded(&mut ctx.test);
+    let attacker = funded(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 0);
+    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
+
+    // attacker signs, but claims the victim's public key as the buyer -> rejected
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(board.component, "take", args![id, attacker.component, victim.public_key])
+            .build_and_seal(&attacker.key),
+        vec![attacker.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "buyer must be the transaction signer");
+
+    // listing is still Open: the real buyer (signing as themselves) takes, seller confirms, buyer paid
+    take(&mut ctx, &board, &victim, id);
+    let victim_before = bal(&mut ctx.test, &victim);
+    confirm_ok(&mut ctx, &board, &seller, id);
+    assert_eq!(bal(&mut ctx.test, &victim), victim_before + amount![1000]); // 0 fee
+}
+
+/// NO-PAYMENT THEFT (the P0): a non-seller takes a listing and tries to release the asset to itself
+/// without paying. The old exploit was `take` with a self-chosen hashlock then `confirm` its
+/// preimage. `take` no longer accepts a lock, so both confirm paths (bogus preimage / no preimage)
+/// are rejected, the attacker gains nothing, and the seller's asset is fully recoverable.
+#[test]
+fn non_paying_taker_cannot_release_the_asset() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = empty(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+    let attacker = funded(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 0);
+    let seller_before = bal(&mut ctx.test, &seller);
+    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
+
+    // anyone may take (binding themselves as buyer) ...
+    take(&mut ctx, &board, &attacker, id);
+    let attacker_after_take = bal(&mut ctx.test, &attacker);
+
+    // ... but cannot self-release. Attacker's own "preimage" matches no seller-set lock:
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(board.component, "confirm", args![id, Some(b"attacker-secret".to_vec())])
+            .build_and_seal(&attacker.key),
+        vec![attacker.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Unauthorized: confirm requires the seller or a valid payment preimage");
+    // nor can the attacker confirm as if they were the seller:
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(board.component, "confirm", args![id, None::<Vec<u8>>])
+            .build_and_seal(&attacker.key),
+        vec![attacker.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Unauthorized: confirm requires the seller or a valid payment preimage");
+
+    // the attacker gained nothing; the seller's asset is still locked and recoverable on timeout
+    assert_eq!(bal(&mut ctx.test, &attacker), attacker_after_take);
+    set_epoch(&mut ctx.test, 11);
+    simple_ok(&mut ctx, &board, &seller, "reclaim", id);
+    assert_eq!(bal(&mut ctx.test, &seller), seller_before); // asset + bond fully returned
+}
+
+/// Even on a listing whose seller DID set a payment hashlock, release needs the *seller's* preimage
+/// (revealed off chain once paid). A guessed preimage from the recorded buyer is rejected; only the
+/// real secret releases — proving the preimage path is a seller-gated payment proof, not a free pull.
+#[test]
+fn seller_set_lock_releases_only_with_the_sellers_preimage() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = empty(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+    let buyer = funded(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 0);
+    let secret = b"seller-only-secret".to_vec();
+    let id = list_locked(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10, Some(sha256(&secret)));
+    take(&mut ctx, &board, &buyer, id);
+
+    // a guessed preimage does not match the seller's lock -> rejected
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(board.component, "confirm", args![id, Some(b"guess".to_vec())])
+            .build_and_seal(&buyer.key),
+        vec![buyer.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Unauthorized: confirm requires the seller or a valid payment preimage");
+
+    // only the seller's real preimage releases the asset to the recorded buyer
+    let buyer_before = bal(&mut ctx.test, &buyer);
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .call_method(board.component, "confirm", args![id, Some(secret.clone())])
+            .build_and_seal(&buyer.key),
+        vec![buyer.owner_token.clone()],
+    );
+    assert_eq!(bal(&mut ctx.test, &buyer), buyer_before + amount![1000]); // 0 fee
 }

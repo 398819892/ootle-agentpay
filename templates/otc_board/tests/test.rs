@@ -89,9 +89,10 @@ fn new_board(ctx: &mut Ctx, owner: &Account, treasury: &Account, arbiter: &Accou
     Board { component, owner_badge }
 }
 
-/// Seller lists `amount` of XTR with `bond_amt` bond; returns the listing id.
-fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
-        amount: Amount, bond_amt: Amount, timeout: u64) -> u64 {
+/// Seller lists `amount` of XTR with `bond_amt` bond and an optional seller-set payment `hashlock`;
+/// returns the listing id.
+fn list_locked(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
+        amount: Amount, bond_amt: Amount, timeout: u64, hashlock: Option<Hash32>) -> u64 {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
             .call_method(seller.component, "withdraw", args![XTR, amount])
@@ -100,7 +101,7 @@ fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
-                      sha256(b"terms"), arbiter.public_key, timeout])
+                      sha256(b"terms"), arbiter.public_key, timeout, hashlock])
             .build_and_seal(&seller.key),
         vec![seller.owner_token.clone()],
     );
@@ -108,10 +109,16 @@ fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
     ctx.test.expect_return::<u64>(4)
 }
 
-fn take(ctx: &mut Ctx, board: &Board, buyer: &Account, id: u64, hashlock: Option<Hash32>) {
+/// Seller lists with no payment hashlock (settlement via seller `confirm`).
+fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
+        amount: Amount, bond_amt: Amount, timeout: u64) -> u64 {
+    list_locked(ctx, board, seller, arbiter, amount, bond_amt, timeout, None)
+}
+
+fn take(ctx: &mut Ctx, board: &Board, buyer: &Account, id: u64) {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(board.component, "take", args![id, buyer.component, buyer.public_key, hashlock])
+            .call_method(board.component, "take", args![id, buyer.component, buyer.public_key])
             .build_and_seal(&buyer.key),
         vec![buyer.owner_token.clone()],
     );
@@ -138,7 +145,7 @@ fn list_take_confirm_pays_buyer_minus_fee() {
     let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 500);
     let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
 
-    take(&mut ctx, &board, &buyer, id, None);
+    take(&mut ctx, &board, &buyer, id);
 
     let buyer_before = bal(&mut ctx.test, &buyer);
     let treasury_before = bal(&mut ctx.test, &treasury);
@@ -167,9 +174,10 @@ fn confirm_by_preimage_holder() {
     let buyer = empty(&mut ctx.test);
 
     let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 0);
-    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
     let preimage = b"paid-in-full".to_vec();
-    take(&mut ctx, &board, &buyer, id, Some(sha256(&preimage)));
+    // the SELLER sets the payment hashlock at list time and reveals the preimage to the buyer once paid
+    let id = list_locked(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10, Some(sha256(&preimage)));
+    take(&mut ctx, &board, &buyer, id);
 
     let buyer_before = bal(&mut ctx.test, &buyer);
     // the buyer releases by presenting the payment preimage
@@ -193,8 +201,8 @@ fn confirm_wrong_preimage_by_stranger_fails() {
     let stranger = empty(&mut ctx.test);
 
     let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 500);
-    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
-    take(&mut ctx, &board, &buyer, id, Some(sha256(b"the secret")));
+    let id = list_locked(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10, Some(sha256(b"the secret")));
+    take(&mut ctx, &board, &buyer, id);
 
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
@@ -233,7 +241,7 @@ fn reclaim_after_timeout_returns_to_seller() {
     let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 500);
     let before = bal(&mut ctx.test, &seller);
     let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
-    take(&mut ctx, &board, &buyer, id, None);
+    take(&mut ctx, &board, &buyer, id);
 
     // too early
     let reason = ctx.test.execute_expect_failure(
@@ -258,7 +266,7 @@ fn dispute_then_arbiter_resolves_split() {
 
     let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 500);
     let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
-    take(&mut ctx, &board, &buyer, id, None);
+    take(&mut ctx, &board, &buyer, id);
     simple(&mut ctx, &board, &buyer, "open_dispute", id);
 
     let buyer_before = bal(&mut ctx.test, &buyer);
@@ -288,7 +296,7 @@ fn non_arbiter_resolve_fails() {
 
     let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 500);
     let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
-    take(&mut ctx, &board, &buyer, id, None);
+    take(&mut ctx, &board, &buyer, id);
     simple(&mut ctx, &board, &seller, "open_dispute", id);
 
     let reason = ctx.test.execute_expect_failure(
@@ -317,7 +325,7 @@ fn listing_over_cap_is_rejected() {
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
-                      sha256(b"t"), arbiter.public_key, 10u64])
+                      sha256(b"t"), arbiter.public_key, 10u64, None::<Hash32>])
             .build_and_seal(&seller.key),
         vec![seller.owner_token.clone()],
     );
@@ -341,7 +349,7 @@ fn listing_bond_too_low_is_rejected() {
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
-                      sha256(b"t"), arbiter.public_key, 10u64])
+                      sha256(b"t"), arbiter.public_key, 10u64, None::<Hash32>])
             .build_and_seal(&seller.key),
         vec![seller.owner_token.clone()],
     );
@@ -366,7 +374,7 @@ fn non_whitelisted_arbiter_is_rejected() {
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
-                      sha256(b"t"), rogue.public_key, 10u64]) // rogue arbiter not whitelisted
+                      sha256(b"t"), rogue.public_key, 10u64, None::<Hash32>]) // rogue arbiter not whitelisted
             .build_and_seal(&seller.key),
         vec![seller.owner_token.clone()],
     );
@@ -455,7 +463,7 @@ fn arbiter_must_stake_before_resolving_when_required() {
     set_arbiter_stake(&mut ctx, &board, &owner, amount![500]);
 
     let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
-    take(&mut ctx, &board, &buyer, id, None);
+    take(&mut ctx, &board, &buyer, id);
     simple(&mut ctx, &board, &buyer, "open_dispute", id);
 
     // arbiter has not staked -> resolve is rejected
@@ -534,7 +542,7 @@ fn double_confirm_does_not_double_release() {
 
     let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 0);
     let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
-    take(&mut ctx, &board, &buyer, id, None);
+    take(&mut ctx, &board, &buyer, id);
     confirm(&mut ctx, &board, &seller, id);
     let buyer_after_first = bal(&mut ctx.test, &buyer);
 
@@ -577,7 +585,7 @@ fn arbiter_cannot_unstake_during_dispute_and_slash_still_works() {
     stake_arbiter(&mut ctx, &board, &arbiter, amount![500]);
 
     let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
-    take(&mut ctx, &board, &buyer, id, None);
+    take(&mut ctx, &board, &buyer, id);
     simple(&mut ctx, &board, &buyer, "open_dispute", id);
 
     // the arbiter tries to escape by pulling their stake mid-dispute -> rejected
@@ -626,7 +634,7 @@ fn arbiter_can_unstake_once_dispute_is_resolved() {
     stake_arbiter(&mut ctx, &board, &arbiter, amount![500]);
 
     let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
-    take(&mut ctx, &board, &buyer, id, None);
+    take(&mut ctx, &board, &buyer, id);
     simple(&mut ctx, &board, &buyer, "open_dispute", id);
 
     // arbiter resolves the dispute (settling the listing) ...
