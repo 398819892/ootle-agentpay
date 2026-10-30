@@ -47,7 +47,7 @@ def main():
 
     print("\n== Owner creates the board (bond>=50, max 5000, 5% fee, arbiter=default) ==")
     NEW=f'''use {BOARD_TPL} as OtcBoard;
-fn main() {{ let mut o=var!["o"]; let (c,ob)=OtcBoard::new(address!("{treasury}"), amount!(50), amount!(5000), 500u64, [public_key!("{DEFAULT_PK}")]); o.deposit(ob); }}'''
+fn main() {{ let mut o=var!["o"]; let (c,ob)=OtcBoard::new(address!("{treasury}"), amount!(50), amount!(5000), 500u64, [public_key!("{DEFAULT_PK}")], []); o.deposit(ob); }}'''
     res=run(t,NEW,{"o":DEFAULT})
     board=new_comp(json.dumps(res),{DEFAULT,treasury,buyer})
     print(f"  board = {board}")
@@ -66,7 +66,8 @@ fn main() {{ let mut o=var!["o"]; let (c,ob)=OtcBoard::new(address!("{treasury}"
     print("  listed (id 0)")
 
     print("\n== Buyer takes listing 0 ==")
-    TAKE=f'''fn main() {{ let mut b=var!["b"]; b.take(0u64, address!("{buyer}"), public_key!("{DEFAULT_PK}"), None); }}'''
+    # the buyer confirms the listing's arbiter (here = default) as the last arg to `take`
+    TAKE=f'''fn main() {{ let mut b=var!["b"]; b.take(0u64, address!("{buyer}"), public_key!("{DEFAULT_PK}"), public_key!("{DEFAULT_PK}")); }}'''
     run(t,TAKE,{"b":board})
     print("  taken")
 
@@ -82,7 +83,7 @@ fn main() {{ let mut o=var!["o"]; let (c,ob)=OtcBoard::new(address!("{treasury}"
     print("\n== Second listing (id 1): seller lists 1000 + 100 bond ==")
     run(t,LIST,{"s":DEFAULT,"b":board})   # same LIST manifest -> id 1
     print("\n== Buyer takes listing 1 ==")
-    TAKE1=f'''fn main() {{ let mut b=var!["b"]; b.take(1u64, address!("{buyer}"), public_key!("{DEFAULT_PK}"), None); }}'''
+    TAKE1=f'''fn main() {{ let mut b=var!["b"]; b.take(1u64, address!("{buyer}"), public_key!("{DEFAULT_PK}"), public_key!("{DEFAULT_PK}")); }}'''
     run(t,TAKE1,{"b":board})
     print("\n== A party opens a dispute (seller=default here) ==")
     run(t,f'''fn main() {{ let mut b=var!["b"]; b.open_dispute(1u64); }}''',{"b":board})

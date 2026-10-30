@@ -74,7 +74,8 @@ fn new_board(ctx: &mut Ctx, owner: &Account, treasury: &Account, arbiter: &Accou
     ctx.test.execute_expect_success(
         ctx.test.transaction()
             .call_function(ctx.template, "new",
-                args![treasury.component, bond, max_amount, fee_bps, vec![arbiter.public_key]])
+                args![treasury.component, bond, max_amount, fee_bps, vec![arbiter.public_key],
+                      Vec::<ResourceAddress>::new()])
             .put_last_instruction_output_on_workspace("ret")
             .call_method(owner.component, "deposit", args![Workspace("ret.1")])
             .build_and_seal(&owner.key),
@@ -116,9 +117,15 @@ fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
 }
 
 fn take(ctx: &mut Ctx, board: &Board, buyer: &Account, id: u64) {
+    // A real buyer reads the listing's arbiter and confirms it in `take` (the method now requires it).
+    ctx.test.execute_expect_success(
+        ctx.test.transaction().call_method(board.component, "get_arbiter", args![id]).build_and_seal(&buyer.key),
+        vec![buyer.owner_token.clone()],
+    );
+    let arbiter = ctx.test.expect_return::<RistrettoPublicKeyBytes>(0);
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(board.component, "take", args![id, buyer.component, buyer.public_key])
+            .call_method(board.component, "take", args![id, buyer.component, buyer.public_key, arbiter])
             .build_and_seal(&buyer.key),
         vec![buyer.owner_token.clone()],
     );

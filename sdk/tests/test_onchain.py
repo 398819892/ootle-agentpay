@@ -214,7 +214,8 @@ def test_pay_manifest_rejects_non_hex_merchant():
     b = _budget()
     for bad in ["component_not_hex", "component_" + "a" * 63, "resource_" + "a" * 64,
                 'component_' + "a" * 64 + '"); drop_all_proofs!(); //',
-                "robert'); DROP", "component_" + "A" * 64]:   # uppercase hex is rejected too
+                "robert'); DROP", "component_" + "A" * 64,   # uppercase hex is rejected too
+                "component_" + "a" * 64 + "\n"]:   # trailing newline must be rejected (fullmatch, not match)
         with pytest.raises(ChainError):
             b._pay_manifest(bad, 100, "ok")
 

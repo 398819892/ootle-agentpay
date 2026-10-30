@@ -68,23 +68,34 @@ Per-listing escrow with explicit OTC roles. Listing: `Open → Taken → Settled
 
 | Method | Caller | Effect |
 |---|---|---|
-| `new(treasury_account, listing_bond, max_listing_amount, fee_bps, arbiter_whitelist) -> (Component, owner_badge)` | owner | Create the board. |
-| `list(asset, bond, seller_account, terms_hash, arbiter, timeout_epochs) -> id` | seller | Checks: `0 < asset ≤ max_listing_amount`, `bond ≥ listing_bond`, arbiter whitelisted. Locks asset+bond. → Open |
+| `new(treasury_account, listing_bond, max_listing_amount, fee_bps, arbiter_whitelist, asset_whitelist) -> (Component, owner_badge)` | owner | Create the board. `asset_whitelist` empty = any resource tradable. |
+| `list(asset, bond, seller_account, terms_hash, arbiter, timeout_epochs, hashlock?) -> id` | seller | Checks: `0 < asset ≤ max_listing_amount`, `bond ≥ listing_bond` **and same resource as asset**, arbiter whitelisted, asset on whitelist (if non-empty). `hashlock` is seller-set. Locks asset+bond. → Open |
 | `cancel(id)` | seller | Open only; return asset+bond. → Cancelled |
-| `take(id, buyer_account, buyer, hashlock?)` | buyer (identity by arg) | → Taken; sets deadline. |
+| `take(id, buyer_account, buyer, expected_arbiter)` | buyer (identity by arg) | Buyer must confirm the listing's arbiter (`expected_arbiter` = `get_arbiter(id)`). → Taken; sets deadline. |
 | `confirm(id, preimage?)` | seller **or** valid preimage holder | Asset → buyer `− fee`; fee → treasury; bond → seller. → Settled |
 | `reclaim(id)` | seller, after timeout | Asset+bond → seller. → Refunded |
 | `open_dispute(id)` | seller or buyer | → Disputed |
 | `resolve(id, to_buyer_amount)` | listing's arbiter | Split asset; bond → seller. → Settled |
+| `claim_dispute_timeout(id)` | anyone, after `dispute_deadline` | Force-close a stalled dispute: asset+bond → seller (safe default); the absent arbiter's stake (if any) is slashed to treasury. → Refunded |
 | `add_arbiter(pk)` / `remove_arbiter(pk)` / `set_params(bond, max, fee_bps)` | owner (owner_badge) | Manage the board. |
+| `add_tradable_asset(resource)` / `remove_tradable_asset(resource)` | owner (owner_badge) | Manage the tradable-asset whitelist. |
 | `set_arbiter_stake(stake)` / `slash_arbiter(pk)` | owner (owner_badge) | Require a resolve stake; slash a bad arbiter's stake to treasury. |
 | `stake_arbiter(stake)` / `unstake_arbiter() -> bucket` | whitelisted arbiter | Post / withdraw stake. `unstake_arbiter` is **rejected while the caller is the arbiter on a `Disputed` listing** (can't dodge a slash). |
-| `get_listing(id) / get_params() / get_arbiter_stake(pk) / get_owner_badge()` | anyone | Read. |
+| `get_listing(id) / get_params() / get_arbiter(id) / get_arbiter_stake(pk) / get_asset_whitelist() / get_owner_badge()` | anyone | Read. |
 
 Terms are summarised on chain as `terms_hash` (a 32-byte hash); the detail is kept off chain.
 
-Anti-abuse: **listing bond** (skin in the game), **max listing amount** (per-deal cap), **arbiter
-whitelist** (only approved arbiters), and an optional **arbiter stake** the owner can slash.
+Anti-abuse: **listing bond** (skin in the game, same resource as the asset), **max listing amount**
+(per-deal cap), **arbiter whitelist** (only approved arbiters), an optional **tradable-asset
+whitelist** (only approved resources listable), a **buyer-confirmed arbiter** at `take`, and an
+optional **arbiter stake** the owner can slash — including automatically on a stalled dispute.
+
+**Dispute-timeout trust model.** OTC settles off chain, so the chain has no proof of payment. A
+stalled dispute force-closes to the **seller** (defaulting to the buyer would let a non-paying buyer
+steal the asset). The buyer's protections are: confirming the arbiter at `take`, the owner's arbiter
+whitelist, and the arbiter's stake being slashed if they go dark. A board with no arbiter stake has
+no economic protection against seller↔arbiter collusion on timeout — set `arbiter_stake` above a
+deal's value. See `docs/audit-notes.md`.
 
 **Trust model (read before building on this).** OtcBoard settles an **off-chain** payment, so it is
 **not a trustless atomic swap**. `confirm(id, preimage?)`: the hashlock preimage is only a

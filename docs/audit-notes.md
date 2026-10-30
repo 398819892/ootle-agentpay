@@ -299,6 +299,60 @@ recover the funds to the owner and a stolen key still cannot redirect them. **Te
 `refund_after_timeout_is_callable_by_anyone_and_pays_the_payer` (replaces the old payer-only test,
 which pinned the vulnerable behaviour).
 
+## Second external review (2026-10-30, follow-up) — fixes to the fixes
+
+The reviewer re-read the #1–#4 / #7 fixes and found that fixing the #3 freeze introduced a new
+*incentive* problem, plus two residual gaps. All addressed here.
+
+### A — Stalled-dispute timeout was seller-profitable (otc_board)
+**Was:** `claim_dispute_timeout` returns the asset to the **seller**, and the arbiter is chosen by
+the seller at `list`. A stalling seller could take the buyer's off-chain payment, pick a lazy or
+complicit (whitelisted) arbiter, let the dispute time out, and keep *both* the asset and the payment.
+(The pre-#3 "freeze forever" was incentive-neutral; the #3 fix made the default profitable.)
+**Why not just flip the default to the buyer:** the chain has no proof the buyer paid, so a
+buyer-default would let a non-paying buyer take → dispute → wait → steal the asset outright — a
+strictly worse, theft-grade bug. The seller-default stays; the collusion incentive is removed
+instead. **Fix:** (1) the **buyer confirms the arbiter** at `take` (`expected_arbiter` must equal the
+listing's arbiter — the buyer consents, on chain, to the party the timeout favours; read it with
+`get_arbiter`); (2) `claim_dispute_timeout` **slashes the stalled arbiter's stake** to the treasury,
+so an arbiter who goes dark loses money and a seller gains nothing by recruiting one — the owner
+sizes `arbiter_stake` above a deal's value to make collusion unprofitable; (3) the trust model is
+documented in the module docs and `docs/interfaces.md`. **Tests:** `take_with_wrong_arbiter_is_rejected`,
+`stalled_dispute_slashes_the_absent_arbiter`.
+
+### B — Same timeout asymmetry in escrow (disclosure)
+**Was:** escrow's stalled-dispute backstop refunds the **payer**; in `pay_via_escrow` the arbiter is
+owner-configured (payer side), so a merchant who delivered can be refunded-against by a stalling
+payer + absent arbiter. There is no clean automatic alternative (payer-default is the safe liveness
+choice). **Fix:** documented — the escrow module docs now state the dispute-timeout trust model and
+direct a payee to verify the arbiter via `get_parties` (and treat a `None` arbiter as "no dispute
+protection") before delivering. No code change to the settlement default.
+
+### C — Same-resource bond still allows air-coin listings (otc_board)
+**Was:** #2 made the bond the same resource as the asset, but a seller can still list a self-minted
+worthless token *as the asset* and post the same worthless token as the bond — the bond check passes
+and the skin-in-the-game is empty. **Fix:** an owner-managed **tradable-asset whitelist**
+(`asset_whitelist`, with `add_tradable_asset` / `remove_tradable_asset`): when non-empty, `list`
+rejects any asset whose resource is not on it, so a board can restrict trading to real resources
+(XTR, approved stablecoins). Empty = permissive (documented as not for production). **Test:**
+`listing_a_non_whitelisted_asset_is_rejected`.
+
+### D — Address/label regex allowed a trailing newline (sdk onchain.py)
+**Was:** `_check_address` / `_check_session` used `re.match` with a `^…$` pattern; Python's `$` also
+matches just before a trailing `\n`, so `"component_<64hex>\n"` passed. Not exploitable (the string
+literal stays closed), but a gap in the hardening layer. **Fix:** switched to `re.fullmatch`.
+**Test:** the trailing-newline case added to `test_pay_manifest_rejects_non_hex_merchant`.
+
+### Still open (disclosed, not fixed this round)
+- #4 back-half: `revoke` does not retroactively close escrows already opened by a leaked agent key
+  (architectural — a revoked key still releases until timeout). #5: AgentBudget fixed-window lets a
+  boundary spend ~2× the daily cap (documented, set caps at half). #8: `agentAccount` defaults to
+  `ownerAccount` in the reference web deployment (on-chain caps only bind agents that hold their own
+  keys in their own environment). Minor: listing bond is never actually slashed; owner-decided
+  `slash_arbiter` is a conflict of interest; listings grow unbounded in one component; `amount *
+  fee_bps` could overflow a 64-bit `Amount` at 18-decimal precision (use checked math).
+
 ### cargo test (WSL, all green)
-escrow **26** (authz 4, conservation 4, edge 4, test 14) · otc_board **38** (authz 16, conservation 4,
-test 18) · agent_budget **25** (conservation 3, escrow_integration 8, test 14). Total **89**.
+escrow **26** (authz 4, conservation 4, edge 4, test 14) · otc_board **41** (authz 19, conservation 4,
+test 18) · agent_budget **25** (conservation 3, escrow_integration 8, test 14). Total **92**.
+_(Counts refreshed after the WSL run below; otc_board +3 for this round's A/C regression tests.)_

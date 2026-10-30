@@ -77,7 +77,8 @@ fn new_board(ctx: &mut Ctx, owner: &Account, treasury: &Account, arbiter: &Accou
     ctx.test.execute_expect_success(
         ctx.test.transaction()
             .call_function(ctx.template, "new",
-                args![treasury.component, bond, max_amount, fee_bps, vec![arbiter.public_key]])
+                args![treasury.component, bond, max_amount, fee_bps, vec![arbiter.public_key],
+                      Vec::<ResourceAddress>::new()])
             .put_last_instruction_output_on_workspace("ret")
             .call_method(owner.component, "deposit", args![Workspace("ret.1")])
             .build_and_seal(&owner.key),
@@ -111,8 +112,13 @@ fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
 
 fn take(ctx: &mut Ctx, board: &Board, buyer: &Account, id: u64) {
     ctx.test.execute_expect_success(
+        ctx.test.transaction().call_method(board.component, "get_arbiter", args![id]).build_and_seal(&buyer.key),
+        vec![buyer.owner_token.clone()],
+    );
+    let arbiter = ctx.test.expect_return::<RistrettoPublicKeyBytes>(0);
+    ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(board.component, "take", args![id, buyer.component, buyer.public_key])
+            .call_method(board.component, "take", args![id, buyer.component, buyer.public_key, arbiter])
             .build_and_seal(&buyer.key),
         vec![buyer.owner_token.clone()],
     );
@@ -169,6 +175,18 @@ fn slash(ctx: &mut Ctx, board: &Board, owner: &Account, arbiter: &Account) {
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("p")
             .call_method(board.component, "slash_arbiter", args![arbiter.public_key])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+}
+
+fn add_tradable_asset(ctx: &mut Ctx, board: &Board, owner: &Account, asset: ResourceAddress) {
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .create_proof(owner.component, board.owner_badge)
+            .put_last_instruction_output_on_workspace("p")
+            .call_method(board.component, "add_tradable_asset", args![asset])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
         vec![owner.owner_token.clone()],
@@ -334,7 +352,7 @@ fn double_take_rejected_first_buyer_is_paid() {
 
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
-            .call_method(board.component, "take", args![id, buyer2.component, buyer2.public_key])
+            .call_method(board.component, "take", args![id, buyer2.component, buyer2.public_key, arbiter.public_key])
             .build_and_seal(&buyer2.key),
         vec![buyer2.owner_token.clone()],
     );
@@ -462,7 +480,7 @@ fn take_cannot_impersonate_a_different_buyer() {
     // attacker signs, but claims the victim's public key as the buyer -> rejected
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
-            .call_method(board.component, "take", args![id, attacker.component, victim.public_key])
+            .call_method(board.component, "take", args![id, attacker.component, victim.public_key, arbiter.public_key])
             .build_and_seal(&attacker.key),
         vec![attacker.owner_token.clone()],
     );
@@ -617,7 +635,8 @@ fn fee_above_platform_maximum_is_rejected() {
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
             .call_function(ctx.template, "new",
-                args![treasury.component, amount![0], amount![10000], 2000u64, vec![arbiter.public_key]])
+                args![treasury.component, amount![0], amount![10000], 2000u64, vec![arbiter.public_key],
+                      Vec::<ResourceAddress>::new()])
             .build_and_seal(&owner.key),
         vec![owner.owner_token.clone()],
     );
@@ -726,4 +745,114 @@ fn stalled_dispute_can_be_force_closed_after_deadline() {
     set_epoch(&mut ctx.test, 15);
     simple_ok(&mut ctx, &board, &anyone, "claim_dispute_timeout", id);
     assert_eq!(bal(&mut ctx.test, &seller), seller_before); // fully recovered
+}
+
+// -- this review round: A (buyer-confirms-arbiter + slash-on-timeout) and C (asset whitelist) ----
+
+/// A: the BUYER must confirm the listing's arbiter at `take`. Passing a different arbiter key than
+/// the one the seller chose is rejected — the buyer has not consented to the real arbiter, the party
+/// the dispute-timeout default works against. The listing stays Open, and confirming the correct
+/// arbiter then settles the deal normally.
+#[test]
+fn take_with_wrong_arbiter_is_rejected() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = empty(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+    let buyer = empty(&mut ctx.test);
+    let other = empty(&mut ctx.test); // a different, non-matching arbiter key
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 0);
+    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
+
+    // buyer signs as themselves but confirms the WRONG arbiter -> rejected
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(board.component, "take",
+                args![id, buyer.component, buyer.public_key, other.public_key])
+            .build_and_seal(&buyer.key),
+        vec![buyer.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Arbiter mismatch: the listing's arbiter is not the one the buyer confirmed");
+
+    // still Open: confirming the correct arbiter (the `take` helper reads it) now settles the deal
+    take(&mut ctx, &board, &buyer, id);
+    let buyer_before = bal(&mut ctx.test, &buyer);
+    confirm_ok(&mut ctx, &board, &seller, id);
+    assert_eq!(bal(&mut ctx.test, &buyer), buyer_before + amount![1000]); // 0 fee
+}
+
+/// A: a stalled dispute slashes the absent arbiter. With a required arbiter stake, letting the
+/// dispute time out (the arbiter never resolves) moves that stake to the treasury *and* returns the
+/// asset+bond to the seller — so a seller recruiting a lazy/complicit arbiter to stall a deal they
+/// were already paid for off chain costs that arbiter their whole stake. Sized above a deal's value,
+/// the collusion is unprofitable.
+#[test]
+fn stalled_dispute_slashes_the_absent_arbiter() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = funded(&mut ctx.test); // posts a stake, then goes dark
+    let seller = funded(&mut ctx.test);
+    let buyer = empty(&mut ctx.test);
+    let anyone = funded(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 0);
+    set_arbiter_stake(&mut ctx, &board, &owner, amount![500]);
+    stake_arbiter(&mut ctx, &board, &arbiter, amount![500]);
+
+    let seller_before = bal(&mut ctx.test, &seller);
+    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
+    set_epoch(&mut ctx.test, 5);
+    take(&mut ctx, &board, &buyer, id);
+    simple_ok(&mut ctx, &board, &buyer, "open_dispute", id); // dispute_deadline = 5 + 10 = 15
+    assert_eq!(bal(&mut ctx.test, &treasury), amount![0]);
+
+    // arbiter never resolves; after the deadline anyone force-closes
+    set_epoch(&mut ctx.test, 15);
+    simple_ok(&mut ctx, &board, &anyone, "claim_dispute_timeout", id);
+
+    assert_eq!(bal(&mut ctx.test, &seller), seller_before);   // asset + bond returned to seller
+    assert_eq!(bal(&mut ctx.test, &treasury), amount![500]);  // stalled arbiter's stake slashed
+
+    // the arbiter's staked balance is now zero
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .call_method(board.component, "get_arbiter_stake", args![arbiter.public_key])
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    let (_required, staked) = ctx.test.expect_return::<(Amount, Amount)>(0);
+    assert_eq!(staked, amount![0]);
+}
+
+/// C: with a non-empty tradable-asset whitelist, a seller cannot list a resource that is not on it.
+/// The owner restricts trading to a single resource that is not XTR (the board's own badge resource
+/// stands in for "some approved non-XTR token"), so listing XTR is rejected. An empty whitelist (the
+/// default these tests use) allows any resource, which is why every other test lists XTR freely.
+#[test]
+fn listing_a_non_whitelisted_asset_is_rejected() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = empty(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 0);
+    add_tradable_asset(&mut ctx, &board, &owner, board.owner_badge); // whitelist is now {badge}, excludes XTR
+
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(seller.component, "withdraw", args![XTR, amount![1000]])
+            .put_last_instruction_output_on_workspace("asset")
+            .call_method(seller.component, "withdraw", args![XTR, amount![100]])
+            .put_last_instruction_output_on_workspace("bond")
+            .call_method(board.component, "list",
+                args![Workspace("asset"), Workspace("bond"), seller.component,
+                      sha256(b"t"), arbiter.public_key, 10u64, None::<Hash32>])
+            .build_and_seal(&seller.key),
+        vec![seller.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Asset resource is not on the board's tradable-asset whitelist");
 }

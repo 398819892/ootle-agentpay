@@ -48,7 +48,9 @@ _MEMO_MAX_BYTES = 253  # Ootle Message-memo limit (see invoice.MAX_MEMO_BYTES)
 def _check_address(addr: Any, kind: str, regex: "re.Pattern[str]") -> str:
     """Return `addr` if it is exactly ``<kind>_<64 lowercase hex>``, else raise. Used for every
     address spliced into an ``address!("…")`` / ``use …`` clause."""
-    if not isinstance(addr, str) or not regex.match(addr):
+    # fullmatch, not match: Python's `$` also matches just before a trailing newline, so
+    # `regex.match("component_<64hex>\n")` would wrongly pass. fullmatch anchors the whole string.
+    if not isinstance(addr, str) or not regex.fullmatch(addr):
         raise ChainError(f"invalid {kind} address (expected {kind}_ + 64 hex chars): {addr!r}")
     return addr
 
@@ -86,7 +88,7 @@ def _check_memo(memo: Any) -> str:
 
 def _check_session(session: Any) -> str:
     """Validate an agent session label before it is spliced into a ``"…"`` literal."""
-    if not isinstance(session, str) or not _SESSION_RE.match(session):
+    if not isinstance(session, str) or not _SESSION_RE.fullmatch(session):  # fullmatch: reject trailing newline
         raise ChainError("session label must match [A-Za-z0-9_.-]{1,64}")
     return session
 

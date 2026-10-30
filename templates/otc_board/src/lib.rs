@@ -34,6 +34,23 @@
 //! `confirm`, any stranger could take a listing with a self-chosen lock and release the asset to
 //! themselves without paying — a P0 asset-theft bug, now fixed. See `docs/audit-notes.md`.)
 //!
+//! **Dispute-timeout trust model (read before trusting a listing).** OTC settles off chain, so the
+//! chain has *no proof the buyer paid*. If a dispute stalls (the arbiter never resolves), the asset
+//! must go somewhere; `claim_dispute_timeout` returns it to the **seller**. This is deliberately the
+//! safe default — the only alternative, defaulting to the buyer, would let a non-paying buyer take a
+//! listing, open a dispute and wait out the clock to steal the asset outright. But it does mean a
+//! *stalling seller* who picks a lazy or complicit arbiter could keep both the asset and the buyer's
+//! off-chain payment. Three things guard against that, and a buyer should check all three before
+//! paying: (1) the **buyer confirms the arbiter** at `take` (passes the arbiter key they are willing
+//! to trust; a listing whose arbiter they do not accept cannot be taken by accident — read it with
+//! `get_arbiter`); (2) a stalled arbiter is **slashed on timeout** — if the board requires an arbiter
+//! stake, `claim_dispute_timeout` moves that stake to the treasury, so an arbiter who goes dark loses
+//! money and a seller gains nothing by recruiting one; (3) arbiters are owner-whitelisted. For the
+//! slash deterrent to bite, the board owner must set `arbiter_stake` high enough to exceed any
+//! single deal's value. A board with no arbiter stake offers no economic protection against a
+//! seller–arbiter collusion on timeout — only the whitelist and the buyer's own arbiter check. See
+//! `docs/audit-notes.md`.
+//!
 //! Anti-abuse (per the product plan): a **listing bond** (skin in the game to list), a
 //! **max listing amount** (per-deal cap), and an **arbiter whitelist** (only approved arbiters).
 //! Time is measured in epochs (`Consensus::current_epoch()`); "terms" are summarised on chain as a
@@ -117,6 +134,13 @@ mod otc_board {
         max_listing_amount: Amount,
         fee_bps: u64,
         arbiter_whitelist: Vec<RistrettoPublicKeyBytes>,
+        /// Resources that may be listed for sale. **Empty = any resource allowed** (permissive; not
+        /// recommended for production). When non-empty, `list` rejects any asset whose resource is not
+        /// in this set, so a seller cannot spam the board with self-minted worthless tokens — the
+        /// bond, which must be the same resource as the asset, would then be worthless too, defeating
+        /// the skin-in-the-game / slashing purpose. Managed by the owner via
+        /// `add_tradable_asset` / `remove_tradable_asset`. See `docs/audit-notes.md`.
+        asset_whitelist: Vec<ResourceAddress>,
         /// Minimum stake an arbiter must post before they are allowed to `resolve`
         /// (0 = staking disabled — the whitelist-only behaviour). Set by the owner.
         arbiter_stake: Amount,
@@ -136,6 +160,7 @@ mod otc_board {
             max_listing_amount: Amount,
             fee_bps: u64,
             arbiter_whitelist: Vec<RistrettoPublicKeyBytes>,
+            asset_whitelist: Vec<ResourceAddress>,
         ) -> (Component<OtcBoard>, Bucket) {
             assert!(fee_bps <= MAX_FEE_BPS, "fee_bps cannot exceed the platform maximum");
             assert!(listing_bond >= amount![0], "listing_bond cannot be negative");
@@ -154,6 +179,8 @@ mod otc_board {
                 .method("set_params", rule!(resource(owner_badge)))
                 .method("set_arbiter_stake", rule!(resource(owner_badge)))
                 .method("slash_arbiter", rule!(resource(owner_badge)))
+                .method("add_tradable_asset", rule!(resource(owner_badge)))
+                .method("remove_tradable_asset", rule!(resource(owner_badge)))
                 .default(rule!(allow_all));
 
             let component = Component::new(Self {
@@ -163,6 +190,7 @@ mod otc_board {
                 max_listing_amount,
                 fee_bps,
                 arbiter_whitelist,
+                asset_whitelist,
                 arbiter_stake: amount![0],
                 arbiter_stakes: HashMap::new(),
                 listings: HashMap::new(),
@@ -201,6 +229,15 @@ mod otc_board {
         ) -> u64 {
             let amount = asset.amount();
             assert!(amount > amount![0], "Asset must be non-empty");
+            // When an asset whitelist is configured, only its resources may be listed. This stops a
+            // seller from listing a self-minted worthless token (whose same-resource bond would be
+            // worthless too) — see the `asset_whitelist` field and `docs/audit-notes.md`. An empty
+            // whitelist allows any resource (permissive default).
+            assert!(
+                self.asset_whitelist.is_empty()
+                    || self.asset_whitelist.contains(&asset.resource_address()),
+                "Asset resource is not on the board's tradable-asset whitelist"
+            );
             // `max_listing_amount` is a per-deal sanity cap denominated in the *asset's own* resource
             // (there is no price oracle on chain to compare resources by value). It is only meaningful
             // because the bond is required to be the same resource as the asset just below, so a
@@ -274,11 +311,19 @@ mod otc_board {
         /// by the seller at `list` time and is deliberately *not* a parameter here: a taker must not
         /// be able to install their own lock and then release the asset to themselves (that was the
         /// P0; see module docs).
+        ///
+        /// The buyer must also pass `expected_arbiter` — the arbiter they are willing to trust to
+        /// `resolve` a dispute — and it must equal the arbiter the seller chose at `list` time, or the
+        /// take is rejected. The arbiter is the party who decides a disputed deal and, on a stalled
+        /// dispute, the timeout defaults to refunding the *seller* (see `claim_dispute_timeout`), so a
+        /// buyer must not commit to a listing without consenting to its arbiter. Read it beforehand
+        /// with `get_arbiter`.
         pub fn take(
             &mut self,
             id: u64,
             buyer_account: ComponentAddress,
             buyer: RistrettoPublicKeyBytes,
+            expected_arbiter: RistrettoPublicKeyBytes,
         ) {
             let now = Consensus::current_epoch();
             assert!(
@@ -287,6 +332,12 @@ mod otc_board {
             );
             let listing = self.get_mut(id);
             assert!(listing.state == ListingState::Open, "Listing is not open");
+            // The buyer must explicitly consent to the arbiter the seller chose. This makes trusting
+            // the arbiter a deliberate, on-chain act by the party the timeout default works against.
+            assert!(
+                listing.arbiter == expected_arbiter,
+                "Arbiter mismatch: the listing's arbiter is not the one the buyer confirmed"
+            );
             listing.buyer_account = Some(buyer_account);
             listing.buyer = Some(buyer);
             listing.deadline_epoch = now + listing.timeout_epochs;
@@ -383,14 +434,37 @@ mod otc_board {
         /// is the seller's `confirm` or the arbiter's `resolve`, neither of which happened), the asset
         /// and bond return to the seller. A buyer who genuinely paid must get the arbiter to `resolve`
         /// within the dispute window; this backstop only runs once that window has fully elapsed.
+        ///
+        /// **The stalled arbiter is slashed.** Because the default favours the seller, an unresolved
+        /// dispute is the arbiter failing the one job they were named (and possibly staked) for. If
+        /// the listing's arbiter has posted a stake, it is moved to the treasury here. This removes
+        /// the incentive for a seller to recruit a lazy or complicit arbiter to stall a deal they were
+        /// already paid for off chain: the colluding arbiter loses their stake, so the owner sizing
+        /// `arbiter_stake` above a single deal's value makes the collusion unprofitable. A board with
+        /// no arbiter stake has nothing to slash — see the module-level trust-model note.
         pub fn claim_dispute_timeout(&mut self, id: u64) {
             let now = Consensus::current_epoch();
+            let treasury = self.treasury_account;
+            // Validate and read the arbiter before touching the (separate) stake map / listing vaults.
+            let arbiter = {
+                let listing = self.listings.get(&id).expect("unknown listing");
+                assert!(listing.state == ListingState::Disputed, "Listing is not under dispute");
+                assert!(
+                    now >= listing.dispute_deadline,
+                    "Cannot force-close before the dispute deadline"
+                );
+                listing.arbiter
+            };
+            // Slash the stalled arbiter's stake (if any) to the treasury — they failed to resolve.
+            if let Some(v) = self.arbiter_stakes.get_mut(&arbiter) {
+                if !v.balance().is_zero() {
+                    let slashed = v.withdraw_all();
+                    let amt = slashed.amount();
+                    ComponentManager::get(treasury).invoke("deposit", args![slashed]);
+                    emit_event("slash_arbiter", metadata!["amount" => amt.to_string(), "reason" => "dispute_timeout".to_string()]);
+                }
+            }
             let listing = self.get_mut(id);
-            assert!(listing.state == ListingState::Disputed, "Listing is not under dispute");
-            assert!(
-                now >= listing.dispute_deadline,
-                "Cannot force-close before the dispute deadline"
-            );
             let asset = listing.asset.withdraw_all();
             let bond = listing.bond.withdraw_all();
             let seller_account = listing.seller_account;
@@ -457,6 +531,22 @@ mod otc_board {
 
         pub fn remove_arbiter(&mut self, arbiter: RistrettoPublicKeyBytes) {
             self.arbiter_whitelist.retain(|a| a != &arbiter);
+        }
+
+        /// Owner adds a resource to the tradable-asset whitelist (idempotent). Once the whitelist is
+        /// non-empty, only its resources may be `list`ed. See the `asset_whitelist` field.
+        pub fn add_tradable_asset(&mut self, asset: ResourceAddress) {
+            if !self.asset_whitelist.contains(&asset) {
+                self.asset_whitelist.push(asset);
+            }
+            emit_event("add_tradable_asset", metadata!["asset" => asset.to_string()]);
+        }
+
+        /// Owner removes a resource from the tradable-asset whitelist. Existing listings are
+        /// unaffected; only new `list` calls are gated.
+        pub fn remove_tradable_asset(&mut self, asset: ResourceAddress) {
+            self.asset_whitelist.retain(|a| a != &asset);
+            emit_event("remove_tradable_asset", metadata!["asset" => asset.to_string()]);
         }
 
         /// Updates board parameters. The fee is capped at `MAX_FEE_BPS`, and because each listing
@@ -541,6 +631,17 @@ mod otc_board {
 
         pub fn get_params(&self) -> (Amount, Amount, u64, u64) {
             (self.listing_bond, self.max_listing_amount, self.fee_bps, self.next_id)
+        }
+
+        /// The arbiter recorded on a listing. A buyer should read this before `take` (which requires
+        /// them to confirm it) and before paying off chain. Readable by anyone.
+        pub fn get_arbiter(&self, id: u64) -> RistrettoPublicKeyBytes {
+            self.listings.get(&id).expect("unknown listing").arbiter
+        }
+
+        /// The tradable-asset whitelist (empty = any resource allowed). Readable by anyone.
+        pub fn get_asset_whitelist(&self) -> Vec<ResourceAddress> {
+            self.asset_whitelist.clone()
         }
 
         /// Returns `(required_stake, staked_by_this_arbiter)`. Readable by anyone.

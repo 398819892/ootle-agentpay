@@ -113,7 +113,7 @@ def main():
     print("\n【1】owner 建板(bond≥50, max 5000, 手续费 5%, 仲裁人=default)")
     NEW = (f'use {BOARD_TPL} as OtcBoard;\n'
            'fn main() { let mut o=var!["o"]; '
-           f'let (c,ob)=OtcBoard::new(address!("{treasury}"), amount!(50), amount!(5000), 500u64, [public_key!("{DEFAULT_PK}")]); '
+           f'let (c,ob)=OtcBoard::new(address!("{treasury}"), amount!(50), amount!(5000), 500u64, [public_key!("{DEFAULT_PK}")], []); '
            'o.deposit(ob); }')
     res = run(t, NEW, {"o": DEFAULT})
     board = new_comp(json.dumps(res), {DEFAULT, treasury, buyer})
@@ -134,7 +134,7 @@ def main():
             'let mut b=var!["b"]; '
             f'b.list(asset, bond, address!("{DEFAULT}"), hex_bytes!("{sha("stake demo")}"), public_key!("{DEFAULT_PK}"), 20u64); }}')
     run(t, LIST, {"s": DEFAULT, "b": board})
-    run(t, f'fn main() {{ let mut b=var!["b"]; b.take(0u64, address!("{buyer}"), public_key!("{DEFAULT_PK}"), None); }}', {"b": board})
+    run(t, f'fn main() {{ let mut b=var!["b"]; b.take(0u64, address!("{buyer}"), public_key!("{DEFAULT_PK}"), public_key!("{DEFAULT_PK}")); }}', {"b": board})
     run(t, 'fn main() { let mut b=var!["b"]; b.open_dispute(0u64); }', {"b": board})
     print("  listing 0:已挂单→已接单→争议中")
 

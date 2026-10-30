@@ -12,9 +12,15 @@
 //!   Open ───────────────────────────► Released
 //!     │  refund()  (after timeout)
 //!     ├───────────────────────────────► Refunded
-//!     │  dispute()
-//!     └───────────────────────────────► Disputed ──► resolve(to_payee) ──► Resolved
+//!     │  dispute()                                   resolve(to_payee)
+//!     └───────────────────────────────► Disputed ──────────────────────► Resolved
+//!                                           │  refund() (after dispute_deadline)
+//!                                           └───────────────────────────► Refunded
 //! ```
+//!
+//! Note the two edges into `Refunded`: a plain timeout from `Open`, and a stalled-dispute timeout
+//! from `Disputed` (the safe default when the arbiter never resolves). Both pay the fixed
+//! `payer_account` and are callable by anyone — see `refund`.
 //!
 //! Design notes (grounded in the real `tari_template_lib` 0.35 API):
 //! - **Any resource.** The escrow locks whatever resource is in the `funds` bucket and pays out in
@@ -33,6 +39,15 @@
 //!   treasury, so these never let funds reach a third party. But a payee who relies on being able
 //!   to dispute should first read `get_parties` and confirm their own key/account are the recorded
 //!   ones before delivering.
+//! - **Dispute-timeout trust model.** The payer also sets the `arbiter` (the only party who can
+//!   `resolve` a dispute). If a dispute stalls — the arbiter never resolves — the `dispute_deadline`
+//!   backstop refunds the funds to the **payer** (see `refund`), never to the payee. That is the safe
+//!   liveness default (funds are never frozen forever), but it means a payee who has delivered is
+//!   protected on a dispute *only as far as they trust the payer-chosen arbiter to actually act*. A
+//!   payee must therefore read `get_parties`, confirm the `arbiter` is one they trust, and treat a
+//!   `None` arbiter (disputes disabled — e.g. `AgentBudget::pay_via_escrow` with no arbiter) as "no
+//!   dispute protection at all" before delivering. In `AgentBudget::pay_via_escrow` the arbiter is
+//!   configured by the budget owner (the payer side), so this caveat applies squarely to merchants.
 
 use tari_template_lib::prelude::*;
 
@@ -63,7 +78,9 @@ mod escrow {
     pub struct Escrow {
         /// The locked funds (any resource type).
         funds: Vault,
-        /// Payer identity — may refund (after timeout) and may dispute/release.
+        /// Payer identity — may dispute and may release. (Refund after timeout is callable by
+        /// anyone: it always pays the fixed `payer_account`, so restricting the caller adds nothing
+        /// and opening it is a deliberate key-loss recovery property — see `refund`.)
         payer: RistrettoPublicKeyBytes,
         /// Payee identity — may dispute.
         payee: RistrettoPublicKeyBytes,
