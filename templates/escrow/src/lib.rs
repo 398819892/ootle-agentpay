@@ -79,6 +79,12 @@ mod escrow {
         hashlock: Option<Hash32>,
         /// Refund is only allowed at or after this epoch.
         deadline_epoch: u64,
+        /// The configured timeout window, in epochs. Reused to bound a dispute: the arbiter has one
+        /// such window from the dispute to `resolve` before anyone may `refund` to the payer.
+        timeout_epochs: u64,
+        /// Epoch after which a stalled dispute may be force-refunded to the payer (0 = not disputed).
+        /// Set in `dispute`; see `refund`. Guards against an unreachable arbiter freezing funds.
+        dispute_deadline: u64,
         /// Fee charged on the payee's payout, in basis points (0..=10000).
         fee_bps: u64,
         /// Current lifecycle state.
@@ -122,6 +128,8 @@ mod escrow {
                 treasury_account,
                 hashlock,
                 deadline_epoch,
+                timeout_epochs,
+                dispute_deadline: 0,
                 fee_bps,
                 state: EscrowState::Open,
             })
@@ -172,22 +180,39 @@ mod escrow {
             );
         }
 
-        /// Refunds the locked funds to the payer. Only callable by the payer, and only once the
-        /// timeout epoch has been reached. No fee is charged on a refund.
+        /// Refunds the locked funds to the fixed `payer_account`. No fee is charged on a refund.
+        ///
+        /// **Callable by anyone** — the destination is the immutable `payer_account`, so there is no
+        /// benefit to restricting the caller, and opening it is a deliberate recovery property: if the
+        /// payer's key is lost, rotated, or compromised (e.g. a revoked/leaked agent key in
+        /// `AgentBudget::pay_via_escrow`), the funds can still be returned to the owner's account once
+        /// the timeout passes, instead of being stranded. A stolen key cannot redirect them either —
+        /// refund always pays `payer_account`, never the caller.
+        ///
+        /// Two timeouts gate it:
+        /// - from `Open`, once the refund `deadline_epoch` is reached (the payee never delivered);
+        /// - from `Disputed`, once the `dispute_deadline` is reached — the safe default when the
+        ///   arbiter never resolved, so a dispute can never freeze the funds forever (see `dispute`).
         ///
         /// # Panics
-        /// - if the escrow is not `Open`
-        /// - if the caller is not the payer
-        /// - if the current epoch is before the deadline
+        /// - if the escrow is neither `Open` nor `Disputed`
+        /// - if the relevant timeout has not yet been reached
         pub fn refund(&mut self) {
-            self.assert_open();
-
-            let caller = CallerContext::transaction_signer_public_key();
-            assert!(caller == self.payer, "Unauthorized: only the payer may refund");
-            assert!(
-                Consensus::current_epoch() >= self.deadline_epoch,
-                "Cannot refund before the timeout"
-            );
+            let now = Consensus::current_epoch();
+            match self.state {
+                EscrowState::Open => {
+                    assert!(now >= self.deadline_epoch, "Cannot refund before the timeout");
+                }
+                EscrowState::Disputed => {
+                    assert!(
+                        now >= self.dispute_deadline,
+                        "Cannot force-close before the dispute deadline"
+                    );
+                }
+                // Released / Refunded / Resolved are terminal. Keep the original message so callers
+                // (and tests) see the same "not open" rejection for a settled escrow.
+                _ => panic!("Escrow is not open"),
+            }
 
             let refund_bucket = self.funds.withdraw_all();
             ComponentManager::get(self.payer_account).invoke("deposit", args![refund_bucket]);
@@ -196,14 +221,28 @@ mod escrow {
             emit_event("refunded", metadata![]);
         }
 
-        /// Raises a dispute, freezing the escrow until the arbiter resolves it. Either the payer or
-        /// the payee may dispute.
+        /// Raises a dispute, freezing the escrow until the arbiter resolves it — or, if the arbiter
+        /// never does, until anyone force-refunds it to the payer after `dispute_deadline` (see
+        /// `refund`). Either the payer or the payee may dispute.
+        ///
+        /// Disputing is **only possible when an arbiter is configured**. With no arbiter, nobody could
+        /// `resolve`, so a dispute would freeze the funds with no way out short of the refund timeout;
+        /// rejecting it up front keeps the escrow on its normal release/refund paths. (An escrow with
+        /// no arbiter — e.g. one opened by `AgentBudget::pay_via_escrow` with `escrow_arbiter = None` —
+        /// is therefore never freezable: it can only be released by the payer/preimage or refunded to
+        /// the payer after the timeout. This was a confirmed liveness/fund-safety gap — see
+        /// `docs/audit-notes.md`.)
         ///
         /// # Panics
         /// - if the escrow is not `Open`
+        /// - if no arbiter is configured
         /// - if the caller is neither the payer nor the payee
         pub fn dispute(&mut self) {
             self.assert_open();
+            assert!(
+                self.arbiter.is_some(),
+                "Cannot dispute an escrow with no arbiter"
+            );
 
             let caller = CallerContext::transaction_signer_public_key();
             assert!(
@@ -212,6 +251,7 @@ mod escrow {
             );
 
             self.state = EscrowState::Disputed;
+            self.dispute_deadline = Consensus::current_epoch() + self.timeout_epochs;
             emit_event("disputed", metadata![]);
         }
 

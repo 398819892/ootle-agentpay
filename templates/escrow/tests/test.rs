@@ -341,26 +341,37 @@ fn refund_before_timeout_fails() {
     assert_reject_reason(reason, "Cannot refund before the timeout");
 }
 
+/// After the timeout, refund is callable by ANYONE (not just the payer) and the funds always go to
+/// the fixed `payer_account`. This is the key-loss recovery property: a third party can trigger the
+/// return even if the payer's key is gone, and a stranger cannot redirect the funds to themselves.
+/// (Was previously payer-only — a confirmed custody bug; see `docs/audit-notes.md`.)
 #[test]
-fn refund_by_non_payer_fails() {
+fn refund_after_timeout_is_callable_by_anyone_and_pays_the_payer() {
     let mut ctx = setup();
     let payer = new_account(&mut ctx.test);
     let payee = new_account(&mut ctx.test);
     let arbiter = new_account(&mut ctx.test);
     let treasury = new_account(&mut ctx.test);
+    let stranger = new_account(&mut ctx.test);
 
     let escrow = create_escrow(&mut ctx, &payer, &payee, &arbiter, &treasury, &EscrowParams::default());
     set_epoch(&mut ctx.test, 11);
 
-    // the payee tries to refund themselves
-    let reason = ctx.test.execute_expect_failure(
+    let payer_before = tari_balance(&mut ctx.test, &payer);
+    let stranger_before = tari_balance(&mut ctx.test, &stranger);
+
+    // a stranger (not the payer) triggers the refund after the timeout
+    ctx.test.execute_expect_success(
         ctx.test
             .transaction()
             .call_method(escrow, "refund", args![])
-            .build_and_seal(&payee.key),
-        vec![payee.owner_token.clone()],
+            .build_and_seal(&stranger.key),
+        vec![stranger.owner_token.clone()],
     );
-    assert_reject_reason(reason, "Unauthorized: only the payer may refund");
+
+    // the full 1000 lands in the payer's account; the caller gets nothing extra (minus their own fees)
+    assert_eq!(tari_balance(&mut ctx.test, &payer), payer_before + amount![1000]);
+    assert!(tari_balance(&mut ctx.test, &stranger) <= stranger_before); // no diversion to the caller
 }
 
 #[test]

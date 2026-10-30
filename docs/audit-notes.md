@@ -250,3 +250,55 @@ seller's real secret releases to the recorded buyer). Happy paths remain green i
   unchanged on every rejected attempt.
 
 Full suite after this pass: see the run numbers in the hand-off note / commit message.
+
+---
+
+## Fund-safety pass (independent review — four confirmed issues, now fixed)
+
+A second independent review found four fund-safety issues (pre-mainnet "must fix"). All four were
+reproduced in code, fixed, and pinned with an attack-scenario regression test. No cross-template call
+signature changed (`Escrow::new` and `AgentBudget::pay_via_escrow` are untouched; OtcBoard gained a
+new `claim_dispute_timeout` method but no existing signature changed).
+
+### #1 — Retroactive fee hike (otc_board)
+**Was:** `confirm`/`resolve` charged the board's *current* `self.fee_bps`, and `set_params` could
+raise it to 10000 at any time. An owner could take the full asset into the treasury after a buyer
+took a listing. **Fix:** the fee is snapshotted into `Listing.fee_bps` at `list` time and settlement
+uses that snapshot; a module-wide `MAX_FEE_BPS = 1000` (10%) caps the fee in `new`/`set_params` so no
+confiscatory rate is possible even on future listings. **Tests:**
+`owner_cannot_raise_fee_after_listing_is_taken`, `fee_above_platform_maximum_is_rejected`.
+
+### #2 — Collateral in a worthless resource (otc_board)
+**Was:** `list` and `stake_arbiter` only checked `amount`, never `resource_address`, so a seller/
+arbiter could post a self-minted air-coin as bond/stake, voiding the skin-in-the-game and making
+`slash` empty. **Fix:** the bond must be the **same resource as the listed asset**
+(`list`), and the arbiter stake must be **XTR** (the board's single collateral currency). The
+`max_listing_amount` cap is documented as denominated in the asset's own resource; bond==asset keeps
+each listing single-denomination so the cap is meaningful. **Tests:**
+`bond_in_wrong_resource_is_rejected`, `arbiter_stake_in_wrong_resource_is_rejected`.
+
+### #3 — Dispute can freeze funds forever (escrow + otc_board)
+**Was:** escrow `arbiter` is `Option`; `dispute` didn't check it, but only an arbiter can `resolve`,
+so a dispute on a no-arbiter escrow (e.g. a `pay_via_escrow` escrow with `escrow_arbiter = None`)
+froze the funds. Even with an arbiter, an unreachable one froze them with no timeout. OtcBoard had
+the same unreachable-arbiter freeze. **Fix (escrow):** `dispute` asserts an arbiter is configured;
+it records `dispute_deadline = now + timeout_epochs`; once that passes, `refund` (now any-caller, see
+#4) force-closes a stalled dispute by returning everything to the payer. **Fix (otc_board):**
+`open_dispute` records `dispute_deadline`; new `claim_dispute_timeout` lets **anyone** force-close
+after it, returning asset + bond to the seller (the same safe default as `reclaim` — no on-chain
+proof of payment ⇒ asset goes back to the seller). **Tests:**
+`dispute_without_arbiter_is_rejected_and_escrow_stays_recoverable`,
+`stalled_dispute_refunds_payer_after_deadline` (escrow);
+`stalled_dispute_can_be_force_closed_after_deadline` (otc_board).
+
+### #4 — Lost agent key strands escrowed funds (escrow)
+**Was:** `refund` was payer-only; if the payer's key (an agent key in `pay_via_escrow`) was lost,
+rotated or revoked, the timed-out funds could never be returned. **Fix:** after the timeout `refund`
+is callable by **anyone**; the destination is the immutable `payer_account`, so a third party can
+recover the funds to the owner and a stolen key still cannot redirect them. **Tests:**
+`refund_after_timeout_is_callable_by_anyone_and_pays_the_payer` (replaces the old payer-only test,
+which pinned the vulnerable behaviour).
+
+### cargo test (WSL, all green)
+escrow **26** (authz 4, conservation 4, edge 4, test 14) · otc_board **38** (authz 16, conservation 4,
+test 18) · agent_budget **25** (conservation 3, escrow_integration 8, test 14). Total **89**.

@@ -556,3 +556,174 @@ fn seller_set_lock_releases_only_with_the_sellers_preimage() {
     );
     assert_eq!(bal(&mut ctx.test, &buyer), buyer_before + amount![1000]); // 0 fee
 }
+
+// =============================================================================================
+// Fund-safety regressions (independent audit pass). Each reproduces a confirmed, now-fixed bug.
+// See `docs/audit-notes.md` §Fund-safety.
+// =============================================================================================
+
+/// Owner sets board params (bond / max / fee). Owner-badge gated.
+fn set_params(ctx: &mut Ctx, board: &Board, owner: &Account, bond: Amount, max: Amount, fee_bps: u64) {
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .create_proof(owner.component, board.owner_badge)
+            .put_last_instruction_output_on_workspace("p")
+            .call_method(board.component, "set_params", args![bond, max, fee_bps])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+}
+
+/// #1 FEE-RUG: the owner raises the board fee to the maximum *after* a buyer has taken a listing,
+/// trying to siphon the asset into the treasury on settlement. The fee is snapshotted at `list`
+/// time, so settlement must still charge the original rate (0 here), not the inflated one.
+#[test]
+fn owner_cannot_raise_fee_after_listing_is_taken() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = empty(&mut ctx.test);
+    let seller = funded(&mut ctx.test);
+    let buyer = empty(&mut ctx.test);
+
+    // board opens at 0% fee
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![0], amount![10000], 0);
+    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
+    take(&mut ctx, &board, &buyer, id);
+
+    // owner now cranks the fee to the platform maximum (10%) — but the deal is already in flight
+    set_params(&mut ctx, &board, &owner, amount![0], amount![10000], 1000);
+
+    let buyer_before = bal(&mut ctx.test, &buyer);
+    let treasury_before = bal(&mut ctx.test, &treasury);
+    confirm_ok(&mut ctx, &board, &seller, id);
+
+    // settlement charges the SNAPSHOTTED 0% fee: buyer gets the full asset, treasury gets nothing.
+    assert_eq!(bal(&mut ctx.test, &buyer), buyer_before + amount![1000]);
+    assert_eq!(bal(&mut ctx.test, &treasury), treasury_before); // no fee seized
+}
+
+/// #1 FEE-CAP: the owner cannot configure a fee above the platform maximum, at creation or later,
+/// so there is no way to set a confiscatory rate even on future listings.
+#[test]
+fn fee_above_platform_maximum_is_rejected() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = empty(&mut ctx.test);
+
+    // `new` with a 20% fee is rejected
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_function(ctx.template, "new",
+                args![treasury.component, amount![0], amount![10000], 2000u64, vec![arbiter.public_key]])
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "fee_bps cannot exceed the platform maximum");
+
+    // a legal board, then `set_params` trying to exceed the cap is rejected too
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![0], amount![10000], 500);
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .create_proof(owner.component, board.owner_badge)
+            .put_last_instruction_output_on_workspace("p")
+            .call_method(board.component, "set_params", args![amount![0], amount![10000], 1001u64])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "fee_bps cannot exceed the platform maximum");
+}
+
+/// #2 AIR-COIN BOND: a seller tries to post a bond in a *different* resource than the asset — here
+/// the board's own OTC-OWN badge, standing in for any non-XTR token the seller controls — to dodge
+/// real skin-in-the-game. The bond's resource must equal the asset's, so the `list` is rejected and
+/// nothing is locked. `listing_bond` is 0 so the *amount* check would pass, proving it is the
+/// RESOURCE check that rejects.
+#[test]
+fn bond_in_wrong_resource_is_rejected() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test); // also acts as the seller, so it holds the OTC-OWN badge
+    let treasury = empty(&mut ctx.test);
+    let arbiter = empty(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![0], amount![10000], 0);
+
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(owner.component, "withdraw", args![XTR, amount![1000]])
+            .put_last_instruction_output_on_workspace("asset")
+            // bond is one OTC-OWN badge (a different resource than the XTR asset)
+            .call_method(owner.component, "withdraw", args![board.owner_badge, amount![1]])
+            .put_last_instruction_output_on_workspace("bond")
+            .call_method(board.component, "list",
+                args![Workspace("asset"), Workspace("bond"), owner.component,
+                      sha256(b"terms"), arbiter.public_key, 10u64, None::<Hash32>])
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Bond must be posted in the same resource as the listed asset");
+}
+
+/// #2 AIR-COIN STAKE: a whitelisted arbiter tries to post their stake in a worthless resource (the
+/// OTC-OWN badge here), which would make a later `slash` empty. The stake must be XTR, so
+/// `stake_arbiter` is rejected. The owner is whitelisted as the arbiter so it holds a non-XTR badge.
+#[test]
+fn arbiter_stake_in_wrong_resource_is_rejected() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+
+    // whitelist the owner itself as the arbiter, so the staker holds the OTC-OWN badge
+    let board = new_board(&mut ctx, &owner, &treasury, &owner, amount![0], amount![10000], 0);
+
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction()
+            .call_method(owner.component, "withdraw", args![board.owner_badge, amount![1]])
+            .put_last_instruction_output_on_workspace("stake")
+            .call_method(board.component, "stake_arbiter", args![Workspace("stake")])
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Arbiter stake must be posted in XTR");
+
+    // a legitimate XTR stake from the same whitelisted arbiter still works (the rule is resource).
+    stake_arbiter(&mut ctx, &board, &owner, amount![500]);
+}
+
+/// #3 DISPUTE FREEZE: after a dispute, the arbiter goes dark and never resolves. Anyone may
+/// force-close the listing once the dispute deadline passes; the safe default returns the asset and
+/// bond to the seller — the funds are never frozen forever. Before the deadline it is rejected.
+#[test]
+fn stalled_dispute_can_be_force_closed_after_deadline() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+    let arbiter = empty(&mut ctx.test); // never resolves
+    let seller = funded(&mut ctx.test);
+    let buyer = empty(&mut ctx.test);
+    let anyone = funded(&mut ctx.test);
+
+    let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![0], amount![10000], 0);
+    let seller_before = bal(&mut ctx.test, &seller);
+    let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
+    // asset + bond (1100) are now locked
+    assert_eq!(bal(&mut ctx.test, &seller), seller_before - amount![1100]);
+
+    set_epoch(&mut ctx.test, 5);
+    take(&mut ctx, &board, &buyer, id);
+    simple_ok(&mut ctx, &board, &buyer, "open_dispute", id); // dispute_deadline = 5 + 10 = 15
+
+    // before the deadline a force-close is rejected and nothing moves
+    set_epoch(&mut ctx.test, 14);
+    let reason = simple_fail(&mut ctx, &board, &anyone, "claim_dispute_timeout", id);
+    assert_reject_reason(reason, "Cannot force-close before the dispute deadline");
+    assert_eq!(bal(&mut ctx.test, &seller), seller_before - amount![1100]); // still locked
+
+    // after the deadline ANYONE can force-close; asset + bond return to the seller (not frozen)
+    set_epoch(&mut ctx.test, 15);
+    simple_ok(&mut ctx, &board, &anyone, "claim_dispute_timeout", id);
+    assert_eq!(bal(&mut ctx.test, &seller), seller_before); // fully recovered
+}

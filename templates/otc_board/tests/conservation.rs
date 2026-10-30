@@ -182,7 +182,9 @@ fn fuzz_settlement_paths_conserve_funds() {
     let mut clock = 1u64;
 
     for i in 0..32u64 {
-        let fee_bps = rng.in_range(0, 10000);
+        // fee is capped at the platform maximum (MAX_FEE_BPS = 1000 bps); conservation holds for any
+        // legal fee, so fuzz within the allowed range.
+        let fee_bps = rng.in_range(0, 1000);
         set_fee(&mut ctx, &owner, &board, fee_bps, amount![BIG]);
 
         let asset = rng.in_range(1, 1_000_000);

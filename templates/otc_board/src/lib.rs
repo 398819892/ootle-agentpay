@@ -41,6 +41,13 @@
 
 use tari_template_lib::prelude::*;
 
+/// Hard ceiling on the platform fee, in basis points (10% here). The owner cannot set a fee above
+/// this in `new`/`set_params`, so even a malicious owner can never seize a meaningful share of a
+/// settled deal. Combined with snapshotting the fee into each `Listing` at `list` time, an owner
+/// cannot retroactively inflate the fee on a listing a buyer has already taken (that was a confirmed
+/// fund-safety bug — see `docs/audit-notes.md`).
+const MAX_FEE_BPS: u64 = 1000;
+
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 pub enum ListingState {
     #[n(0)]
@@ -85,6 +92,16 @@ pub struct Listing {
     deadline_epoch: u64,
     #[n(12)]
     state: ListingState,
+    /// Platform fee (basis points) **snapshotted at `list` time**. Settlement (`confirm`/`resolve`)
+    /// charges this, not the board's current `fee_bps`, so a later `set_params` cannot change the
+    /// fee on a deal that is already in flight.
+    #[n(13)]
+    fee_bps: u64,
+    /// Epoch after which a stalled dispute may be force-closed by anyone (0 = not disputed). Set in
+    /// `open_dispute`; see `claim_dispute_timeout`. Guards against an unreachable arbiter freezing
+    /// the asset forever.
+    #[n(14)]
+    dispute_deadline: u64,
 }
 
 #[template]
@@ -120,7 +137,7 @@ mod otc_board {
             fee_bps: u64,
             arbiter_whitelist: Vec<RistrettoPublicKeyBytes>,
         ) -> (Component<OtcBoard>, Bucket) {
-            assert!(fee_bps <= 10000, "fee_bps cannot exceed 10000");
+            assert!(fee_bps <= MAX_FEE_BPS, "fee_bps cannot exceed the platform maximum");
             assert!(listing_bond >= amount![0], "listing_bond cannot be negative");
             assert!(max_listing_amount > amount![0], "max_listing_amount must be positive");
 
@@ -184,7 +201,19 @@ mod otc_board {
         ) -> u64 {
             let amount = asset.amount();
             assert!(amount > amount![0], "Asset must be non-empty");
+            // `max_listing_amount` is a per-deal sanity cap denominated in the *asset's own* resource
+            // (there is no price oracle on chain to compare resources by value). It is only meaningful
+            // because the bond is required to be the same resource as the asset just below, so a
+            // listing is internally single-denomination — asset, bond and cap are all one unit.
             assert!(amount <= self.max_listing_amount, "Asset exceeds the max listing amount");
+            // The bond must be the SAME resource as the listed asset. Without this, a seller could
+            // post a self-minted worthless token as the bond, defeating the skin-in-the-game /
+            // slashing-on-abuse purpose of the bond entirely (a confirmed fund-safety bug — the
+            // amount check below is meaningless across resources). See `docs/audit-notes.md`.
+            assert!(
+                bond.resource_address() == asset.resource_address(),
+                "Bond must be posted in the same resource as the listed asset"
+            );
             assert!(bond.amount() >= self.listing_bond, "Bond below the minimum listing bond");
             assert!(timeout_epochs > 0, "timeout must be greater than zero");
             assert!(
@@ -195,6 +224,8 @@ mod otc_board {
             let id = self.next_id;
             self.next_id += 1;
             let seller = CallerContext::transaction_signer_public_key();
+            // Snapshot the fee now so a later `set_params` cannot re-rate a deal in flight.
+            let fee_bps = self.fee_bps;
             self.listings.insert(id, Listing {
                 seller,
                 seller_account,
@@ -209,6 +240,8 @@ mod otc_board {
                 hashlock,
                 deadline_epoch: 0,
                 state: ListingState::Open,
+                fee_bps,
+                dispute_deadline: 0,
             });
             emit_event("list", metadata!["id" => id.to_string(), "amount" => amount.to_string()]);
             id
@@ -268,9 +301,11 @@ mod otc_board {
         /// goes to the recorded buyer regardless of who presents the preimage.
         pub fn confirm(&mut self, id: u64, preimage: Option<Vec<u8>>) {
             let treasury = self.treasury_account;
-            let fee_bps = self.fee_bps;
             let listing = self.get_mut(id);
             assert!(listing.state == ListingState::Taken, "Listing is not taken");
+            // Use the fee snapshotted when the listing was created, NOT the board's current rate, so
+            // the owner cannot inflate the fee after the buyer committed.
+            let fee_bps = listing.fee_bps;
 
             let caller = CallerContext::transaction_signer_public_key();
             let is_seller = caller == listing.seller;
@@ -321,8 +356,12 @@ mod otc_board {
             emit_event("reclaim", metadata!["id" => id.to_string()]);
         }
 
-        /// Either party raises a dispute, freezing the listing until the arbiter resolves it.
+        /// Either party raises a dispute, freezing the listing until the arbiter resolves it — or,
+        /// if the arbiter never does, until anyone force-closes it after `dispute_deadline` via
+        /// `claim_dispute_timeout`. The deadline is one `timeout_epochs` window from now, so an
+        /// unreachable arbiter can delay settlement by at most that window, never freeze it forever.
         pub fn open_dispute(&mut self, id: u64) {
+            let now = Consensus::current_epoch();
             let listing = self.get_mut(id);
             assert!(listing.state == ListingState::Taken, "Listing is not taken");
             let caller = CallerContext::transaction_signer_public_key();
@@ -331,14 +370,40 @@ mod otc_board {
                 "Only the seller or buyer may dispute"
             );
             listing.state = ListingState::Disputed;
+            listing.dispute_deadline = now + listing.timeout_epochs;
             emit_event("dispute", metadata!["id" => id.to_string()]);
+        }
+
+        /// Force-closes a dispute that the arbiter never resolved. Callable by **anyone** once the
+        /// `dispute_deadline` has passed, so an unresponsive or unreachable arbiter can never freeze a
+        /// listing's asset indefinitely (a confirmed liveness/fund-safety bug — see
+        /// `docs/audit-notes.md`).
+        ///
+        /// The safe default mirrors `reclaim`: with no on-chain proof that the buyer paid (that proof
+        /// is the seller's `confirm` or the arbiter's `resolve`, neither of which happened), the asset
+        /// and bond return to the seller. A buyer who genuinely paid must get the arbiter to `resolve`
+        /// within the dispute window; this backstop only runs once that window has fully elapsed.
+        pub fn claim_dispute_timeout(&mut self, id: u64) {
+            let now = Consensus::current_epoch();
+            let listing = self.get_mut(id);
+            assert!(listing.state == ListingState::Disputed, "Listing is not under dispute");
+            assert!(
+                now >= listing.dispute_deadline,
+                "Cannot force-close before the dispute deadline"
+            );
+            let asset = listing.asset.withdraw_all();
+            let bond = listing.bond.withdraw_all();
+            let seller_account = listing.seller_account;
+            listing.state = ListingState::Refunded;
+            ComponentManager::get(seller_account).invoke("deposit", args![asset]);
+            ComponentManager::get(seller_account).invoke("deposit", args![bond]);
+            emit_event("claim_dispute_timeout", metadata!["id" => id.to_string()]);
         }
 
         /// The listing's arbiter splits the asset: `to_buyer_amount` (minus fee) to the buyer, the
         /// remainder to the seller. The bond returns to the seller.
         pub fn resolve(&mut self, id: u64, to_buyer_amount: Amount) {
             let treasury = self.treasury_account;
-            let fee_bps = self.fee_bps;
             let stake_req = self.arbiter_stake;
             // When staking is required, the listing's arbiter must have posted enough stake. Read
             // both (disjoint, immutable) fields before taking the mutable listing borrow below.
@@ -353,6 +418,8 @@ mod otc_board {
                 CallerContext::transaction_signer_public_key() == listing.arbiter,
                 "Only the listing's arbiter may resolve"
             );
+            // Fee snapshotted at `list` time, not the board's current rate (see `confirm`).
+            let fee_bps = listing.fee_bps;
             let total = listing.asset.balance();
             assert!(to_buyer_amount >= amount![0], "amount cannot be negative");
             assert!(to_buyer_amount <= total, "amount exceeds the escrowed asset");
@@ -392,8 +459,11 @@ mod otc_board {
             self.arbiter_whitelist.retain(|a| a != &arbiter);
         }
 
+        /// Updates board parameters. The fee is capped at `MAX_FEE_BPS`, and because each listing
+        /// snapshots the fee at `list` time, a change here only affects *future* listings — it can
+        /// never re-rate a deal already in flight.
         pub fn set_params(&mut self, listing_bond: Amount, max_listing_amount: Amount, fee_bps: u64) {
-            assert!(fee_bps <= 10000, "fee_bps cannot exceed 10000");
+            assert!(fee_bps <= MAX_FEE_BPS, "fee_bps cannot exceed the platform maximum");
             assert!(max_listing_amount > amount![0], "max_listing_amount must be positive");
             self.listing_bond = listing_bond;
             self.max_listing_amount = max_listing_amount;
@@ -415,6 +485,14 @@ mod otc_board {
             assert!(
                 self.arbiter_whitelist.contains(&who),
                 "Only a whitelisted arbiter may stake"
+            );
+            // The stake must be the native token (XTR), the board's single collateral currency. An
+            // arbiter cannot post a self-minted worthless token as their stake, which would make the
+            // slash-on-misbehaviour penalty (stake -> treasury) empty (a confirmed fund-safety bug —
+            // see `docs/audit-notes.md`).
+            assert!(
+                stake.resource_address() == XTR,
+                "Arbiter stake must be posted in XTR"
             );
             let amt = stake.amount();
             match self.arbiter_stakes.get_mut(&who) {
