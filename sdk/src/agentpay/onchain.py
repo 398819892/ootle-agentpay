@@ -28,6 +28,86 @@ from .invoice import encode_memo
 # Native Tari test token used as the (plaintext, countable) budget resource on a devnet.
 XTR = "XTR"
 
+# --- manifest value validation (injection guard, issue #7) --------------------------------------
+# A transaction manifest is assembled as text, so EVERY value spliced into it must be validated here,
+# at the lowest layer (inside the manifest builders) — not only in `_precheck`. This way a direct SDK
+# caller (`pay`, `pay_invoice`, `issue_agent_badge`, …) is protected too: an attacker-controlled memo
+# or address can never break out of its literal and inject extra manifest instructions (which, when
+# the owner and agent share an account, could move the owner's funds / bypass the authorizer).
+#
+# Values handed to walletd as `variables` (the accounts, the budget component) are NOT a vector: the
+# daemon parses those as typed values, never splicing them into the manifest text. The values below
+# ARE spliced in, so each is checked against a strict allowlist and rejected otherwise.
+_COMPONENT_RE = re.compile(r"^component_[0-9a-f]{64}$")
+_RESOURCE_RE = re.compile(r"^resource_[0-9a-f]{64}$")
+_TEMPLATE_RE = re.compile(r"^template_[0-9a-f]{64}$")
+_SESSION_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+_MEMO_MAX_BYTES = 253  # Ootle Message-memo limit (see invoice.MAX_MEMO_BYTES)
+
+
+def _check_address(addr: Any, kind: str, regex: "re.Pattern[str]") -> str:
+    """Return `addr` if it is exactly ``<kind>_<64 lowercase hex>``, else raise. Used for every
+    address spliced into an ``address!("…")`` / ``use …`` clause."""
+    if not isinstance(addr, str) or not regex.match(addr):
+        raise ChainError(f"invalid {kind} address (expected {kind}_ + 64 hex chars): {addr!r}")
+    return addr
+
+
+def _check_component(addr: Any) -> str:
+    return _check_address(addr, "component", _COMPONENT_RE)
+
+
+def _check_resource(addr: Any) -> str:
+    return _check_address(addr, "resource", _RESOURCE_RE)
+
+
+def _check_template(addr: Any) -> str:
+    return _check_address(addr, "template", _TEMPLATE_RE)
+
+
+def _check_memo(memo: Any) -> str:
+    """Validate a free-text memo before it is spliced into a ``"…"`` manifest string literal.
+
+    Rejects anything that could terminate the literal or start an escape sequence — a double-quote
+    or a backslash (so we never depend on the manifest parser's escape handling) — plus any control
+    character (newline / tab / NUL …, which could smuggle in further manifest lines) and over-length
+    memos. Returns the memo unchanged when safe. Empty is allowed. Any accepted memo is guaranteed to
+    stay inside its literal, so it cannot inject manifest instructions."""
+    if not isinstance(memo, str):
+        raise ChainError(f"memo must be a string, got {type(memo).__name__}")
+    if '"' in memo or "\\" in memo:
+        raise ChainError('memo must not contain a double-quote (") or backslash (\\)')
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in memo):
+        raise ChainError("memo must not contain control characters")
+    if len(memo.encode("utf-8")) > _MEMO_MAX_BYTES:
+        raise ChainError(f"memo too long (max {_MEMO_MAX_BYTES} bytes)")
+    return memo
+
+
+def _check_session(session: Any) -> str:
+    """Validate an agent session label before it is spliced into a ``"…"`` literal."""
+    if not isinstance(session, str) or not _SESSION_RE.match(session):
+        raise ChainError("session label must match [A-Za-z0-9_.-]{1,64}")
+    return session
+
+
+def _check_amount(x: Any) -> str:
+    """Normalise a base-unit amount to a decimal-integer string for an ``amount!(…)`` literal,
+    rejecting negatives, non-integers and anything that is not a plain decimal integer (so no
+    expression can ride in through the amount field)."""
+    if isinstance(x, bool):                       # bool is an int subclass — reject explicitly
+        raise ChainError(f"invalid amount: {x!r}")
+    if isinstance(x, int):
+        if x < 0:
+            raise ChainError(f"amount cannot be negative: {x}")
+        return str(x)
+    if isinstance(x, str):
+        s = x.strip()
+        if not re.fullmatch(r"\d+", s):
+            raise ChainError(f"invalid amount (expected a non-negative integer): {x!r}")
+        return s
+    raise ChainError(f"invalid amount type: {type(x).__name__}")
+
 # Transient public-testnet (esmeralda) indexer errors worth retrying a manifest submit through.
 # A local swarm never produces these, so retry logic below stays dormant there.
 _TRANSIENT_MARKERS = (
@@ -301,14 +381,14 @@ class OnChainBudget:
     # -- owner -----------------------------------------------------------------------
     def open(self, *, fund: int, per_tx_cap: int, daily_cap: int,
              epochs_per_window: int, whitelist: list[str]) -> "OnChainBudget":
-        wl = ", ".join(f'address!("{m}")' for m in whitelist)
+        wl = ", ".join(f'address!("{_check_component(m)}")' for m in whitelist)
         manifest = (
-            f'use {self.budget_template} as AgentBudget;\n'
+            f'use {_check_template(self.budget_template)} as AgentBudget;\n'
             'fn main() {\n'
             '    let mut owner = var!["owner"];\n'
-            f'    let funds = owner.withdraw(XTR, amount!({fund}));\n'
+            f'    let funds = owner.withdraw(XTR, amount!({_check_amount(fund)}));\n'
             f'    let (comp, owner_badge, agent_badge) = AgentBudget::new('
-            f'funds, amount!({per_tx_cap}), amount!({daily_cap}), {epochs_per_window}u64, [{wl}]);\n'
+            f'funds, amount!({_check_amount(per_tx_cap)}), amount!({_check_amount(daily_cap)}), {int(epochs_per_window)}u64, [{wl}]);\n'
             '    owner.deposit(owner_badge);\n'
             '    owner.deposit(agent_badge);\n'
             '}\n'
@@ -346,9 +426,9 @@ class OnChainBudget:
         manifest = (
             'fn main() {\n'
             '    let mut owner = var!["owner"];\n'
-            f'    let proof = owner.create_proof_for_resource(address!("{self.owner_badge}"));\n'
+            f'    let proof = owner.create_proof_for_resource(address!("{_check_resource(self.owner_badge)}"));\n'
             '    let mut budget = var!["budget"];\n'
-            f'    let coins = budget.withdraw(amount!({amount}));\n'
+            f'    let coins = budget.withdraw(amount!({_check_amount(amount)}));\n'
             '    owner.deposit(coins);\n'
             '    drop_all_proofs!();\n'
             '}\n'
@@ -356,7 +436,7 @@ class OnChainBudget:
         self.client.run(manifest, {"owner": self.owner_account, "budget": self.component})
 
     def add_merchant(self, merchant: str) -> None:
-        self._owner_call(f'add_merchant(address!("{merchant}"))')
+        self._owner_call(f'add_merchant(address!("{_check_component(merchant)}"))')
         if merchant not in self.whitelist:
             self.whitelist.append(merchant)
 
@@ -365,10 +445,11 @@ class OnChainBudget:
         (defaults to this budget's agent account). The new badge can `pay` within the same on-chain
         caps/whitelist until the owner revokes *that* session. Returns the session label."""
         target = to_account or self.agent_account
+        _check_session(session)
         manifest = (
             'fn main() {\n'
             '    let mut owner = var!["owner"];\n'
-            f'    let proof = owner.create_proof_for_resource(address!("{self.owner_badge}"));\n'
+            f'    let proof = owner.create_proof_for_resource(address!("{_check_resource(self.owner_badge)}"));\n'
             '    let mut budget = var!["budget"];\n'
             f'    let badge = budget.issue_agent_badge("{session}");\n'
             '    let mut agent = var!["agent"];\n'
@@ -387,7 +468,7 @@ class OnChainBudget:
     def revoke_session(self, session: str) -> None:
         """Owner revokes a single agent session badge. Other sessions keep working; use `revoke()`
         for the global kill switch."""
-        self._owner_call(f'revoke_session("{session}")')
+        self._owner_call(f'revoke_session("{_check_session(session)}")')
         if session not in self.revoked_sessions:
             self.revoked_sessions.append(session)
 
@@ -416,7 +497,7 @@ class OnChainBudget:
         manifest = (
             'fn main() {\n'
             '    let mut owner = var!["owner"];\n'
-            f'    let proof = owner.create_proof_for_resource(address!("{self.owner_badge}"));\n'
+            f'    let proof = owner.create_proof_for_resource(address!("{_check_resource(self.owner_badge)}"));\n'
             '    let mut budget = var!["budget"];\n'
             f'    budget.{call};\n'
             '    drop_all_proofs!();\n'
@@ -431,9 +512,9 @@ class OnChainBudget:
         return (
             'fn main() {\n'
             '    let mut agent = var!["agent"];\n'
-            f'    let proof = agent.create_proof_for_resource(address!("{self.agent_badge}"));\n'
+            f'    let proof = agent.create_proof_for_resource(address!("{_check_resource(self.agent_badge)}"));\n'
             '    let mut budget = var!["budget"];\n'
-            f'    budget.pay(proof, address!("{merchant}"), amount!({amount}), "{memo}");\n'
+            f'    budget.pay(proof, address!("{_check_component(merchant)}"), amount!({_check_amount(amount)}), "{_check_memo(memo)}");\n'
             '    drop_all_proofs!();\n'
             '}\n'
         )

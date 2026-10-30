@@ -1,8 +1,11 @@
-"""Invoices, the encrypted-memo codec and an x402-style payment challenge.
+"""Invoices, the memo codec and an x402-style payment challenge.
 
-Wire memo (goes in an Ootle stealth output, encrypted to the merchant only):
+Wire memo (passed to the AgentBudget ``pay`` call and emitted verbatim in its on-chain ``pay``
+event):
     {"Message": "ap1|<invoice_id>|<agent_tag>"}
-Ootle memos: Message is UTF-8 up to 253 bytes (docs: Stealth Transfers > Memos).
+This memo is PUBLIC, on-chain plaintext, NOT an encrypted stealth output — the template writes it
+into the event payload as-is, so never put a secret in it (see docs/security.md: "A memo is public
+metadata, not a secret."). Ootle Message memos are UTF-8 up to 253 bytes.
 
 The challenge is OUR OWN format ("ootle-stealth-v1"), not standard x402: standard x402
 clients only understand EVM/Solana settlement. A thin adapter is provided in tools.py.

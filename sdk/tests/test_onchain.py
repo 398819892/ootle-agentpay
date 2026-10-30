@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentpay.errors import PolicyViolation
+from agentpay.errors import ChainError, PolicyViolation
 from agentpay.onchain import LedgerEntry, OnChainBudget, WalletdClient
 
 TPL = "template_" + "7" * 64
@@ -179,3 +179,87 @@ def test_open_resolves_badges_from_state_not_sort():
 def test_would_reject_returns_clean_onchain_reason():
     b = _budget()
     assert b.would_reject(SHOP, 9_999) == "Amount exceeds the per-transaction cap"
+
+
+# -- manifest injection guard (issue #7) ----------------------------------------------
+# Every value spliced into a manifest string is validated at the lowest layer, so a crafted memo /
+# address can never break out of its literal and inject extra manifest instructions. These assert
+# the guard rejects such input and NEVER builds a tainted manifest, while leaving normal input alone.
+
+# A memo that tries to close the string literal and append its own instructions (the core attack:
+# with a shared owner/agent account these extra lines could move the owner's funds).
+_INJECTION_MEMOS = [
+    'x"); owner.withdraw(amount!(999999)); agent.deposit(address!("resource_" + "a"*64, memo="',
+    'a"); drop_all_proofs!(); budget.pay(proof, address!("component_' + "e" * 64 + '"), amount!(1), "',
+    'has a " quote',                 # a lone double-quote would terminate the literal
+    "back\\slash",                   # a backslash could start an escape sequence
+    "line\nbreak",                   # a newline could smuggle in another manifest statement
+    "tab\there",                     # any control char is refused
+    "x" * 254,                       # over the 253-byte memo limit
+]
+
+
+@pytest.mark.parametrize("memo", _INJECTION_MEMOS)
+def test_pay_rejects_injection_memo(memo):
+    b = _budget()
+    with pytest.raises(ChainError):
+        b.pay(SHOP, 100, memo=memo)                 # rejected before any chain submit
+    assert b.client.runs == []                      # and no (tainted) manifest was ever built
+
+    with pytest.raises(ChainError):                 # the low-level builder refuses it directly too
+        b._pay_manifest(SHOP, 100, memo)
+
+
+def test_pay_manifest_rejects_non_hex_merchant():
+    b = _budget()
+    for bad in ["component_not_hex", "component_" + "a" * 63, "resource_" + "a" * 64,
+                'component_' + "a" * 64 + '"); drop_all_proofs!(); //',
+                "robert'); DROP", "component_" + "A" * 64]:   # uppercase hex is rejected too
+        with pytest.raises(ChainError):
+            b._pay_manifest(bad, 100, "ok")
+
+
+def test_pay_manifest_rejects_bad_amount():
+    b = _budget()
+    for bad in ["1); drop_all_proofs!(); amount!(1", -5, "1_000", 3.5, "nan"]:
+        with pytest.raises(ChainError):
+            b._pay_manifest(SHOP, bad, "ok")
+
+
+def test_open_rejects_injection_in_template_and_whitelist():
+    b = OnChainBudget(FakeWalletd().connect(), 'template_x") AS Evil; use template_' + "0" * 64, OWNER)
+    with pytest.raises(ChainError):
+        b.open(fund=1000, per_tx_cap=100, daily_cap=300, epochs_per_window=48, whitelist=[SHOP])
+    assert b.client.runs == []
+
+    b2 = OnChainBudget(FakeWalletd().connect(), TPL, OWNER)
+    with pytest.raises(ChainError):                 # a tainted whitelist entry is refused
+        b2.open(fund=1000, per_tx_cap=100, daily_cap=300, epochs_per_window=48,
+                whitelist=['component_' + "a" * 64 + '"), address!("component_evil'])
+    assert b2.client.runs == []
+
+
+def test_session_label_injection_is_rejected():
+    b = _budget()
+    for bad in ['default"); revoke(); budget.issue_agent_badge("x', "has space", "a" * 65, "quote\""]:
+        with pytest.raises(ChainError):
+            b.issue_agent_badge(bad)
+        with pytest.raises(ChainError):
+            b.revoke_session(bad)
+    assert b.client.runs == []                      # nothing reached the daemon
+
+
+def test_normal_memo_and_addresses_still_pass():
+    """The guard must not reject legitimate input: a plain memo, the invoice-codec memo, and valid
+    addresses all build a well-formed manifest and reach the (fake) daemon."""
+    b = _budget()
+    b.pay(SHOP, 500, memo="order #42 — café latte")      # punctuation / unicode is fine
+    manifest, _ = b.client.runs[-1]
+    assert 'budget.pay(proof, address!("' + SHOP + '"), amount!(500), "order #42 — café latte")' in manifest
+
+    b.pay_invoice(merchant=SHOP, invoice_id="deadbeef", amount=200, agent_tag="shopper")
+    manifest, _ = b.client.runs[-1]
+    assert '"ap1|deadbeef|shopper"' in manifest
+
+    b.add_merchant(OTHER)                                # valid component address passes
+    b.issue_agent_badge("session-1.default")             # valid label passes

@@ -1,9 +1,11 @@
 /**
- * Encrypted-memo codec — mirrors the parts of `agentpay.invoice` the on-chain path uses.
+ * Memo codec — mirrors the parts of `agentpay.invoice` the on-chain path uses.
  *
- * Wire memo (goes in an Ootle stealth output, encrypted to the merchant only):
- *     {"Message": "ap1|<invoice_id>|<agent_tag>"}
- * Ootle memos: Message is UTF-8 up to 253 bytes.
+ * Wire memo (passed to the AgentBudget `pay` call and emitted verbatim in its on-chain `pay`
+ * event): {"Message": "ap1|<invoice_id>|<agent_tag>"}
+ * This memo is PUBLIC, on-chain plaintext, NOT an encrypted stealth output — the template writes it
+ * into the event payload as-is, so never put a secret in it (see docs/security.md: "A memo is public
+ * metadata, not a secret."). Ootle Message memos are UTF-8 up to 253 bytes.
  */
 import { randomBytes } from "node:crypto";
 

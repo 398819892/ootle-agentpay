@@ -565,13 +565,33 @@ async function walletd() {
  * AUTO_CREATE_MERCHANTS is enabled (open local-dev mode); otherwise a clear error is returned so a
  * public deployment is never a free account-minting / faucet-draining endpoint.
  */
+// A component address is exactly `component_` + 64 lowercase hex. The resolved value is spliced
+// into a transaction manifest as `address!("…")`, so it must match this exactly — a loose
+// `startsWith("component_")` would let `component_x") ; owner.withdraw(…` break out of the literal
+// and inject manifest instructions (issue #7). Account-name lookups below return a chain-minted
+// address, which we re-validate to the same shape before it can reach a manifest (defence in depth).
+const COMPONENT_ADDR_RE = /^component_[0-9a-f]{64}$/;
+
 async function resolveMerchant(nameOrAddr) {
-  const c = await walletd();
   const raw = String(nameOrAddr || "").trim();
   if (!raw) throw httpError(400, "A merchant name or component address is required.");
-  if (raw.startsWith("component_")) return raw; // already an address
+  if (raw.startsWith("component_")) {
+    // Validate the address shape BEFORE any daemon call: this value is spliced into a manifest.
+    if (!COMPONENT_ADDR_RE.test(raw)) {
+      throw httpError(400, "That is not a valid component_… address (expected component_ + 64 hex chars).");
+    }
+    return raw; // already a (now validated) address
+  }
   const key = raw.toLowerCase();
-  if (store.merchants[key]) return store.merchants[key];
+  if (store.merchants[key]) {
+    const cached = store.merchants[key];
+    // A snapshot written before this check could hold a malformed address; re-validate on read.
+    if (!COMPONENT_ADDR_RE.test(String(cached))) {
+      throw httpError(502, "A cached merchant address has an unexpected shape; re-resolve the merchant.");
+    }
+    return cached;
+  }
+  const c = await walletd();
   let addr;
   try {
     addr = await c.accountAddress(key);
@@ -587,6 +607,9 @@ async function resolveMerchant(nameOrAddr) {
     }
     addr = await c.createAccount(key);
     await c.fund(key);
+  }
+  if (!COMPONENT_ADDR_RE.test(String(addr))) {
+    throw httpError(502, "The wallet returned an unexpected merchant address shape.");
   }
   store.merchants[key] = addr;
   saveStore();

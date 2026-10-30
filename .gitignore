@@ -48,6 +48,9 @@ Thumbs.db
 # so the small prebuilt TS client is committed on purpose.
 !clients/ts/dist/
 !clients/ts/dist/**
+# …but never the compiled *test* artifacts — tests are type-checked/run from src, not shipped.
+clients/ts/dist/*.test.js
+clients/ts/dist/*.test.d.ts
 
 # Archives & stray folders (not source)
 *.7z

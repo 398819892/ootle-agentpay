@@ -39,6 +39,60 @@ function amt(x) {
 function big(x) {
     return BigInt(amt(x));
 }
+// --- manifest value validation (injection guard, issue #7) ------------------------------------
+// A transaction manifest is assembled as text, so EVERY value spliced into it is validated here, at
+// the lowest layer (inside the manifest builders) — not only in `precheck`. A direct SDK caller
+// (`pay`, `payInvoice`, `issueAgentBadge`, …) is therefore protected too: an attacker-controlled
+// memo or address can never break out of its literal and inject extra manifest instructions (which,
+// when the owner and agent share an account, could move the owner's funds / bypass the authorizer).
+// Values handed to walletd as `variables` (accounts, the component) are parsed as typed values, not
+// spliced into the manifest text, so they are not a vector; the ones below are. Mirrors the Python
+// SDK's `_check_*` helpers in `agentpay/onchain.py`.
+const COMPONENT_RE = /^component_[0-9a-f]{64}$/;
+const RESOURCE_RE = /^resource_[0-9a-f]{64}$/;
+const TEMPLATE_RE = /^template_[0-9a-f]{64}$/;
+const SESSION_RE = /^[A-Za-z0-9_.\-]{1,64}$/;
+const MEMO_MAX_BYTES = 253; // Ootle Message-memo limit (see invoice.MAX_MEMO_BYTES)
+/** Return `addr` if it is exactly `<kind>_<64 lowercase hex>`, else throw. */
+function checkAddress(addr, kind, re) {
+    if (typeof addr !== "string" || !re.test(addr)) {
+        throw new errors_1.ChainError(`invalid ${kind} address (expected ${kind}_ + 64 hex chars): ${String(addr)}`);
+    }
+    return addr;
+}
+const checkComponent = (a) => checkAddress(a, "component", COMPONENT_RE);
+const checkResource = (a) => checkAddress(a, "resource", RESOURCE_RE);
+const checkTemplate = (a) => checkAddress(a, "template", TEMPLATE_RE);
+/**
+ * Validate a free-text memo before it is spliced into a `"…"` manifest string literal. Rejects a
+ * double-quote or backslash (so we never depend on the manifest parser's escape handling), any
+ * control character (newline/tab/NUL…, which could smuggle in further manifest lines) and
+ * over-length memos. Returns the memo unchanged when safe; empty is allowed. An accepted memo is
+ * guaranteed to stay inside its literal, so it cannot inject manifest instructions.
+ */
+function checkMemo(memo) {
+    if (typeof memo !== "string")
+        throw new errors_1.ChainError(`memo must be a string, got ${typeof memo}`);
+    if (memo.includes('"') || memo.includes("\\")) {
+        throw new errors_1.ChainError('memo must not contain a double-quote (") or backslash (\\)');
+    }
+    for (const ch of memo) {
+        const c = ch.codePointAt(0);
+        if (c < 0x20 || c === 0x7f)
+            throw new errors_1.ChainError("memo must not contain control characters");
+    }
+    if (Buffer.byteLength(memo, "utf8") > MEMO_MAX_BYTES) {
+        throw new errors_1.ChainError(`memo too long (max ${MEMO_MAX_BYTES} bytes)`);
+    }
+    return memo;
+}
+/** Validate an agent session label before it is spliced into a `"…"` literal. */
+function checkSession(session) {
+    if (typeof session !== "string" || !SESSION_RE.test(session)) {
+        throw new errors_1.ChainError("session label must match [A-Za-z0-9_.-]{1,64}");
+    }
+    return session;
+}
 function components(blob, exclude) {
     const all = new Set(blob.match(/component_[0-9a-f]{64}/g) ?? []);
     return [...all].filter((c) => !exclude.has(c));
@@ -140,8 +194,8 @@ class OnChainBudget {
     // -- owner -----------------------------------------------------------------------
     async open(params) {
         const { fund, perTxCap, dailyCap, epochsPerWindow, whitelist } = params;
-        const wl = whitelist.map((m) => `address!("${m}")`).join(", ");
-        const manifest = `use ${this.budgetTemplate} as AgentBudget;\n` +
+        const wl = whitelist.map((m) => `address!("${checkComponent(m)}")`).join(", ");
+        const manifest = `use ${checkTemplate(this.budgetTemplate)} as AgentBudget;\n` +
             "fn main() {\n" +
             '    let mut owner = var!["owner"];\n' +
             `    let funds = owner.withdraw(XTR, amount!(${amt(fund)}));\n` +
@@ -186,7 +240,7 @@ class OnChainBudget {
     async withdraw(amount) {
         const manifest = "fn main() {\n" +
             '    let mut owner = var!["owner"];\n' +
-            `    let proof = owner.create_proof_for_resource(address!("${this.ownerBadge}"));\n` +
+            `    let proof = owner.create_proof_for_resource(address!("${checkResource(this.ownerBadge)}"));\n` +
             '    let mut budget = var!["budget"];\n' +
             `    let coins = budget.withdraw(amount!(${amt(amount)}));\n` +
             "    owner.deposit(coins);\n" +
@@ -195,7 +249,7 @@ class OnChainBudget {
         await this.client.run(manifest, { owner: this.ownerAccount, budget: this.component });
     }
     async addMerchant(merchant) {
-        await this.ownerCall(`add_merchant(address!("${merchant}"))`);
+        await this.ownerCall(`add_merchant(address!("${checkComponent(merchant)}"))`);
         if (!this.whitelist.includes(merchant))
             this.whitelist.push(merchant);
     }
@@ -206,9 +260,10 @@ class OnChainBudget {
      */
     async issueAgentBadge(session, opts = {}) {
         const target = opts.toAccount ?? this.agentAccount;
+        checkSession(session);
         const manifest = "fn main() {\n" +
             '    let mut owner = var!["owner"];\n' +
-            `    let proof = owner.create_proof_for_resource(address!("${this.ownerBadge}"));\n` +
+            `    let proof = owner.create_proof_for_resource(address!("${checkResource(this.ownerBadge)}"));\n` +
             '    let mut budget = var!["budget"];\n' +
             `    let badge = budget.issue_agent_badge("${session}");\n` +
             '    let mut agent = var!["agent"];\n' +
@@ -230,7 +285,7 @@ class OnChainBudget {
      * global kill switch.
      */
     async revokeSession(session) {
-        await this.ownerCall(`revoke_session("${session}")`);
+        await this.ownerCall(`revoke_session("${checkSession(session)}")`);
         if (!this.revokedSessions.includes(session))
             this.revokedSessions.push(session);
     }
@@ -260,7 +315,7 @@ class OnChainBudget {
     async ownerCall(call) {
         const manifest = "fn main() {\n" +
             '    let mut owner = var!["owner"];\n' +
-            `    let proof = owner.create_proof_for_resource(address!("${this.ownerBadge}"));\n` +
+            `    let proof = owner.create_proof_for_resource(address!("${checkResource(this.ownerBadge)}"));\n` +
             '    let mut budget = var!["budget"];\n' +
             `    budget.${call};\n` +
             "    drop_all_proofs!();\n" +
@@ -273,9 +328,9 @@ class OnChainBudget {
         // refuse) the session before moving funds.
         return ("fn main() {\n" +
             '    let mut agent = var!["agent"];\n' +
-            `    let proof = agent.create_proof_for_resource(address!("${this.agentBadge}"));\n` +
+            `    let proof = agent.create_proof_for_resource(address!("${checkResource(this.agentBadge)}"));\n` +
             '    let mut budget = var!["budget"];\n' +
-            `    budget.pay(proof, address!("${merchant}"), amount!(${amt(amount)}), "${memo}");\n` +
+            `    budget.pay(proof, address!("${checkComponent(merchant)}"), amount!(${amt(amount)}), "${checkMemo(memo)}");\n` +
             "    drop_all_proofs!();\n" +
             "}\n");
     }
