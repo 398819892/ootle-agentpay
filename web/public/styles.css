@@ -424,7 +424,9 @@ button {
   margin-bottom: 26px;
 }
 .page-head h1 {
-  font-size: 25px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
 }
 .page-head p {
   color: var(--text-muted);
@@ -465,7 +467,19 @@ button {
   gap: 18px;
 }
 .grid--stats {
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  /* exactly four stat tiles: 4-across on wide, a clean 2×2 on medium (never an orphaned 3+1),
+     single column on mobile. */
+  grid-template-columns: repeat(4, 1fr);
+}
+@media (max-width: 920px) {
+  .grid--stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 460px) {
+  .grid--stats {
+    grid-template-columns: 1fr;
+  }
 }
 .grid--2 {
   grid-template-columns: 1.4fr 1fr;
@@ -476,6 +490,74 @@ button {
   }
 }
 
+/* ---- governance page ------------------------------------------------------ */
+/* Balanced two-column top row: the treasury card (balance + top-up + withdraw)
+   carries more content than the whitelist card, so it must not be the narrow one. */
+.gov-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .gov-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Danger zone: one calm, clearly-marked block that groups the revoke + emergency-stop
+   actions, instead of two separate shouty red cards stacked down the page. */
+.danger-zone {
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--danger) 26%, var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.danger-zone__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 20px;
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--danger) 18%, var(--border));
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.danger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  flex-wrap: wrap;
+}
+.danger-row + .danger-row {
+  border-top: 1px solid var(--border);
+}
+.danger-row__text {
+  max-width: 56ch;
+  min-width: 240px;
+}
+.danger-row__text h4 {
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.danger-row__text h4 svg {
+  color: var(--danger);
+}
+.danger-row__text p {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
 /* stat tile */
 .stat {
   background: var(--surface);
@@ -483,6 +565,32 @@ button {
   border-radius: var(--radius);
   padding: 18px;
   box-shadow: var(--shadow-sm);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+.stat:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--border-strong);
+}
+.stat__top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+/* a soft, colored icon chip — the main "lively" touch; each tile sets --c inline */
+.stat__icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-content: center;
+  color: var(--c, var(--brand));
+  background: color-mix(in srgb, var(--c, var(--brand)) 14%, transparent);
+}
+.stat__icon svg {
+  width: 17px;
+  height: 17px;
 }
 .stat__label {
   display: flex;
@@ -498,8 +606,8 @@ button {
   color: var(--text-faint);
 }
 .stat__value {
-  margin-top: 10px;
-  font-size: 27px;
+  margin-top: 13px;
+  font-size: 29px;
   font-weight: 700;
   letter-spacing: -0.02em;
   display: flex;

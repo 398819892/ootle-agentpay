@@ -1484,14 +1484,19 @@ function serveStatic(req, res) {
             res.writeHead(404);
             return res.end("not found");
           }
-          res.writeHead(200, { "Content-Type": MIME[".html"] });
+          res.writeHead(200, { "Content-Type": MIME[".html"], "Cache-Control": "no-cache" });
           res.end(idx);
         });
       }
       res.writeHead(404);
       return res.end("not found");
     }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" });
+    // no-cache (revalidate every load): the UI is served straight from disk with no build/hash, so a
+    // CSS/JS change must show on the next refresh instead of being masked by the browser's heuristic cache.
+    res.writeHead(200, {
+      "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream",
+      "Cache-Control": "no-cache",
+    });
     res.end(data);
   });
 }

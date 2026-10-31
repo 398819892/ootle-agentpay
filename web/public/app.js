@@ -243,6 +243,7 @@ const I18N = {
     /* governance */
     gov_sub: "Owner controls. Changes are signed with the owner badge and committed on chain.",
     gov_nobudget_sub: "Open a budget to manage it.",
+    danger_zone: "Danger zone",
     wl_merchants: "Whitelisted merchants",
     no_wl_merchants: "No merchants whitelisted — any merchant is allowed.",
     add_merchant_placeholder: "Add merchant by name",
@@ -543,6 +544,7 @@ const I18N = {
     /* governance */
     gov_sub: "所有者的控制项。每项变更都会用所有者凭证签名并提交到链上。",
     gov_nobudget_sub: "请先开通一个预算再来管理。",
+    danger_zone: "危险操作",
     wl_merchants: "白名单商户",
     no_wl_merchants: "尚未设置白名单——任意商户都可收款。",
     add_merchant_placeholder: "按名称添加商户",
@@ -1137,14 +1139,17 @@ function viewOverview() {
     : "";
 
   const stats = [
-    { label: t("stat_treasury"), icon: "coins", value: fmt(b.treasury), unit: true, hint: t("stat_treasury_hint", { funded: fmt(b.funded), withdrawn: fmt(b.withdrawn) }) },
-    { label: t("stat_spent_window"), icon: "trend", value: fmt(winSpent), unit: true, hint: w ? t("stat_spent_hint_window", { cap: fmt(winCap), left: fmt(winRemaining) }) : t("stat_spent_hint_daily", { cap: fmt(b.dailyCap) }) },
-    { label: t("stat_tx"), icon: "activity", value: fmt(b.ledger.length), unit: false, hint: t("stat_tx_hint") },
-    { label: t("stat_whitelisted"), icon: "store", value: fmt(b.whitelist.length), unit: false, hint: t("stat_whitelisted_hint") },
+    { label: t("stat_treasury"), icon: "coins", color: "var(--brand)", value: fmt(b.treasury), unit: true, hint: t("stat_treasury_hint", { funded: fmt(b.funded), withdrawn: fmt(b.withdrawn) }) },
+    { label: t("stat_spent_window"), icon: "trend", color: "var(--info)", value: fmt(winSpent), unit: true, hint: w ? t("stat_spent_hint_window", { cap: fmt(winCap), left: fmt(winRemaining) }) : t("stat_spent_hint_daily", { cap: fmt(b.dailyCap) }) },
+    { label: t("stat_tx"), icon: "activity", color: "var(--success)", value: fmt(b.ledger.length), unit: false, hint: t("stat_tx_hint") },
+    { label: t("stat_whitelisted"), icon: "store", color: "var(--warn)", value: fmt(b.whitelist.length), unit: false, hint: t("stat_whitelisted_hint") },
   ]
     .map(
       (s) => `<div class="stat">
-        <div class="stat__label">${icon(s.icon, 15)} ${esc(s.label)}</div>
+        <div class="stat__top">
+          <span class="stat__icon" style="--c:${s.color}">${icon(s.icon, 17)}</span>
+          <div class="stat__label">${esc(s.label)}</div>
+        </div>
         <div class="stat__value">${s.value} <span class="unit">${s.unit ? UNIT : ""}</span></div>
         <div class="stat__hint">${esc(s.hint)}</div>
       </div>`,
@@ -1508,7 +1513,7 @@ function viewGovernance() {
   return (
     pageHead(t("nav_governance"), t("gov_sub")) +
     `<div class="stack">
-      <div class="grid grid--2" style="align-items:start">
+      <div class="gov-grid">
         <div class="card">
           <div class="card__head"><h3>${esc(t("wl_merchants"))}</h3><span class="sub">${fmt(b.whitelist.length)}</span></div>
           <div class="card__body">
@@ -1550,35 +1555,27 @@ function viewGovernance() {
 
       ${sessionsCard(b)}
 
-      <div class="card" style="border-color:color-mix(in srgb, var(--danger) 30%, var(--border))">
-        <div class="card__head"><h3 style="color:var(--danger)">${icon("ban", 16)} ${esc(t("kill_switch"))}</h3>
-          ${b.revoked ? `<span class="badge badge--danger">${esc(t("revoked"))}</span>` : `<span class="badge badge--ok">${esc(t("status_active"))}</span>`}</div>
-        <div class="card__body">
-          <div class="row spread row--wrap" style="gap:16px">
-            <div style="max-width:52ch">
-              <p style="font-weight:600;margin-bottom:4px">${esc(t("revoke_authority"))}</p>
-              <p class="muted" style="font-size:13.5px">${esc(t("revoke_authority_body"))}</p>
-            </div>
-            <button class="btn btn--danger" id="g-revoke" data-action="revoke" ${b.revoked ? "disabled" : ""}>${icon("ban", 16)} ${b.revoked ? esc(t("already_revoked")) : esc(t("revoke_agent"))}</button>
+      <div class="danger-zone">
+        <div class="danger-zone__head">${icon("ban", 14)} ${esc(t("danger_zone"))}</div>
+        <div class="danger-row">
+          <div class="danger-row__text">
+            <h4>${icon("ban", 15)} ${esc(t("revoke_authority"))}
+              ${b.revoked ? `<span class="badge badge--danger">${esc(t("revoked"))}</span>` : `<span class="badge badge--ok">${esc(t("status_active"))}</span>`}</h4>
+            <p>${esc(t("revoke_authority_body"))}</p>
           </div>
+          <button class="btn btn--danger" id="g-revoke" data-action="revoke" ${b.revoked ? "disabled" : ""}>${icon("ban", 16)} ${b.revoked ? esc(t("already_revoked")) : esc(t("revoke_agent"))}</button>
         </div>
-      </div>
-
-      <div class="card" style="border-color:color-mix(in srgb, var(--danger) 30%, var(--border))">
-        <div class="card__head"><h3 style="color:var(--danger)">${icon("lock", 16)} ${esc(t("emergency_stop"))}</h3>
-          ${d.frozen ? `<span class="badge badge--danger">${esc(t("frozen_badge"))}</span>` : `<span class="badge badge--ok">${esc(t("status_active"))}</span>`}</div>
-        <div class="card__body">
-          <div class="row spread row--wrap" style="gap:16px">
-            <div style="max-width:52ch">
-              <p style="font-weight:600;margin-bottom:4px">${esc(t("freeze_title"))}</p>
-              <p class="muted" style="font-size:13.5px">${esc(t("freeze_body"))}</p>
-            </div>
-            ${
-              d.frozen
-                ? `<button class="btn btn--primary" data-action="unfreeze">${icon("check", 16)} ${esc(t("unfreeze_btn"))}</button>`
-                : `<button class="btn btn--danger" data-action="freeze">${icon("ban", 16)} ${esc(t("freeze_btn"))}</button>`
-            }
+        <div class="danger-row">
+          <div class="danger-row__text">
+            <h4>${icon("lock", 15)} ${esc(t("freeze_title"))}
+              ${d.frozen ? `<span class="badge badge--danger">${esc(t("frozen_badge"))}</span>` : `<span class="badge badge--ok">${esc(t("status_active"))}</span>`}</h4>
+            <p>${esc(t("freeze_body"))}</p>
           </div>
+          ${
+            d.frozen
+              ? `<button class="btn btn--primary" data-action="unfreeze">${icon("check", 16)} ${esc(t("unfreeze_btn"))}</button>`
+              : `<button class="btn btn--danger" data-action="freeze">${icon("ban", 16)} ${esc(t("freeze_btn"))}</button>`
+          }
         </div>
       </div>
 
