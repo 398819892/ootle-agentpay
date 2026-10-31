@@ -3,6 +3,7 @@
 name = "otc_board"
 version = "0.1.0"
 edition = "2024"
+license = "BSD-3-Clause"
 description = "A P2P OTC escrow board: sellers list assets, buyers take them through an on-chain Escrow"
 
 [package.metadata.tari-template]

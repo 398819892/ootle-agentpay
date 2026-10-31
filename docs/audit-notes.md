@@ -545,8 +545,12 @@ Followed up on the fifth review's deferred server items.
 - **#14 API-key → session mapping** (per-key on-chain session revoke; currently one "default" session).
 - **SDK `open()` component discovery** — still finds the new component by "first unknown address";
   the robust fix decodes the `new` return value, same live-walletd-shape validation as #16's typed read.
-- **Copyright headers** (templates say "The Tari Project" — need the owner's name) and the TS-vs-rest
-  licence split (MIT vs BSD-3) — both are the owner's call, not guessed.
+- **Licence unified to BSD-3-Clause (done).** The TS client was MIT; it is now BSD-3-Clause, matching
+  the SDK and templates. All three templates' `Cargo.toml` now also declare `license = "BSD-3-Clause"`
+  explicitly (not just the SPDX header).
+- **Copyright holder (still pending the owner's name).** The template `lib.rs` SPDX headers say
+  `Copyright 2026 The Tari Project` (inherited from the upstream template). The owner's original code
+  should carry the owner's own name/entity — left unchanged until they supply it (not guessed).
 
 ## Decision: OtcBoard frozen (2026-10-31)
 

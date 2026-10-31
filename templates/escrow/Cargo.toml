@@ -3,6 +3,7 @@
 name = "escrow"
 version = "0.1.0"
 edition = "2024"
+license = "BSD-3-Clause"
 description = "A generic on-chain escrow: lock funds, release/refund/dispute/resolve, with a platform fee"
 
 [package.metadata.tari-template]
