@@ -908,10 +908,25 @@ async function runChainOp(key, opName, component, params, submitFn, fpParams) {
   // explicitly (the timeout/pending case, where run() stamps e.txId on the tx it did submit).
   const txIdBefore = wd && wd.lastTxId;
   const submittedTxId = () => (wd && wd.lastTxId && wd.lastTxId !== txIdBefore ? wd.lastTxId : null);
+  // #8: persist the tx id to the journal the moment it is known — i.e. as soon as the client's
+  // lastTxId advances (right after submit, BEFORE the up-to-minutes confirmation wait) — not only
+  // after submitFn resolves. Otherwise a crash during the wait leaves the record "pending" with no
+  // txId, which the reconciler cannot settle against the chain (and replay won't resubmit). Chain ops
+  // are serialized, so a lastTxId that advances during this submitFn is unambiguously this op's.
+  let midflightTxId = null;
+  const txIdWatcher = setInterval(() => {
+    const t = submittedTxId();
+    if (t && !midflightTxId) {
+      midflightTxId = t;
+      try { txlog.settle(key, { txId: t }); } catch { /* best-effort; final settle still records it */ }
+      clearInterval(txIdWatcher);
+    }
+  }, 200);
   let res;
   try {
     res = await submitFn();
   } catch (e) {
+    clearInterval(txIdWatcher);
     const txId = (e && e.txId) || submittedTxId();
     if (e && e.pending) {
       // Submitted, but not confirmed within the window → UNKNOWN (never success). Reconciled later.
@@ -922,6 +937,7 @@ async function runChainOp(key, opName, component, params, submitFn, fpParams) {
     txlog.settle(key, { status: "rejected", txId, reason: chainMessage(e) });
     throw e;
   }
+  clearInterval(txIdWatcher);
   const txId = submittedTxId();
   const event = opName === "pay" ? firstPayEvent(res) : null;
   const record = txlog.settle(key, { status: "confirmed", txId, event });
@@ -1308,9 +1324,15 @@ const OPS = {
   },
 
   // Emergency stop: freeze every money/admin action dashboard-wide (independent of on-chain revoke).
+  // #12: an emergency stop must be EASY to engage and HARD to lift. `freeze` therefore skips the
+  // step-up gate (`noStepUp`) and the rate limiter (`bypassRateLimit`) — a logged-in operator can
+  // always hit the brakes, even while a flood is tripping limits. It stays `highRisk` so the action
+  // is still durably audited. `unfreeze` below keeps the full step-up gate (hard to lift).
   freeze: {
     tier: TIERS.ADMIN,
     highRisk: true,
+    noStepUp: true,
+    bypassRateLimit: true,
     async run(_body, ctx) {
       store.frozen = true;
       saveStore();
@@ -1621,7 +1643,7 @@ async function handleApiV1(req, res, urlPath) {
       enabled: apiKeys.configured(),
       auth: "Bearer API key (Authorization: Bearer <key>, or X-API-Key). Roles: agent, admin.",
       endpoints: [
-        "POST   /api/v1/payments        (agent) — make a capped payment; honours Idempotency-Key",
+        "POST   /api/v1/payments        (agent) — make a capped payment; REQUIRES an Idempotency-Key header",
         "GET    /api/v1/payments        (agent) — list payment receipts",
         "GET    /api/v1/payments/:id    (agent) — one receipt / status",
         "GET    /api/v1/budget          (agent) — caps, remaining window, treasury (chain-derived)",
@@ -1630,6 +1652,8 @@ async function handleApiV1(req, res, urlPath) {
         "DELETE /api/v1/merchants/:name (admin) — remove a local merchant alias",
         "POST   /api/v1/budgets         (admin) — open/fund a budget",
         "GET    /api/v1/audit           (admin) — recent audit entries",
+        "GET    /api/v1/keys            (admin) — list API keys (id/role/revoked)",
+        "POST   /api/v1/keys/:id/revoke (admin) — revoke an API key at runtime",
       ],
       spec: "/api/v1/openapi.json",
       docs: "docs/api.md",
@@ -1684,10 +1708,17 @@ async function handleApiV1(req, res, urlPath) {
     // ---- payments -------------------------------------------------------------------------------
     if (sub === "/payments" && method === "POST") {
       const idemHeader = String(req.headers["idempotency-key"] || "").trim();
+      // #14: REQUIRE an Idempotency-Key on the payment endpoint. Without it a client that retries a
+      // timed-out request would pay twice (the server would otherwise mint a random invoice id per
+      // call, so the retry gets a fresh key and re-submits). Making it mandatory puts the dedup key
+      // in the caller's control and closes that double-pay path.
+      if (!idemHeader) {
+        throw httpError(400, "POST /payments requires an Idempotency-Key header (so a retried request cannot pay twice).");
+      }
       const invoiceId = validInvoiceId(body.invoiceId) || newInvoiceId();
-      // Payment id = the idempotency key: the client's Idempotency-Key header if given, else a stable
-      // per-invoice default. A repeat with the same key never re-submits to chain (txlog enforces it).
-      const key = idemHeader ? idemHeader.slice(0, 128) : "pay:" + invoiceId;
+      // Payment id = the caller's Idempotency-Key. A repeat with the same key never re-submits to
+      // chain (txlog enforces it); a repeat with different funding params is a hard conflict.
+      const key = idemHeader.slice(0, 128);
       const payBody = {
         merchant: body.merchant,
         amount: body.amount,
@@ -1792,6 +1823,22 @@ async function handleApiV1(req, res, urlPath) {
       if (denyIfNotAdmin("audit")) return;
       const limit = Math.max(1, Math.min(500, Number(query.limit) || 100));
       return sendJson(res, 200, { entries: audit.recent(limit) });
+    }
+
+    // ---- API keys (#9: the runtime revoke entry point) ------------------------------------------
+    // apikeys.js has always supported runtime revoke; these endpoints expose it (admin-only) so a
+    // leaked key can be killed without an env edit + restart. The key list stays in env; this only
+    // flips the persisted revocation flag (secret-free metadata is returned).
+    if (sub === "/keys" && method === "GET") {
+      if (denyIfNotAdmin("listApiKeys")) return;
+      return sendJson(res, 200, { keys: apiKeys.list() });
+    }
+    if (sub.startsWith("/keys/") && sub.endsWith("/revoke") && method === "POST") {
+      if (denyIfNotAdmin("revokeApiKey")) return;
+      const id = decodeURIComponent(sub.slice("/keys/".length, -"/revoke".length));
+      const ok = apiKeys.revoke(id);
+      if (!ok) return sendJson(res, 404, { error: `No API key with id ${JSON.stringify(id)}.` });
+      return sendJson(res, 200, { id, revoked: true, keys: apiKeys.list() });
     }
 
     return sendJson(res, 404, { error: "Unknown API endpoint. GET /api/v1 lists the available ones." });
@@ -1972,6 +2019,19 @@ if (!isLoopbackHost(HOST) && !AUTH_ON) {
       `Fix one of:\n` +
       `  • set DASHBOARD_PASSWORD (and front the service with HTTPS / a reverse proxy), or\n` +
       `  • bind to loopback for local dev (unset HOST, or HOST=127.0.0.1).\n`,
+  );
+  process.exit(1);
+}
+
+// #10: on a network-exposed deployment, the step-up ("second factor" for move-funds / admin ops)
+// must NOT reuse the login password — otherwise it is the same single secret typed twice, not a
+// second factor. Refuse to start exposed without a DISTINCT AGENTPAY_ADMIN_PASSWORD. On loopback
+// (local dev) this stays a non-fatal note below.
+if (!isLoopbackHost(HOST) && AUTH_ON && ADMIN_PASSWORD === DASHBOARD_PASSWORD) {
+  console.error(
+    `\nRefusing to start: HOST=${HOST} is network-exposed and AGENTPAY_ADMIN_PASSWORD is not set ` +
+      `(step-up would reuse DASHBOARD_PASSWORD — no real second factor for a custodial wallet).\n` +
+      `Fix: set a DISTINCT AGENTPAY_ADMIN_PASSWORD, or bind to loopback for local dev.\n`,
   );
   process.exit(1);
 }

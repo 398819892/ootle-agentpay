@@ -131,7 +131,11 @@ def load(argv: list[str] | None = None) -> ServerConfig:
         component=os.environ.get("AGENTPAY_COMPONENT") or None,
         agent_badge=os.environ.get("AGENTPAY_AGENT_BADGE") or None,
         agent_account=os.environ.get("AGENTPAY_AGENT_ACCOUNT") or None,
-        auto_provision=_env_bool("AGENTPAY_AUTO_PROVISION", True),
+        # #15: default to ATTACH (non-custodial): the MCP/agent process attaches to a budget the
+        # OWNER already opened (component + agent badge + agent account), so it holds only the agent
+        # badge — not the owner key. Auto-provision (the agent process opening a budget with the owner
+        # key, thus holding both badges) is now opt-in for local demos: set AGENTPAY_AUTO_PROVISION=1.
+        auto_provision=_env_bool("AGENTPAY_AUTO_PROVISION", False),
         per_tx_cap=_env_int("AGENTPAY_PER_TX_CAP", 1_000),
         daily_cap=_env_int("AGENTPAY_DAILY_CAP", 1_500),
         fund=_env_int("AGENTPAY_FUND", 10_000),

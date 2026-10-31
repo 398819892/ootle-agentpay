@@ -149,19 +149,25 @@ function createAuthorizer({ ops, audit, isFrozen, stepUp, rate }) {
       });
     }
 
-    // 3. rate limit + anomaly flags (money ops are throttled hardest).
+    // 3. rate limit + anomaly flags (money ops are throttled hardest). An op may opt out
+    // (`bypassRateLimit`) — used by the emergency `freeze`, which must stay reachable even while a
+    // flood is tripping limits (see server.js #12).
     let flags = [];
-    try {
-      const money = op.tier === TIERS.MONEY;
-      const amount = args && (args.amount != null ? args.amount : args.fund != null ? args.fund : null);
-      ({ flags } = rate.check(ctx.rateKey || actor, { money, amount, op: name }));
-    } catch (e) {
-      audit.append({ ...base, tier: op.tier, status: "denied", reason: "rate_limited" });
-      throw e;
+    if (!op.bypassRateLimit) {
+      try {
+        const money = op.tier === TIERS.MONEY;
+        const amount = args && (args.amount != null ? args.amount : args.fund != null ? args.fund : null);
+        ({ flags } = rate.check(ctx.rateKey || actor, { money, amount, op: name }));
+      } catch (e) {
+        audit.append({ ...base, tier: op.tier, status: "denied", reason: "rate_limited" });
+        throw e;
+      }
     }
 
-    // 4. step-up confirmation for high-risk ops, independent of the login session.
-    if (op.highRisk && stepUp && stepUp.required()) {
+    // 4. step-up confirmation for high-risk ops, independent of the login session. An op may opt out
+    // (`noStepUp`) while staying high-risk/audited — used by the emergency `freeze`, which must be
+    // easy to engage (see server.js #12).
+    if (op.highRisk && !op.noStepUp && stepUp && stepUp.required()) {
       // Pass the operation's actual arguments so the confirm token can be verified as bound to THESE
       // funding parameters (amount, payee, caps, budget), not merely to the operation name.
       const okToken = ctx.confirmToken && stepUp.verify(ctx.confirmToken, name, args);

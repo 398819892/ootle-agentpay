@@ -107,8 +107,13 @@ class AgentWallet:
         return PayResult(True, merchant, amount, memo, spent_in_window=spent_in_window)
 
     def status(self) -> dict[str, Any]:
-        """What the agent is allowed to know about its own budget. The spend figure and the
-        'revoked' flag are confirmed against the chain via a dry run, not merely remembered."""
+        """What the agent is allowed to know about its own budget.
+
+        `revoked` IS confirmed against the chain here (a dry-run probe). `spent_in_window` is the
+        last figure this process saw — it is set from the chain's `pay` event on each payment, but it
+        resets on restart and does not reflect spends by OTHER sessions of the same budget, so treat it
+        as a local estimate, not an authoritative chain read. (A live read would call the template's
+        `get_info` via dry-run and decode a typed result; tracked with #16 in docs/audit-notes.md.)"""
         spent = self.budget.spent
         remaining_daily = max(self.daily_cap - spent, 0)
         # A tiny whitelisted probe tells us whether the kill switch has been pulled on chain.

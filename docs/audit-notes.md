@@ -485,6 +485,42 @@ open-source template — revenue is from the service; SDK `payEvents` topic/dedu
 component-discovery robustness; resource-address parametrization (drop hard-coded `XTR`); copyright
 headers (need the owner's name — not guessed) and TS-vs-rest licence consistency.
 
+## Server-layer pass (2026-10-31) — the deferred #8–#16
+
+Followed up on the fifth review's deferred server items.
+
+- **#8 — tx id lost on a crash mid-confirmation (fixed).** `runChainOp` recorded the tx id only after
+  `submitFn` (submit + up-to-minutes wait) returned, so a crash during the wait left a `pending`
+  record with no txId — unreconcilable. Now a watcher persists the txId to the journal the moment the
+  client's `lastTxId` advances (right after submit), closing the window. Safe because chain ops are
+  serialized.
+- **#9 — API-key revoke had no entry point (fixed).** Added admin `GET /api/v1/keys` and
+  `POST /api/v1/keys/:id/revoke` (the revoke logic existed in apikeys.js), so a leaked key can be
+  killed at runtime without an env edit + restart.
+- **#10 — step-up reused the login password (fixed).** The server now **refuses to start** when it is
+  network-exposed, auth is on, and `AGENTPAY_ADMIN_PASSWORD == DASHBOARD_PASSWORD` (step-up would be
+  the same secret, not a second factor). Loopback dev keeps the non-fatal note.
+- **#12 — emergency stop was high-friction (fixed).** `freeze` now skips step-up (`noStepUp`) and the
+  rate limiter (`bypassRateLimit`) — a logged-in operator can always brake, even under a flood — while
+  staying `highRisk` so it is still durably audited. `unfreeze` keeps the full step-up gate.
+- **#14 — v1 pay could double-pay on retry (fixed, core).** `POST /api/v1/payments` now **requires** an
+  `Idempotency-Key` header (without it a retried request would get a fresh random key and re-submit).
+  The thin TS/Python clients already send it. *(Deferred: API-key → session mapping so per-key on-chain
+  session revoke works; it currently uses the one "default" session.)*
+- **#15 — MCP was custodial by default (fixed, core).** `AGENTPAY_AUTO_PROVISION` now defaults to
+  **false**: the MCP/agent attaches to an owner-opened budget (holds only the agent badge) instead of
+  opening one with the owner key. Provision is opt-in for demos. The `status()` docstring is corrected
+  to stop claiming `spent_in_window` is chain-confirmed (it is a local estimate; `revoked` is probed).
+
+### Still deferred (need focused work, not a rushed edit)
+- **#11 — serial lock blocks reads.** Letting reads bypass the lock is valuable but concurrency-
+  sensitive (the lock also guards the shared `lastTxId` for writes); it deserves a concurrency test,
+  not a quick edit.
+- **#16 — positional substate parsing.** The robust fix is a typed `get_info` dry-run read; a larger
+  SDK+client change. This also gates a live-chain `spent_in_window` for MCP `status()` (#15).
+- Design/product (#4 escrow-for-merchant, #5 fee-not-enforceable), SDK `payEvents` topic/dedup and
+  `open()` component discovery, resource-address parametrization, and copyright headers remain open.
+
 ## Decision: OtcBoard frozen (2026-10-31)
 
 After the fourth review, **OtcBoard is frozen** — moved out of the supported product line, kept in
