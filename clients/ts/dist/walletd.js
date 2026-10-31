@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.WalletdClient = exports.rejectReason = exports.finalizedOutcome = exports.DEFAULT_WALLETD_URL = void 0;
+exports.WalletdClient = exports.DEFAULT_WALLETD_URL = void 0;
+exports.finalizedOutcome = finalizedOutcome;
+exports.rejectReason = rejectReason;
 /**
  * Minimal JSON-RPC client for a Tari Ootle wallet daemon (auth = `none` devnet mode).
  *
@@ -95,13 +97,11 @@ function finalizedOutcome(rpcResult) {
     }
     return null;
 }
-exports.finalizedOutcome = finalizedOutcome;
 /** Extract a human reject reason from a finalized-but-rejected result tree, or null if not rejected. */
 function rejectReason(result) {
     const outcome = finalizedOutcome(result);
     return outcome && outcome[0] === "reject" ? outcome[1] : null;
 }
-exports.rejectReason = rejectReason;
 class WalletdClient {
     constructor(url = exports.DEFAULT_WALLETD_URL, opts = {}) {
         this.token = null;
@@ -207,19 +207,32 @@ class WalletdClient {
     }
     // -- transactions ---------------------------------------------------------------
     async submitManifest(manifest, variables, maxFee, dryRun) {
-        // Retry ONLY on transient public-indexer errors (connection / 30s timeouts seen on
-        // esmeralda). A local swarm never hits these; a template/policy rejection is returned
-        // immediately (never retried).
         const params = { manifest, variables, max_fee: maxFee, dry_run: dryRun };
-        let last = {};
-        for (let i = 0; i < SUBMIT_RETRIES; i++) {
-            last = await this.rpc("transactions.submit_manifest", params);
-            const err = last.error;
-            if (!err || !isTransient(err.message ?? ""))
-                return last;
-            await sleep(SUBMIT_RETRY_DELAY_MS);
+        // A transient error (connection / 30s indexer timeout seen on esmeralda) is ambiguous for a
+        // REAL submit: the manifest may already have reached the node and created a transaction, and
+        // the response was merely lost. Re-submitting it would be a *new* transaction — a double-spend
+        // (H5). So we retry transient errors ONLY for dry runs, which change no state. For a real submit
+        // we do a single attempt and surface a transient failure as `pending` (unknown), leaving the
+        // caller to reconcile by tx id rather than blindly resubmit. A template/policy rejection is
+        // returned immediately either way. A local swarm never produces transient errors.
+        if (dryRun) {
+            let last = {};
+            for (let i = 0; i < SUBMIT_RETRIES; i++) {
+                last = await this.rpc("transactions.submit_manifest", params);
+                const err = last.error;
+                if (!err || !isTransient(err.message ?? ""))
+                    return last;
+                await sleep(SUBMIT_RETRY_DELAY_MS);
+            }
+            return last;
         }
-        return last; // exhausted: hand back the last (transient) error for the caller to surface
+        const resp = await this.rpc("transactions.submit_manifest", params);
+        if (resp.error && isTransient(resp.error.message ?? "")) {
+            const err = new errors_1.ChainError(`submit may or may not have landed (transient error, not resubmitted): ${resp.error.message}`);
+            err.pending = true; // unknown: reconcile, never auto-resubmit (H5)
+            throw err;
+        }
+        return resp;
     }
     async dryRun(manifest, variables, maxFee = 200000) {
         return this.submitManifest(manifest, variables, maxFee, true);

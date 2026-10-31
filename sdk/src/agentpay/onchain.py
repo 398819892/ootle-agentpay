@@ -182,18 +182,33 @@ class WalletdClient:
     # -- transactions ---------------------------------------------------------------
     def _submit_manifest(self, manifest: str, variables: dict[str, str], max_fee: int,
                          dry_run: bool) -> dict:
-        """Submit a manifest, retrying ONLY on transient public-indexer errors (connection /
-        30s timeouts seen on esmeralda). A local swarm never hits these, so its behaviour is
-        unchanged; a template/policy rejection is returned immediately (never retried)."""
+        """Submit a manifest. A transient error (connection / 30s indexer timeout seen on esmeralda)
+        is ambiguous for a REAL submit: the manifest may already have reached the node and created a
+        transaction while only the response was lost, so resubmitting it would be a *new* transaction
+        — a double-spend (H5). We therefore retry transient errors ONLY for dry runs (no state
+        change); a real submit does a single attempt and surfaces a transient failure as ``pending``
+        (unknown), to be reconciled by tx id rather than blindly resubmitted. A template/policy
+        rejection is returned immediately either way. A local swarm never produces transient errors."""
         params = {"manifest": manifest, "variables": variables, "max_fee": max_fee, "dry_run": dry_run}
-        last = None
-        for _ in range(_SUBMIT_RETRIES):
-            last = self._rpc("transactions.submit_manifest", params)
-            err = last.get("error")
-            if not err or not _is_transient(err.get("message", "")):
-                return last
-            time.sleep(_SUBMIT_RETRY_DELAY)
-        return last  # exhausted: hand back the last (transient) error for the caller to surface
+        if dry_run:
+            last = None
+            for _ in range(_SUBMIT_RETRIES):
+                last = self._rpc("transactions.submit_manifest", params)
+                err = last.get("error")
+                if not err or not _is_transient(err.get("message", "")):
+                    return last
+                time.sleep(_SUBMIT_RETRY_DELAY)
+            return last
+        resp = self._rpc("transactions.submit_manifest", params)
+        err = resp.get("error")
+        if err and _is_transient(err.get("message", "")):
+            e = ChainError(
+                "submit may or may not have landed (transient error, not resubmitted): "
+                + err.get("message", "")
+            )
+            e.pending = True  # unknown: reconcile, never auto-resubmit (H5)
+            raise e
+        return resp
 
     def dry_run(self, manifest: str, variables: dict[str, str], max_fee: int = 200_000) -> dict:
         return self._submit_manifest(manifest, variables, max_fee, dry_run=True)

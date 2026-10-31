@@ -1115,7 +1115,7 @@ const OPS = {
       const agentTag = (body.agentTag || "agent").toString().slice(0, 24);
       const invoiceId = body.invoiceId ? String(body.invoiceId) : newInvoiceId();
       // Free-text memo is recorded in the journal/receipt for the caller's reference. (It is NOT the
-      // on-chain stealth memo — that carries the encoded invoice id + agent tag; see invoice.ts.)
+      // on-chain memo — that public plaintext memo carries the encoded invoice id + agent tag; see invoice.ts.)
       const memo = body.memo != null ? String(body.memo).slice(0, 120) : undefined;
       const key = idemKey(body, "pay:" + invoiceId);
       let r;
@@ -1443,7 +1443,15 @@ const MIME = {
 };
 
 function serveStatic(req, res) {
-  let urlPath = decodeURIComponent((req.url.split("?")[0] || "/"));
+  let urlPath;
+  try {
+    // A malformed percent-escape (e.g. GET /%E0%A4%A) makes decodeURIComponent throw URIError;
+    // without this guard that throw became an unhandled rejection and killed the process (H1).
+    urlPath = decodeURIComponent((req.url.split("?")[0] || "/"));
+  } catch {
+    res.writeHead(400);
+    return res.end("bad request");
+  }
   if (urlPath === "/") urlPath = "/index.html";
   const filePath = path.join(PUBLIC_DIR, path.normalize(urlPath));
   if (!filePath.startsWith(PUBLIC_DIR)) {
@@ -1471,22 +1479,42 @@ function serveStatic(req, res) {
   });
 }
 
+const MAX_BODY_BYTES = 1e6; // 1 MB
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let raw = "";
+    const chunks = [];
+    let size = 0;
+    let done = false;
+    const fail = (err) => {
+      if (done) return;
+      done = true;
+      // Stop accepting data AND tear the socket down, so a client streaming a huge body can't keep
+      // growing our memory after we've rejected (H2: a 300 MB stream to /api/login pushed RSS to
+      // ~410 MB because the old code only rejected the promise and kept appending).
+      req.destroy();
+      reject(err);
+    };
     req.on("data", (c) => {
-      raw += c;
-      if (raw.length > 1e6) reject(httpError(413, "payload too large"));
+      if (done) return;
+      size += c.length;
+      if (size > MAX_BODY_BYTES) return fail(httpError(413, "payload too large"));
+      chunks.push(c);
     });
     req.on("end", () => {
-      if (!raw) return resolve({});
+      if (done) return;
+      done = true;
+      if (size === 0) return resolve({});
+      // Collect Buffers and concat once, so a multi-byte UTF-8 char split across chunks is not
+      // corrupted (the old `raw += c` string concat could mangle it).
+      const raw = Buffer.concat(chunks, size).toString("utf8");
       try {
         resolve(JSON.parse(raw));
       } catch {
         reject(httpError(400, "invalid JSON body"));
       }
     });
-    req.on("error", reject);
+    req.on("error", fail);
   });
 }
 
@@ -1515,7 +1543,7 @@ function bearerKey(req) {
   const x = req.headers["x-api-key"];
   return x ? String(x).trim() : "";
 }
-/** An invoice id valid for the on-chain stealth memo codec, or null. */
+/** An invoice id valid for the on-chain (public plaintext) memo codec, or null. */
 function validInvoiceId(v) {
   const s = String(v == null ? "" : v).trim();
   return /^[a-z0-9]{8,32}$/.test(s) ? s : null;
@@ -1696,7 +1724,11 @@ async function handleApiV1(req, res, urlPath) {
     }
     if (sub.startsWith("/payments/") && method === "GET") {
       const id = decodeURIComponent(sub.slice("/payments/".length));
-      let rec = txlog.get(id) || txlog.list().find((r) => r.op === "pay" && r.txId === id) || null;
+      // This is the payments endpoint: only ever expose `pay` records. Looking a record up by its
+      // idempotency key could otherwise return any op (e.g. a withdraw), leaking it on this route.
+      let rec = txlog.get(id);
+      if (rec && rec.op !== "pay") rec = null;
+      if (!rec) rec = txlog.list().find((r) => r.op === "pay" && r.txId === id) || null;
       // Status tracking: advance an open record by settling it against chain (read-only get_result).
       if (rec && txlog.isOpen(rec.status) && rec.txId) {
         try {
@@ -1746,9 +1778,10 @@ async function handleApiV1(req, res, urlPath) {
         removedAlias: existed,
         name,
         notice:
-          "Removed the local merchant alias. NOTE: this AgentBudget template has no on-chain " +
-          "whitelist-remove — a whitelisted address stays spendable on chain until you revoke the " +
-          "agent (POST a revoke) or open a new budget. See docs/api.md 'Known limitations'.",
+          "Removed the local merchant alias only. NOTE: this endpoint does NOT call the template's " +
+          "on-chain remove_merchant — the address stays whitelisted (spendable) on chain. To remove " +
+          "it on chain, use the owner-badge remove_merchant method directly, or revoke the agent / " +
+          "open a new budget. See docs/api.md 'Known limitations'.",
       });
     }
 
@@ -1772,6 +1805,15 @@ async function handleApiV1(req, res, urlPath) {
     return sendJson(res, status, payload);
   }
 }
+
+// Last-resort safety net: an unexpected rejection/exception in an async request handler must not
+// take the whole process down (H1 — one malformed URL could do exactly that). Log and keep serving.
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason && reason.stack ? reason.stack : reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err && err.stack ? err.stack : err);
+});
 
 const server = http.createServer(async (req, res) => {
   applySecurityHeaders(req, res); // every response: static and API

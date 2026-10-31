@@ -118,7 +118,10 @@ mod agent_budget {
             let owner_badge_bucket = ResourceBuilder::non_fungible()
                 .with_token_symbol("OWNER")
                 .mintable(AccessRule::DenyAll, LOCKED)
-                .burnable(AccessRule::AllowAll, LOCKED)
+                // DenyAll (not AllowAll): the owner badge gates withdraw / revoke / limit changes and
+                // there is no recovery path, so burning it would strand the funds. It must not be
+                // destroyable. (The agent badge below stays burnable — sessions are meant to be retired.)
+                .burnable(AccessRule::DenyAll, LOCKED)
                 .initial_supply_with_data(Some((NonFungibleId::random(), (&(), &()))));
             let owner_badge = owner_badge_bucket.resource_address();
 

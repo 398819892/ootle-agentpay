@@ -67,6 +67,11 @@ use tari_template_lib::prelude::*;
 /// fund-safety bug — see `docs/audit-notes.md`).
 const MAX_FEE_BPS: u64 = 1000;
 
+/// Upper bound on a listing's timeout window, in epochs (~57 years at ~30 min/epoch). Caps both an
+/// accidental overflow of `now + timeout_epochs` (release builds wrap silently) and an absurdly large
+/// value that would lock the asset near-forever. See `docs/audit-notes.md` (M1).
+const MAX_TIMEOUT_EPOCHS: u64 = 1_000_000;
+
 /// `amount * fee_bps / 10000`, computed as a split so no intermediate overflows a 64-bit `Amount` on
 /// a large (e.g. 18-decimal) resource: `amount * fee_bps` can exceed `i64::MAX` even though the fee
 /// itself (≤ amount) never does. With `q = amount / 10000` and `r = amount - q*10000` (r < 10000),
@@ -197,7 +202,9 @@ mod otc_board {
             let owner_badge_bucket = ResourceBuilder::non_fungible()
                 .with_token_symbol("OTC-OWN")
                 .mintable(AccessRule::DenyAll, LOCKED)
-                .burnable(AccessRule::AllowAll, LOCKED)
+                // DenyAll: the owner badge gates all board management and has no recovery path, so it
+                // must not be burnable — burning it would permanently lock board administration.
+                .burnable(AccessRule::DenyAll, LOCKED)
                 .initial_supply_with_data(Some((NonFungibleId::random(), (&(), &()))));
             let owner_badge = owner_badge_bucket.resource_address();
 
@@ -284,6 +291,7 @@ mod otc_board {
             );
             assert!(bond.amount() >= self.listing_bond, "Bond below the minimum listing bond");
             assert!(timeout_epochs > 0, "timeout must be greater than zero");
+            assert!(timeout_epochs <= MAX_TIMEOUT_EPOCHS, "timeout exceeds the maximum");
             assert!(
                 timeout_epochs >= self.min_timeout_epochs,
                 "timeout is below the board minimum"
@@ -398,7 +406,7 @@ mod otc_board {
             let listing = self.get_mut(id);
             listing.buyer_account = Some(buyer_account);
             listing.buyer = Some(buyer);
-            listing.deadline_epoch = now + listing.timeout_epochs;
+            listing.deadline_epoch = now.checked_add(listing.timeout_epochs).expect("deadline overflow");
             listing.state = ListingState::Taken;
             listing.arbiter_stake_locked = required; // snapshot (0 when no stake required)
             emit_event("take", metadata!["id" => id.to_string()]);
@@ -480,7 +488,7 @@ mod otc_board {
                 "Only the seller or buyer may dispute"
             );
             listing.state = ListingState::Disputed;
-            listing.dispute_deadline = now + listing.timeout_epochs;
+            listing.dispute_deadline = now.checked_add(listing.timeout_epochs).expect("dispute deadline overflow");
             emit_event("dispute", metadata!["id" => id.to_string()]);
         }
 
@@ -544,13 +552,21 @@ mod otc_board {
         /// remainder to the seller. The bond returns to the seller.
         pub fn resolve(&mut self, id: u64, to_buyer_amount: Amount) {
             let treasury = self.treasury_account;
-            let stake_req = self.arbiter_stake;
-            // When staking is required, the listing's arbiter must have posted enough stake. Read
-            // both (disjoint, immutable) fields before taking the mutable listing borrow below.
-            if stake_req > amount![0] {
+            // The stake requirement for THIS deal is the amount locked at `take`
+            // (`arbiter_stake_locked`), NOT the board's current `arbiter_stake`. Using the snapshot
+            // means a malicious owner cannot block resolution of an in-flight dispute — and so cannot
+            // force the timeout default to the seller — by raising `set_arbiter_stake`, calling
+            // `slash_arbiter`, or `remove_arbiter` after the deal was taken. (Slash can only take FREE
+            // stake, so the locked portion is always still present here.) See docs/audit-notes.md (H3).
+            let (arbiter, req) = {
                 let l = self.listings.get(&id).expect("unknown listing");
-                let staked = self.arbiter_stakes.get(&l.arbiter).map(|v| v.balance()).unwrap_or(amount![0]);
-                assert!(staked >= stake_req, "Arbiter has not staked enough to resolve");
+                (l.arbiter, l.arbiter_stake_locked)
+            };
+            if req > amount![0] {
+                assert!(
+                    self.staked_balance(&arbiter) >= req,
+                    "Arbiter's deal-locked stake is missing"
+                );
             }
             let listing = self.get_mut(id);
             assert!(listing.state == ListingState::Disputed, "Listing is not under dispute");
@@ -689,12 +705,25 @@ mod otc_board {
             out
         }
 
-        /// Owner slashes a misbehaving arbiter: their entire stake is moved to the treasury. This is
-        /// the penalty that backs the arbiter's decisions — being whitelisted is no longer "free".
+        /// Owner slashes a misbehaving arbiter's **free** (unlocked) stake to the treasury. This is a
+        /// discretionary penalty for arbiters not currently backing a live deal.
+        ///
+        /// It can only take the FREE portion: stake locked to a `Taken`/`Disputed` listing is reserved
+        /// to back that deal and the owner cannot drain it. Without this an owner could empty an
+        /// arbiter's collateral mid-dispute — leaving nothing for the timeout burn and starving
+        /// `resolve` — to force the timeout default to a colluding seller (a confirmed owner-power bug,
+        /// see docs/audit-notes.md H3). The automatic, objective penalty for a stalled dispute remains
+        /// `claim_dispute_timeout`, which burns the deal's locked portion.
         pub fn slash_arbiter(&mut self, arbiter: RistrettoPublicKeyBytes) {
             let treasury = self.treasury_account;
+            let locked = self.locked_stake_for(&arbiter);
             let v = self.arbiter_stakes.get_mut(&arbiter).expect("arbiter has no stake");
-            let slashed = v.withdraw_all();
+            let free = v.balance() - locked;
+            assert!(
+                free > amount![0],
+                "No free (unlocked) stake to slash; it is locked to the arbiter's live deals"
+            );
+            let slashed = v.withdraw(free);
             let amt = slashed.amount();
             ComponentManager::get(treasury).invoke("deposit", args![slashed]);
             emit_event("slash_arbiter", metadata!["amount" => amt.to_string()]);

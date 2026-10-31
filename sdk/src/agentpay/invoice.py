@@ -7,8 +7,9 @@ This memo is PUBLIC, on-chain plaintext, NOT an encrypted stealth output — the
 into the event payload as-is, so never put a secret in it (see docs/security.md: "A memo is public
 metadata, not a secret."). Ootle Message memos are UTF-8 up to 253 bytes.
 
-The challenge is OUR OWN format ("ootle-stealth-v1"), not standard x402: standard x402
+The challenge is OUR OWN format ("ootle-invoice-v1"), not standard x402: standard x402
 clients only understand EVM/Solana settlement. A thin adapter is provided in tools.py.
+(The scheme is deliberately NOT named "stealth" — this memo/flow is public plaintext, see above.)
 """
 from __future__ import annotations
 
@@ -25,14 +26,14 @@ MEMO_PREFIX = "ap1"
 MAX_MEMO_BYTES = 253
 _ID_RE = re.compile(r"^[a-z0-9]{8,32}$")
 _TAG_RE = re.compile(r"^[A-Za-z0-9_.-]{0,32}$")
-SCHEME = "ootle-stealth-v1"
+SCHEME = "ootle-invoice-v1"
 
 
 @dataclass(frozen=True)
 class Invoice:
     invoice_id: str
     amount: int              # base units of the coin
-    coin: str                # resource address of the stealth coin
+    coin: str                # resource address of the payment coin
     payee: str               # merchant bech32m address
     expires_at: float        # unix seconds
     description: str = ""
@@ -102,7 +103,7 @@ def to_challenge(inv: Invoice) -> dict[str, Any]:
         "payee": inv.payee,
         "expires_at": inv.expires_at,
         "description": inv.description,
-        "how_to_pay": "stealth transfer to `payee` with memo Message 'ap1|<invoice_id>|<agent_tag>', "
+        "how_to_pay": "transfer to `payee` with public memo Message 'ap1|<invoice_id>|<agent_tag>', "
                       "then retry the request with header X-Ootle-Payment: <tx_id>",
     }
 

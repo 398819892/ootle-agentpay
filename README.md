@@ -29,9 +29,9 @@ Two products on one shared escrow core:
 
 | Template | What it does | Tests | Published (localnet) | Published (esmeralda) |
 |---|---|---|---|---|
-| **Escrow** | Lock funds; release (opt. hashlock) / refund after timeout / dispute → arbiter resolves; platform fee | 17 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
-| **AgentBudget** | Owner/agent badges; `pay` within per-tx + rolling-daily caps + whitelist; revoke; `pay_via_escrow` (cross-template) | 14 ✅ | `template_758d0c58…` | `template_299d49bc…` |
-| **OtcBoard** | List/take/confirm/reclaim/dispute/resolve; listing bond, max-amount cap, arbiter whitelist + **arbiter stake/slash** | 18 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
+| **Escrow** | Lock funds; release (opt. hashlock) / refund after timeout / dispute → arbiter resolves; platform fee | 26 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
+| **AgentBudget** | Owner/agent badges; `pay` within per-tx + rolling-daily caps + whitelist; revoke; `pay_via_escrow` (cross-template) | 25 ✅ | `template_758d0c58…` | `template_299d49bc…` |
+| **OtcBoard** | List/take/confirm/reclaim/dispute/resolve; listing bond, max-amount cap, arbiter whitelist + **arbiter stake/slash** | 45 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
 
 All three are deployed to a local swarm **and to the public esmeralda testnet**, and exercised with
 **real on-chain calls** (not just unit tests): see the demos below. Full esmeralda addresses and the
@@ -100,7 +100,7 @@ Support level per component — read the ✅/❌ precisely:
 | Exercised on-chain (live swarm + esmeralda) | ✅ | ✅ (local swarm) | ❌ never run against a live indexer |
 | Audited | ❌ not yet | ❌ not yet | ❌ not yet |
 
-- **49 template unit tests** (Escrow 17, AgentBudget 14, OtcBoard 18) pass in the wasmer sandbox,
+- **96 template unit tests** (Escrow 26, AgentBudget 25, OtcBoard 45) pass in the wasmer sandbox,
   including adversarial/boundary cases (double-release, over-balance resolve, fee truncation), the
   arbiter stake/slash flow, and the arbiter-cannot-unstake-during-a-dispute guard.
 - **On-chain**: all three templates published to a local swarm; Escrow release, AgentBudget pay /
@@ -133,9 +133,9 @@ Support level per component — read the ✅/❌ precisely:
 
 | 模板 | 作用 | 测试 | 已发布(localnet) | 已发布(esmeralda) |
 |---|---|---|---|---|
-| **Escrow** | 锁资金；放款(可选 hashlock)/超时退款/争议→仲裁；平台手续费 | 17 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
-| **AgentBudget** | owner/agent 双 badge；`pay` 受单笔+日窗口上限+白名单约束；撤销；`pay_via_escrow`(跨模板) | 14 ✅ | `template_758d0c58…` | `template_299d49bc…` |
-| **OtcBoard** | 挂单/接单/确认/退回/争议/分配；挂单保证金、单笔上限、仲裁人白名单 + **仲裁人质押/罚没** | 18 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
+| **Escrow** | 锁资金；放款(可选 hashlock)/超时退款/争议→仲裁；平台手续费 | 26 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
+| **AgentBudget** | owner/agent 双 badge；`pay` 受单笔+日窗口上限+白名单约束；撤销；`pay_via_escrow`(跨模板) | 25 ✅ | `template_758d0c58…` | `template_299d49bc…` |
+| **OtcBoard** | 挂单/接单/确认/退回/争议/分配；挂单保证金、单笔上限、仲裁人白名单 + **仲裁人质押/罚没** | 45 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
 
 三个模板都已部署到本地链**以及公共测试网 esmeralda**,并用**真实链上调用**验证过（不只是单测）。
 esmeralda 完整地址与部署方法见 [`docs/esmeralda.md`](docs/esmeralda.md)。
@@ -212,7 +212,7 @@ Web 控制台里:开预算 → 正常付款(成功、余额减)→ 试试超额/
 | 已上链验证(本地 swarm + esmeralda) | ✅ | ✅(本地 swarm) | ❌ 从未对活索引器跑过 |
 | 已审计 | ❌ 暂无 | ❌ 暂无 | ❌ 暂无 |
 
-- **49 个模板单测**（Escrow 17、AgentBudget 14、OtcBoard 18）在 wasmer 沙箱通过，含对抗/边界用例
+- **96 个模板单测**（Escrow 26、AgentBudget 25、OtcBoard 45）在 wasmer 沙箱通过，含对抗/边界用例
   （重复放款、超额分配、手续费截断）、仲裁人质押/罚没流程，以及「在途争议时仲裁人不能取回质押」守卫。
 - **链上**：三个模板都发布到本地 swarm **以及公共测试网 esmeralda**；Escrow 放款、AgentBudget
   付款/超额拒绝/撤销、OtcBoard 挂单/接单/确认都用真实交易 + 余额核对验证过。

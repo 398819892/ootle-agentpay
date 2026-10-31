@@ -51,6 +51,12 @@
 
 use tari_template_lib::prelude::*;
 
+/// Upper bound on an escrow's timeout window, in epochs (~57 years at ~30 min/epoch). Caps both an
+/// accidental overflow of `now + timeout_epochs` (release builds wrap silently, which could land the
+/// deadline in the past and allow an immediate refund) and a griefing "lock the funds ~forever"
+/// value — notably in `AgentBudget::pay_via_escrow`, where a leaked agent key picks the timeout.
+const MAX_TIMEOUT_EPOCHS: u64 = 1_000_000;
+
 /// The escrow lifecycle state.
 #[derive(Debug, Clone, PartialEq, Eq, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 pub enum EscrowState {
@@ -130,10 +136,14 @@ mod escrow {
         ) -> Component<Escrow> {
             assert!(!funds.amount().is_zero(), "Escrow must be funded");
             assert!(timeout_epochs > 0, "Timeout must be greater than zero");
+            assert!(timeout_epochs <= MAX_TIMEOUT_EPOCHS, "Timeout exceeds the maximum");
             assert!(fee_bps <= 10000, "Fee basis points cannot exceed 10000");
 
             let payer = CallerContext::transaction_signer_public_key();
-            let deadline_epoch = Consensus::current_epoch() + timeout_epochs;
+            // checked_add: never silently wrap a huge timeout into a past deadline (see MAX_TIMEOUT_EPOCHS).
+            let deadline_epoch = Consensus::current_epoch()
+                .checked_add(timeout_epochs)
+                .expect("deadline epoch overflow");
 
             Component::new(Self {
                 funds: Vault::from_bucket(funds),
@@ -268,7 +278,9 @@ mod escrow {
             );
 
             self.state = EscrowState::Disputed;
-            self.dispute_deadline = Consensus::current_epoch() + self.timeout_epochs;
+            self.dispute_deadline = Consensus::current_epoch()
+                .checked_add(self.timeout_epochs)
+                .expect("dispute deadline overflow");
             emit_event("disputed", metadata![]);
         }
 

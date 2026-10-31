@@ -389,6 +389,56 @@ the collateral. (Owner-discretion `slash_arbiter` still banks to treasury; see l
 starving the buyer/arbiter of time. **Fix:** owner-set `min_timeout_epochs` via `set_min_timeout`
 (default 0 = none); `list` rejects a shorter window. **Test:** `listing_below_min_timeout_is_rejected`.
 
+## Fourth external review (2026-10-31)
+
+Two web-robustness bugs the reviewer reproduced by running the server, plus OTC owner-power and
+retry-safety issues. Fixed the ones with clean fixes; the rest are OTC feature/architecture items
+tracked under limitations (and reinforce the standing "freeze OTC, focus AgentPay" recommendation).
+
+- **H1 — a malformed URL crashed the process (fixed).** `serveStatic` called `decodeURIComponent`
+  with no guard; `GET /%E0%A4%A` threw `URIError` → unhandled rejection → process exit. Now the
+  decode is wrapped (400 on failure), plus a top-level `unhandledRejection`/`uncaughtException` net.
+- **H2 — unbounded request body (fixed).** `readBody` rejected over 1 MB but kept appending; a 300 MB
+  stream drove RSS to ~410 MB. Now it `req.destroy()`s on overflow and collects Buffers +
+  `Buffer.concat` (also fixes multibyte-UTF-8 split across chunks).
+- **H3 — owner could force a dispute outcome (fixed).** `resolve` checked the board's *current*
+  `arbiter_stake` and the arbiter's live balance, so an owner could block `resolve` (raise the stake
+  bar / `slash_arbiter` / `remove_arbiter`) and let the timeout default the asset to a colluding
+  seller; `slash_arbiter`'s `withdraw_all` also drained stake locked to in-flight deals. **Fix:**
+  `resolve` now checks `listing.arbiter_stake_locked` (the take-time snapshot, owner-immutable), and
+  `slash_arbiter` can take only the **free** (unlocked) stake. **Tests:**
+  `malicious_owner_cannot_block_an_in_flight_resolve`, `stake_locked_to_a_dispute_cannot_be_unstaked_or_slashed`.
+- **H5 — submit retry could double-pay (fixed).** The TS/Python clients retried a *real* submit up to
+  30× on transient errors (incl. "did not respond within" / "Failed to submit transaction") — but
+  those are ambiguous: the tx may already have landed, so resubmitting is a new, duplicate payment.
+  **Fix:** transient-error retry now applies to **dry runs only**; a real submit makes one attempt and
+  surfaces a transient failure as `pending` (unknown) for reconciliation, never resubmitting.
+- **M1 — timeout overflow / near-infinite lock (fixed).** `now + timeout_epochs` could wrap in a
+  release build (deadline in the past → instant refund) and had no upper bound (lock funds ~forever,
+  incl. via a leaked agent key in `pay_via_escrow`). **Fix:** `checked_add` everywhere and a
+  `MAX_TIMEOUT_EPOCHS` cap in `Escrow::new` and OtcBoard `list`.
+- **Owner badge was burnable by anyone (fixed).** AgentBudget and OtcBoard minted the owner badge
+  `burnable(AllowAll)` with no recovery — burning it would strand funds/admin. Now `DenyAll`. (Agent
+  session badges stay burnable — they are meant to be retired.)
+- **Consistency fixes.** v1 `GET /payments/:id` now returns only `pay` records (was any op, incl.
+  withdraw); the v1 remove-merchant notice no longer wrongly claims the template lacks
+  `remove_merchant`; the invoice scheme/comments no longer say "stealth" (the memo is public
+  plaintext); `pyproject.toml` drops the broken `agentpay.cli:main` entry and adds `pytest-asyncio`;
+  README test counts corrected to 96 (26/25/45).
+
+### Deferred this round (see limitations below, and the freeze-OTC recommendation)
+- **H4** — `take` costs nothing, so an attacker can squat every Open listing (and tie up arbiter
+  stake) for the price of fees. A real fix needs a buyer take-deposit or seller approval — an OTC flow
+  change. **M2** — Docker loses the idempotency log (txlog/audit/claims not under `/data`), which
+  undermines H5's protection; `.dockerignore` gaps; `node:18` EOL. **M3** — all requests (incl. reads)
+  share one serial lock; a stuck tx blocks the dashboard. **M4** — a buyer-callable `mark_paid` to
+  stop a seller waiting out `reclaim`. **M5** — all clients request Admin on `auth=none` walletd; no
+  non-custodial least-privilege path (the #8 custodial point). **M6** — `take` now also scans all
+  listings via `locked_stake_for`, so per-tx cost grows with history (needs a per-arbiter counter or
+  one-component-per-listing). Plus lows: escrow `dispute` has no deadline check (payee can stall a
+  window), checks-effects-interactions ordering, `ADMIN_PASSWORD` defaulting to the login password,
+  and the server/SDK session-label regexes disagreeing on spaces.
+
 ## Known limitations & mitigations (disclosed, by design — not code bugs)
 
 These are architectural trade-offs, not fixable by a localised patch. They are disclosed here and in

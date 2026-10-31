@@ -608,10 +608,13 @@ fn unstake_arbiter(ctx: &mut Ctx, board: &Board, arbiter: &Account) {
     );
 }
 
-/// An arbiter must NOT be able to pull their stake while a dispute names them (that would dodge
-/// slashing); and `slash_arbiter` must still work while the dispute is live.
+/// Neither the arbiter nor the OWNER can remove stake locked to a live dispute. The arbiter cannot
+/// `unstake` it, and `slash_arbiter` may take only the FREE portion — so an owner cannot drain the
+/// deal-locked collateral mid-dispute (which would leave nothing for the timeout burn and could be
+/// used to force the timeout default to a colluding seller — H3). Here all 500 is locked, so both are
+/// rejected and the stake stays put.
 #[test]
-fn arbiter_cannot_unstake_during_dispute_and_slash_still_works() {
+fn stake_locked_to_a_dispute_cannot_be_unstaked_or_slashed() {
     let mut ctx = setup();
     let owner = funded(&mut ctx.test);
     let treasury = empty(&mut ctx.test);
@@ -627,7 +630,7 @@ fn arbiter_cannot_unstake_during_dispute_and_slash_still_works() {
     take(&mut ctx, &board, &buyer, id);
     simple(&mut ctx, &board, &buyer, "open_dispute", id);
 
-    // the arbiter tries to escape by pulling their stake mid-dispute -> rejected
+    // the arbiter tries to escape by pulling their stake mid-dispute -> rejected (all locked)
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
             .call_method(board.component, "unstake_arbiter", args![])
@@ -636,8 +639,8 @@ fn arbiter_cannot_unstake_during_dispute_and_slash_still_works() {
     );
     assert_reject_reason(reason, "No free stake to withdraw: it is locked by your live listings (taken or disputed)");
 
-    // the stake is still there, so slashing remains effective during the dispute
-    ctx.test.execute_expect_success(
+    // the OWNER tries to drain the locked stake mid-dispute -> rejected (only free stake is slashable)
+    let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
@@ -646,8 +649,10 @@ fn arbiter_cannot_unstake_during_dispute_and_slash_still_works() {
             .build_and_seal(&owner.key),
         vec![owner.owner_token.clone()],
     );
-    assert_eq!(bal(&mut ctx.test, &treasury), amount![500]); // slashed stake moved to treasury
+    assert_reject_reason(reason, "No free (unlocked) stake to slash; it is locked to the arbiter's live deals");
+    assert_eq!(bal(&mut ctx.test, &treasury), amount![0]); // nothing drained
 
+    // the stake is still fully there, backing the live dispute
     ctx.test.execute_expect_success(
         ctx.test.transaction()
             .call_method(board.component, "get_arbiter_stake", args![arbiter.public_key])
@@ -655,7 +660,7 @@ fn arbiter_cannot_unstake_during_dispute_and_slash_still_works() {
         vec![owner.owner_token.clone()],
     );
     let (_required, staked) = ctx.test.expect_return::<(Amount, Amount)>(0);
-    assert_eq!(staked, amount![0]);
+    assert_eq!(staked, amount![500]);
 }
 
 /// Once the arbiter has no open dispute (the deal is resolved/settled), they CAN retire their stake.

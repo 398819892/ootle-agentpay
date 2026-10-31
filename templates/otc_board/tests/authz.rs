@@ -169,18 +169,6 @@ fn stake_arbiter(ctx: &mut Ctx, board: &Board, arbiter: &Account, stake: Amount)
     );
 }
 
-fn slash(ctx: &mut Ctx, board: &Board, owner: &Account, arbiter: &Account) {
-    ctx.test.execute_expect_success(
-        ctx.test.transaction()
-            .create_proof(owner.component, board.owner_badge)
-            .put_last_instruction_output_on_workspace("p")
-            .call_method(board.component, "slash_arbiter", args![arbiter.public_key])
-            .drop_all_proofs_in_workspace()
-            .build_and_seal(&owner.key),
-        vec![owner.owner_token.clone()],
-    );
-}
-
 fn add_tradable_asset(ctx: &mut Ctx, board: &Board, owner: &Account, asset: ResourceAddress) {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
@@ -389,11 +377,12 @@ fn cancel_after_taken_is_rejected() {
     assert_eq!(bal(&mut ctx.test, &buyer), buyer_before + amount![1000]);
 }
 
-/// L3 (docs/audit-notes.md): slashing the listing's arbiter mid-dispute blocks `resolve` while a
-/// stake is required, but the funds are NOT frozen — lowering the stake requirement (owner action)
-/// lets the dispute be resolved and the asset distributed. Proves the "no permanent freeze" claim.
+/// H3 (docs/audit-notes.md): a malicious owner cannot force an in-flight dispute to time out (and so
+/// default to a colluding seller). `resolve` checks the stake LOCKED to the deal at `take`, not the
+/// board's current `arbiter_stake`, and `slash_arbiter` cannot touch locked stake — so neither
+/// cranking the stake bar nor slashing stops the arbiter from resolving the dispute.
 #[test]
-fn slashed_arbiter_mid_dispute_can_resolve_after_stake_requirement_lowered() {
+fn malicious_owner_cannot_block_an_in_flight_resolve() {
     let mut ctx = setup();
     let owner = funded(&mut ctx.test);
     let treasury = empty(&mut ctx.test);
@@ -406,23 +395,25 @@ fn slashed_arbiter_mid_dispute_can_resolve_after_stake_requirement_lowered() {
     stake_arbiter(&mut ctx, &board, &arbiter, amount![500]);
 
     let id = list(&mut ctx, &board, &seller, &arbiter, amount![1000], amount![100], 10);
-    take(&mut ctx, &board, &buyer, id);
+    take(&mut ctx, &board, &buyer, id); // locks 500 to this deal
     simple_ok(&mut ctx, &board, &buyer, "open_dispute", id);
 
-    // owner slashes the arbiter mid-dispute -> their stake drops to 0
-    slash(&mut ctx, &board, &owner, &arbiter);
+    // owner interference #1: crank the stake bar sky-high -> does NOT block resolve (snapshot used)
+    set_arbiter_stake(&mut ctx, &board, &owner, amount![999999]);
 
-    // with a stake still required, resolve is now blocked (the L3 symptom)
+    // owner interference #2: try to slash the arbiter mid-dispute -> rejected (the stake is locked)
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
-            .call_method(board.component, "resolve", args![id, amount![600]])
-            .build_and_seal(&arbiter.key),
-        vec![arbiter.owner_token.clone()],
+            .create_proof(owner.component, board.owner_badge)
+            .put_last_instruction_output_on_workspace("p")
+            .call_method(board.component, "slash_arbiter", args![arbiter.public_key])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
     );
-    assert_reject_reason(reason, "Arbiter has not staked enough to resolve");
+    assert_reject_reason(reason, "No free (unlocked) stake to slash; it is locked to the arbiter's live deals");
 
-    // RECOVERY: owner lowers the stake bar to 0 and the dispute resolves -> funds are not frozen
-    set_arbiter_stake(&mut ctx, &board, &owner, amount![0]);
+    // despite both interferences, the arbiter resolves the dispute normally
     let buyer_before = bal(&mut ctx.test, &buyer);
     let seller_before = bal(&mut ctx.test, &seller);
     ctx.test.execute_expect_success(
