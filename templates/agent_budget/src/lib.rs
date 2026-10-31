@@ -52,6 +52,11 @@
 
 use tari_template_lib::prelude::*;
 
+/// Max memo length written into a `pay` event, in bytes. Matches the SDK's `MAX_MEMO_BYTES` (253, the
+/// Ootle Message-memo limit). Enforced in the template too, so a caller going direct (not via the
+/// SDK) cannot bloat events / fees with an unbounded memo (see `docs/audit-notes.md` #7).
+const MAX_MEMO_BYTES: usize = 253;
+
 #[template]
 mod agent_budget {
     use super::*;
@@ -92,6 +97,15 @@ mod agent_budget {
         escrow_arbiter: Option<RistrettoPublicKeyBytes>,
         /// Fee (basis points) charged by escrows opened by the agent.
         escrow_fee_bps: u64,
+        /// The OWNER's public key, recorded as the `payer` of every escrow `pay_via_escrow` opens, so
+        /// only the owner (not the agent's key) can `release`/`dispute` it. Without this the agent's
+        /// signing key was the payer, so a leaked agent key could release the owner's funds to a
+        /// colluding merchant (see `docs/audit-notes.md` #1). Set by the owner in `configure_escrow`.
+        escrow_owner_pubkey: Option<RistrettoPublicKeyBytes>,
+        /// Owner-set ceiling on `timeout_epochs` for escrows the agent opens. Bounds how long a leaked
+        /// agent key can lock funds (the template's `MAX_TIMEOUT_EPOCHS` ~57y is far too high for this
+        /// use). Set in `configure_escrow`.
+        escrow_max_timeout: u64,
     }
 
     impl AgentBudget {
@@ -170,6 +184,8 @@ mod agent_budget {
                 treasury_account: None,
                 escrow_arbiter: None,
                 escrow_fee_bps: 0,
+                escrow_owner_pubkey: None,
+                escrow_max_timeout: 0,
             })
             .with_access_rules(rules)
             .create();
@@ -190,6 +206,7 @@ mod agent_budget {
         /// - if the payment would exceed the rolling daily cap
         pub fn pay(&mut self, agent_proof: Proof, merchant: ComponentAddress, amount: Amount, memo: String) {
             let session = self.authorize_session(&agent_proof);
+            assert!(memo.len() <= MAX_MEMO_BYTES, "memo too long");
             assert!(amount > amount![0], "Amount must be positive");
             assert!(amount <= self.per_tx_cap, "Amount exceeds the per-transaction cap");
             assert!(
@@ -226,6 +243,10 @@ mod agent_budget {
         /// - `treasury_account`: where the escrow fee is paid.
         /// - `arbiter`: optional dispute arbiter for escrows the agent opens.
         /// - `fee_bps`: escrow fee in basis points (0..=10000).
+        /// - `owner_pubkey`: the owner's public key, recorded as the escrow's `payer` so only the
+        ///   owner (not the agent's key) can release/dispute an agent-opened escrow.
+        /// - `max_escrow_timeout`: owner ceiling on an agent-opened escrow's `timeout_epochs` (bounds
+        ///   how long a leaked agent key can lock funds). Must be > 0 for `pay_via_escrow` to work.
         pub fn configure_escrow(
             &mut self,
             escrow_template: TemplateAddress,
@@ -233,13 +254,18 @@ mod agent_budget {
             treasury_account: ComponentAddress,
             arbiter: Option<RistrettoPublicKeyBytes>,
             fee_bps: u64,
+            owner_pubkey: RistrettoPublicKeyBytes,
+            max_escrow_timeout: u64,
         ) {
             assert!(fee_bps <= 10000, "fee_bps cannot exceed 10000");
+            assert!(max_escrow_timeout > 0, "max_escrow_timeout must be greater than zero");
             self.escrow_template = Some(escrow_template);
             self.owner_account = Some(owner_account);
             self.treasury_account = Some(treasury_account);
             self.escrow_arbiter = arbiter;
             self.escrow_fee_bps = fee_bps;
+            self.escrow_owner_pubkey = Some(owner_pubkey);
+            self.escrow_max_timeout = max_escrow_timeout;
             emit_event("configure_escrow", metadata!["fee_bps" => fee_bps.to_string()]);
         }
 
@@ -247,13 +273,17 @@ mod agent_budget {
         /// released (e.g. after the merchant delivers). Returns the new escrow component address.
         /// Called by the agent. Subject to the same checks and daily budget as `pay`.
         ///
-        /// The escrow records the transaction signer (the agent) as its payer, the owner's account
-        /// as the refund target, and the merchant as the payee. `merchant_pubkey` lets the merchant
-        /// raise a dispute.
+        /// The escrow records the **owner** (not the agent's signing key) as its payer, the owner's
+        /// account as the refund target, and the merchant as the payee. So only the owner can
+        /// `release`/`dispute` it — a leaked agent key cannot move an already-opened escrow (owner
+        /// `revoke` freezes new `pay`/`pay_via_escrow`, and the owner payer gates the open ones).
+        /// `merchant_pubkey` lets the merchant raise a dispute. `timeout_epochs` is bounded by the
+        /// owner-set `max_escrow_timeout`. See `docs/audit-notes.md` #1.
         ///
         /// # Panics
         /// - any of the `pay` checks (revoked / positive / per-tx cap / whitelist / daily cap)
-        /// - if the escrow integration has not been configured
+        /// - if the escrow integration has not been configured (incl. owner pubkey + max timeout)
+        /// - if `timeout_epochs` exceeds the owner-set `max_escrow_timeout`
         pub fn pay_via_escrow(
             &mut self,
             agent_proof: Proof,
@@ -264,6 +294,7 @@ mod agent_budget {
             memo: String,
         ) -> ComponentAddress {
             self.authorize_session(&agent_proof);
+            assert!(memo.len() <= MAX_MEMO_BYTES, "memo too long");
             assert!(amount > amount![0], "Amount must be positive");
             assert!(amount <= self.per_tx_cap, "Amount exceeds the per-transaction cap");
             assert!(
@@ -281,6 +312,15 @@ mod agent_budget {
             let treasury_account = self
                 .treasury_account
                 .expect("Escrow integration is not configured");
+            let owner_pubkey = self
+                .escrow_owner_pubkey
+                .expect("Escrow integration is not configured (owner pubkey)");
+            // Bound how long an agent-opened escrow can lock funds (a leaked agent key otherwise picks
+            // the timeout). The owner sets this; the template's ~57y MAX is far too high here.
+            assert!(
+                timeout_epochs <= self.escrow_max_timeout,
+                "timeout exceeds the owner's max_escrow_timeout"
+            );
 
             self.spent_in_window += amount;
             let payment = self.vault.withdraw(amount);
@@ -288,6 +328,7 @@ mod agent_budget {
                 "new",
                 args![
                     payment,
+                    owner_pubkey,     // payer = OWNER, not the agent signer
                     owner_account,
                     merchant,
                     merchant_pubkey,
@@ -438,6 +479,12 @@ mod agent_budget {
             assert!(!self.revoked, "Agent has been revoked");
             agent_proof.assert_resource(self.agent_badge);
             let sessions = agent_proof.get_non_fungibles();
+            // Require EXACTLY ONE session token. `assert_resource` only checks the proof's resource,
+            // not that it actually carries a badge — an empty proof (e.g. from a zero-balance vault
+            // left behind after the badge was transferred away) would have `sessions == []`, skip the
+            // revocation loop, and bypass `revoke_session`. Demanding one token closes that hole and
+            // makes the "paying session" below unambiguous. (See `docs/audit-notes.md` #2.)
+            assert!(sessions.len() == 1, "Present exactly one agent session badge");
             for id in &sessions {
                 assert!(!self.revoked_sessions.contains(id), "Agent session has been revoked");
             }
@@ -452,7 +499,11 @@ mod agent_budget {
         /// Resets the spent counter if the current window has elapsed.
         fn roll_window(&mut self) {
             let now = Consensus::current_epoch();
-            if now >= self.window_start_epoch + self.epochs_per_window {
+            // saturating_add: a huge `epochs_per_window` (e.g. a mistaken `set_window(u64::MAX)` used as
+            // "never reset") must not wrap the sum to a small number and reset every payment, which would
+            // void the daily cap. Saturating to u64::MAX means the window simply never elapses instead.
+            // (Also build with `overflow-checks = true`; see `docs/audit-notes.md` #3.)
+            if now >= self.window_start_epoch.saturating_add(self.epochs_per_window) {
                 self.window_start_epoch = now;
                 self.spent_in_window = amount![0];
             }

@@ -1238,8 +1238,10 @@ const OPS = {
       if (!b) throw httpError(409, "No budget is open.");
       const session = String(body.session || "").trim();
       if (!session) throw httpError(400, "A session label is required.");
-      if (!/^[A-Za-z0-9 _-]{1,48}$/.test(session)) {
-        throw httpError(400, "Use letters, numbers, spaces, hyphens or underscores (max 48).");
+      // Keep this in lockstep with the SDK/TS client's SESSION_RE (no spaces): a label the server
+      // accepts but the client then rejects would surface as a confusing 422 downstream (#13).
+      if (!/^[A-Za-z0-9_.\-]{1,64}$/.test(session)) {
+        throw httpError(400, "Use letters, numbers, '.', '-' or '_' (no spaces, max 64).");
       }
       if ((b.sessions || []).includes(session)) throw httpError(400, "That session label already exists.");
       const key = idemKey(body, "issueSession:" + session);

@@ -27,6 +27,13 @@ out/
 .tari/
 *.pid
 
+# Web dashboard runtime state — holds account addresses + the operation journal; never commit it.
+web/server/state.json
+web/server/state.*.json
+web/server/txlog.json
+web/server/claims/
+web/server/audit.log
+
 # Env & secrets
 .env
 .env.*

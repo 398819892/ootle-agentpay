@@ -467,6 +467,27 @@ fn revoking_one_session_leaves_others_working() {
     assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![300]);
 }
 
+/// #2 regression: `pay` requires a proof carrying EXACTLY ONE session badge. If an account holds two
+/// of the agent-badge resource's tokens, `create_proof` carries both, and the payment is rejected —
+/// the guard that also blocks the empty-proof bypass of `revoke_session` (an empty proof has zero
+/// tokens). See `docs/audit-notes.md` #2.
+#[test]
+fn pay_with_more_than_one_session_badge_is_rejected() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(&mut ctx, &owner, &agent, vec![merchant.component],
+        amount![10000], amount![5000], amount![9000], 10);
+    // the agent already holds the "default" badge; give it a second one in the same account
+    issue_badge(&mut ctx, &owner, &b, &agent, "extra");
+
+    // a proof over the agent-badge resource now carries two tokens -> rejected
+    let reason = pay_fail(&mut ctx, &agent, &b, merchant.component, amount![100]);
+    assert_reject_reason(reason, "Present exactly one agent session badge");
+}
+
 #[test]
 fn global_revoke_freezes_every_session() {
     let mut ctx = setup();
@@ -595,7 +616,8 @@ fn agent_pays_via_escrow_then_release() {
             .call_method(
                 b.component,
                 "configure_escrow",
-                args![escrow_tpl, owner.component, treasury.component, None::<RistrettoPublicKeyBytes>, 500u64],
+                args![escrow_tpl, owner.component, treasury.component, None::<RistrettoPublicKeyBytes>, 500u64,
+                      pubkey(&owner.key), 100_000u64],
             )
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -624,13 +646,14 @@ fn agent_pays_via_escrow_then_release() {
     // the funds are locked in the escrow — the merchant has NOT been paid yet
     assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![0]);
 
-    // the agent is the escrow's payer (the tx signer), so it can release once the merchant delivers
+    // the OWNER is the escrow's payer (pay_via_escrow records the owner, not the agent), so the owner
+    // releases once the merchant delivers — a leaked agent key could not (see audit #1).
     ctx.test.execute_expect_success(
         ctx.test
             .transaction()
             .call_method(escrow, "release", args![None::<Vec<u8>>])
-            .build_and_seal(&agent.key),
-        vec![agent.owner_token.clone()],
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
     );
     // 1000 funds, 5% fee => merchant +950, treasury +50
     assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![950]);

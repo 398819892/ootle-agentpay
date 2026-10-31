@@ -117,14 +117,21 @@ mod escrow {
     impl Escrow {
         /// Creates a new escrow, locking `funds`.
         ///
-        /// Called by the **payer** (the transaction signer becomes the recorded payer identity).
+        /// `payer` is recorded **explicitly** (not taken from the transaction signer): the party who
+        /// may `release`/`dispute` and to whose `payer_account` funds refund. The caller funds the
+        /// escrow, so naming someone else as `payer` only forgoes the caller's own control — the
+        /// escrowed funds can still only flow to `payee_account`, `payer_account` or the treasury, so
+        /// it can never divert funds to a third party. This lets a cross-template caller
+        /// (`AgentBudget::pay_via_escrow`) record the **owner** as payer rather than the agent's
+        /// signing key, so a leaked agent key cannot release the owner's money (see audit-notes #1).
         ///
         /// # Panics
         /// - if `funds` is empty
-        /// - if `timeout_epochs` is 0
+        /// - if `timeout_epochs` is 0 or exceeds `MAX_TIMEOUT_EPOCHS`
         /// - if `fee_bps` exceeds 10000 (100%)
         pub fn new(
             funds: Bucket,
+            payer: RistrettoPublicKeyBytes,
             payer_account: ComponentAddress,
             payee_account: ComponentAddress,
             payee: RistrettoPublicKeyBytes,
@@ -139,7 +146,6 @@ mod escrow {
             assert!(timeout_epochs <= MAX_TIMEOUT_EPOCHS, "Timeout exceeds the maximum");
             assert!(fee_bps <= 10000, "Fee basis points cannot exceed 10000");
 
-            let payer = CallerContext::transaction_signer_public_key();
             // checked_add: never silently wrap a huge timeout into a past deadline (see MAX_TIMEOUT_EPOCHS).
             let deadline_epoch = Consensus::current_epoch()
                 .checked_add(timeout_epochs)
@@ -190,14 +196,15 @@ mod escrow {
             let fee = self.fee_on(total);
             let payee_amount = total - fee;
 
-            // Pay the fee to the treasury first (only if non-zero).
-            self.pay_fee(fee);
+            // checks-effects-interactions: set the terminal state BEFORE any external `invoke`, so a
+            // reentrant call would hit `assert_open()` and fail (defense in depth — see audit #6).
+            self.state = EscrowState::Released;
 
-            // Pay the remainder to the payee.
+            // Pay the fee to the treasury first (only if non-zero), then the remainder to the payee.
+            self.pay_fee(fee);
             let payee_bucket = self.funds.withdraw(payee_amount);
             ComponentManager::get(self.payee_account).invoke("deposit", args![payee_bucket]);
 
-            self.state = EscrowState::Released;
             emit_event(
                 "released",
                 metadata![
@@ -241,10 +248,11 @@ mod escrow {
                 _ => panic!("Escrow is not open"),
             }
 
+            // checks-effects-interactions: set the terminal state before the external `invoke` (#6).
+            self.state = EscrowState::Refunded;
             let refund_bucket = self.funds.withdraw_all();
             ComponentManager::get(self.payer_account).invoke("deposit", args![refund_bucket]);
 
-            self.state = EscrowState::Refunded;
             emit_event("refunded", metadata![]);
         }
 
@@ -311,8 +319,10 @@ mod escrow {
             let payee_net = to_payee_amount - fee;
             let payer_amount = total - to_payee_amount;
 
-            self.pay_fee(fee);
+            // checks-effects-interactions: set the terminal state before any external `invoke` (#6).
+            self.state = EscrowState::Resolved;
 
+            self.pay_fee(fee);
             if !payee_net.is_zero() {
                 let payee_bucket = self.funds.withdraw(payee_net);
                 ComponentManager::get(self.payee_account).invoke("deposit", args![payee_bucket]);
@@ -322,7 +332,6 @@ mod escrow {
                 ComponentManager::get(self.payer_account).invoke("deposit", args![payer_bucket]);
             }
 
-            self.state = EscrowState::Resolved;
             emit_event(
                 "resolved",
                 metadata![

@@ -7,6 +7,9 @@ import json, sys, time, urllib.request
 URL = "http://127.0.0.1:12010/json_rpc"
 TPL = "template_9b230fab92bd2c2e32b82d28162854b9d31a2cb6a950a7920088cb8d54f2ef90"
 DEFAULT = "component_9b4056f17545b091ac77a20c4506b7562b59ed3b7a8b0b164e99fb9c6f71511d"
+# Escrow::new now takes an explicit `payer` public key (audit #1). For this demo the payer is the
+# DEFAULT account — set DEFAULT_PK to its public key (e.g. from your wallet's account info).
+DEFAULT_PK = "REPLACE_WITH_DEFAULT_ACCOUNT_PUBLIC_KEY_HEX"
 BOB = "component_599dfb26007103e65e729f6ec3290bd2a67088946300cd987c9863d13c891417"
 BOB_PK = "de8b4c8e1842616885893da7b8b227f58dc2b840765b2fe5522a43c6b8e5e42d"
 FEES = "component_d5b68993d9dd8375f5f54a0db3739418bb322565ce61f8ccce2c86300ff899d3"
@@ -45,6 +48,7 @@ fn main() {{
     let funds = payer.withdraw(XTR, amount!(1000));
     Escrow::new(
         funds,
+        public_key!("{DEFAULT_PK}"),
         address!("{DEFAULT}"),
         address!("{BOB}"),
         public_key!("{BOB_PK}"),

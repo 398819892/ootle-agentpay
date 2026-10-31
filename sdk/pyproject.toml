@@ -1,13 +1,16 @@
 [project]
 name = "ootle-agentpay"
 version = "0.1.0"
-description = "Private, budget-capped stablecoin payments for AI agents on Tari Ootle (L2)."
+description = "Budget-capped, chain-enforced payments for AI agents on Tari Ootle (L2). Amounts are public on chain."
 readme = "README.md"
-requires-python = ">=3.13"          # ootle-py itself requires >=3.13
+requires-python = ">=3.9"           # the on-chain adapter is stdlib-only; the `ootle` extra needs >=3.13
 license = { text = "BSD-3-Clause" }
-dependencies = ["ootle-py>=0.2.0"]
+# No required runtime deps: `agentpay.onchain` (the main path) is standard-library only. `ootle-py`
+# is only used by the key-derivation tests, so it lives in the optional `ootle` extra (and needs 3.13).
+dependencies = []
 
 [project.optional-dependencies]
+ootle = ["ootle-py>=0.2.0"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 # (No console_scripts entry: this package is a library/SDK, it ships no `agentpay` CLI.)

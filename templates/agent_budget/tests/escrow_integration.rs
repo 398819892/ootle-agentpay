@@ -104,7 +104,8 @@ fn configure_escrow(ctx: &mut Ctx, owner: &Account, b: &Budget, treasury: &Accou
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
             .call_method(b.component, "configure_escrow",
-                args![escrow_tpl, owner.component, treasury.component, None::<RistrettoPublicKeyBytes>, fee_bps])
+                args![escrow_tpl, owner.component, treasury.component, None::<RistrettoPublicKeyBytes>, fee_bps,
+                      pubkey(&owner.key), 100_000u64])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
         vec![owner.owner_token.clone()],
@@ -340,10 +341,11 @@ fn daily_cap_is_shared_between_pay_and_escrow() {
 // Full chain: budget → escrow custody → only the right principal can move the funds out.
 // ============================================================================================
 
-/// After `pay_via_escrow`, the funds sit in the escrow. Only the agent (the escrow's payer) can
-/// release them; a stranger and the merchant cannot. Proves the escrow custody is not a soft spot.
+/// After `pay_via_escrow`, the funds sit in the escrow with the **OWNER** (not the agent) recorded as
+/// payer (audit #1). So the agent's own key — even if leaked — CANNOT release it; nor can a stranger
+/// or the merchant. Only the owner can. This is what makes a leaked agent key non-catastrophic.
 #[test]
-fn escrowed_funds_release_only_by_agent() {
+fn escrowed_funds_release_only_by_owner_not_agent() {
     let mut ctx = setup();
     let owner = funded(&mut ctx.test);
     let agent = empty(&mut ctx.test);
@@ -371,15 +373,83 @@ fn escrowed_funds_release_only_by_agent() {
         vec![merchant.owner_token.clone()],
     );
     assert_reject_reason(reason, "Unauthorized: release requires the payer or a valid preimage");
-    assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![0]); // still nothing moved
 
-    // the agent (escrow payer) releases once the merchant delivers
-    ctx.test.execute_expect_success(
+    // THE AGENT whose key opened the escrow cannot release it — the payer is the owner, not the agent
+    // (so a leaked agent key cannot move an already-opened escrow). This is the #1 fix.
+    let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction().call_method(escrow, "release", args![None::<Vec<u8>>]).build_and_seal(&agent.key),
         vec![agent.owner_token.clone()],
     );
+    assert_reject_reason(reason, "Unauthorized: release requires the payer or a valid preimage");
+    assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![0]); // still nothing moved
+
+    // the OWNER (the recorded escrow payer) releases once the merchant delivers
+    ctx.test.execute_expect_success(
+        ctx.test.transaction().call_method(escrow, "release", args![None::<Vec<u8>>]).build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
     assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![950]); // 1000 - 5%
     assert_eq!(tari_balance(&mut ctx.test, &treasury), amount![50]);
+}
+
+/// #1 regression, named for the attack: a leaked agent key, after the owner has `revoke`d the budget,
+/// still cannot release an already-open escrow (it is not the payer) — and cannot open new ones.
+#[test]
+fn leaked_agent_key_cannot_release_open_escrow() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+
+    let b = create_budget(&mut ctx, &owner, &agent, vec![merchant.component],
+        amount![10000], amount![5000], amount![9000], 10);
+    configure_escrow(&mut ctx, &owner, &b, &treasury, 0);
+    let escrow = pay_via_escrow_ok(&mut ctx, &agent, &b, merchant.component, pubkey(&merchant.key), amount![1000], 50);
+
+    // owner revokes the (leaked) agent after noticing
+    ctx.test.execute_expect_success(
+        ctx.test.transaction()
+            .create_proof(owner.component, b.owner_badge)
+            .put_last_instruction_output_on_workspace("p")
+            .call_method(b.component, "revoke", args![])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+
+    // the leaked agent key cannot release the open escrow (not the payer)
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test.transaction().call_method(escrow, "release", args![None::<Vec<u8>>]).build_and_seal(&agent.key),
+        vec![agent.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Unauthorized: release requires the payer or a valid preimage");
+
+    // the owner recovers the funds (release to the merchant here, or could refund after timeout)
+    ctx.test.execute_expect_success(
+        ctx.test.transaction().call_method(escrow, "release", args![None::<Vec<u8>>]).build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![1000]); // 0 fee
+}
+
+/// #1 regression: the owner's `max_escrow_timeout` bounds how long an agent-opened escrow can lock
+/// funds — a `timeout_epochs` above it is rejected (so a leaked key cannot pick a ~57-year lock).
+#[test]
+fn pay_via_escrow_rejects_timeout_above_owner_max() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+    let treasury = empty(&mut ctx.test);
+
+    let b = create_budget(&mut ctx, &owner, &agent, vec![merchant.component],
+        amount![10000], amount![5000], amount![9000], 10);
+    configure_escrow(&mut ctx, &owner, &b, &treasury, 0); // helper sets max_escrow_timeout = 100_000
+
+    // 100_001 > the owner's max -> rejected
+    let reason = pay_via_escrow_fail(&mut ctx, &agent, &b, merchant.component, pubkey(&merchant.key), amount![500], 100_001);
+    assert_reject_reason(reason, "timeout exceeds the owner's max_escrow_timeout");
 }
 
 /// A timed-out escrow refunds to the OWNER account (configured as the refund target), not to the

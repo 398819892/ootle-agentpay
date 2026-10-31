@@ -60,7 +60,7 @@ fn new_escrow(ctx: &mut Ctx, payer: &Account, payee: &Account, treasury: &Accoun
             .call_method(payer.component, "withdraw", args![XTR, amount])
             .put_last_instruction_output_on_workspace("funds")
             .call_function(ctx.template, "new",
-                args![Workspace("funds"), payer.component, payee.component, payee.public_key,
+                args![Workspace("funds"), payer.public_key, payer.component, payee.component, payee.public_key,
                       arbiter, treasury.component, None::<Hash32>, 10u64, fee_bps])
             .build_and_seal(&payer.key),
         vec![payer.owner_token.clone()],

@@ -1,10 +1,8 @@
 # Continuous Integration for the Ootle AgentPay / OTC Escrow DApp.
 #
-# STATUS: correct-by-construction, NOT YET RUN on GitHub.
-#   This repo has no GitHub remote at the time of writing, so GitHub Actions has never
-#   executed this file. It is written for a standard `ubuntu-latest` runner and mirrors the
-#   suites that pass locally (see `make ci` / scripts/ci-local.sh and docs/ci.md). It is wired
-#   to run automatically on the first push once a GitHub remote is added — nothing else to do.
+# STATUS: running on GitHub Actions (github.com/398819892/ootle-agentpay). Runs on a standard
+#   `ubuntu-latest` runner and mirrors the suites that pass locally (see `make ci` /
+#   scripts/ci-local.sh and docs/ci.md).
 #
 # It runs the same four suites as the local CI, but each in its own job for clear, cached,
 # parallel feedback:

@@ -121,6 +121,7 @@ fn create_escrow(
                 "new",
                 args![
                     Workspace("funds"),
+                    payer.public_key,
                     payer.component,
                     payee.component,
                     payee.public_key,
@@ -474,6 +475,7 @@ fn fee_above_cap_is_rejected() {
                 "new",
                 args![
                     Workspace("funds"),
+                    payer.public_key,
                     payer.component,
                     payee.component,
                     payee.public_key,
@@ -508,6 +510,7 @@ fn zero_funds_is_rejected() {
                 "new",
                 args![
                     Workspace("funds"),
+                    payer.public_key,
                     payer.component,
                     payee.component,
                     payee.public_key,

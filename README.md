@@ -33,7 +33,7 @@ agents. A third template, **OtcBoard, is FROZEN** (experimental, not for product
 | Template | What it does | Tests | Published (localnet) | Published (esmeralda) |
 |---|---|---|---|---|
 | **Escrow** | Lock funds; release (opt. hashlock) / refund after timeout / dispute → arbiter resolves; platform fee | 26 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
-| **AgentBudget** | Owner/agent badges; `pay` within per-tx + rolling-daily caps + whitelist; revoke; `pay_via_escrow` (cross-template) | 25 ✅ | `template_758d0c58…` | `template_299d49bc…` |
+| **AgentBudget** | Owner/agent badges; `pay` within per-tx + rolling-daily caps + whitelist; revoke; `pay_via_escrow` (cross-template) | 28 ✅ | `template_758d0c58…` | `template_299d49bc…` |
 | **OtcBoard** *(frozen)* | P2P OTC escrow board — kept compiling + tested as a reference artifact only | 45 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
 
 Escrow and AgentBudget are deployed to a local swarm **and to the public esmeralda testnet** and
@@ -79,7 +79,7 @@ tari -n localnet publish -a default -y --wallet-daemon-url http://127.0.0.1:1201
 # 4. demos against the live swarm (Python, stdlib only)
 cd sdk && PYTHONPATH=src python examples/demo_devnet.py   # agent budget, on-chain
 PYTHONPATH=src python examples/stress_devnet.py 20        # randomised stress vs reference model
-python ../scripts/otc_demo.py                             # OTC list→take→confirm, on-chain
+python ../scripts/otc_demo.py                             # OTC demo (OtcBoard is FROZEN — reference only)
 ```
 
 ### Continuous integration
@@ -109,7 +109,7 @@ Support level per component — read the ✅/❌ precisely:
 | Exercised on-chain (live swarm + esmeralda) | ✅ | ✅ (local swarm) | ❌ never run against a live indexer |
 | Audited | ❌ not yet | ❌ not yet | ❌ not yet |
 
-- **96 template unit tests** (Escrow 26, AgentBudget 25, OtcBoard 45) pass in the wasmer sandbox,
+- **99 template unit tests** (Escrow 26, AgentBudget 28, OtcBoard 45) pass in the wasmer sandbox,
   including adversarial/boundary cases (double-release, over-balance resolve, fee truncation), the
   arbiter stake/slash flow, and the arbiter-cannot-unstake-during-a-dispute guard.
 - **On-chain**: all three templates published to a local swarm; Escrow release, AgentBudget pay /
@@ -146,7 +146,7 @@ Support level per component — read the ✅/❌ precisely:
 | 模板 | 作用 | 测试 | 已发布(localnet) | 已发布(esmeralda) |
 |---|---|---|---|---|
 | **Escrow** | 锁资金；放款(可选 hashlock)/超时退款/争议→仲裁；平台手续费 | 26 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
-| **AgentBudget** | owner/agent 双 badge；`pay` 受单笔+日窗口上限+白名单约束；撤销；`pay_via_escrow`(跨模板) | 25 ✅ | `template_758d0c58…` | `template_299d49bc…` |
+| **AgentBudget** | owner/agent 双 badge；`pay` 受单笔+日窗口上限+白名单约束；撤销；`pay_via_escrow`(跨模板) | 28 ✅ | `template_758d0c58…` | `template_299d49bc…` |
 | **OtcBoard** *(已冻结)* | P2P 场外托管板 —— 仅作为参考/研究产物保留(仍可编译、测试通过) | 45 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
 
 Escrow 与 AgentBudget 都已部署到本地链**以及公共测试网 esmeralda**,并用**真实链上调用**验证过
@@ -181,12 +181,11 @@ tari -n localnet publish -a default -y --wallet-daemon-url http://127.0.0.1:1201
 # 4. 对活链的演示（Python，纯标准库）
 cd sdk && PYTHONPATH=src python examples/demo_devnet.py   # 代理预算，链上
 PYTHONPATH=src python examples/stress_devnet.py 20        # 随机压测 vs 参考模型
-python ../scripts/otc_demo.py                             # OTC 挂单→接单→确认，链上
-python ../scripts/otc_stake_demo.py <OtcBoard模板地址>    # OTC 仲裁人质押/罚没，链上
+python ../scripts/otc_demo.py                             # OTC 演示（OtcBoard 已冻结，仅参考）
+python ../scripts/otc_stake_demo.py <OtcBoard模板地址>    # OTC 演示（已冻结，仅参考）
 ```
 
-> 带质押/罚没的 OtcBoard 已发布到本地链：`template_dd8e9b31…2fd32c97`
-> （`python scripts/otc_stake_demo.py template_dd8e9b31…` 跑完整演示）。
+> OtcBoard 已冻结（见上文模板表与 `docs/audit-notes.md`）：上面两个 OTC 演示仅作参考保留。
 
 ### 持续集成（CI）
 
@@ -228,7 +227,7 @@ Web 控制台里:开预算 → 正常付款(成功、余额减)→ 试试超额/
 | 已上链验证(本地 swarm + esmeralda) | ✅ | ✅(本地 swarm) | ❌ 从未对活索引器跑过 |
 | 已审计 | ❌ 暂无 | ❌ 暂无 | ❌ 暂无 |
 
-- **96 个模板单测**（Escrow 26、AgentBudget 25、OtcBoard 45）在 wasmer 沙箱通过，含对抗/边界用例
+- **99 个模板单测**（Escrow 26、AgentBudget 28、OtcBoard 45）在 wasmer 沙箱通过，含对抗/边界用例
   （重复放款、超额分配、手续费截断）、仲裁人质押/罚没流程，以及「在途争议时仲裁人不能取回质押」守卫。
 - **链上**：三个模板都发布到本地 swarm **以及公共测试网 esmeralda**；Escrow 放款、AgentBudget
   付款/超额拒绝/撤销、OtcBoard 挂单/接单/确认都用真实交易 + 余额核对验证过。
@@ -239,14 +238,15 @@ Web 控制台里:开预算 → 正常付款(成功、余额减)→ 试试超额/
 
 ### 定位与局限（务必读）
 
-- **主打 AgentPay(AI 代理可控支付中间件)**，这是更垂直、更有差异化的场景；OTC 托管板是共用托管核心的
-  可选模块，后置打磨。
+- **主打 AgentPay(AI 代理可控支付中间件)**，这是更垂直、更有差异化的场景；受支持的产品线是
+  **AgentBudget + Escrow**。OtcBoard 已**冻结**(仅作参考产物，不再演进，见模板表与 `docs/audit-notes.md`)。
 - **三条对用户的关键披露**（详见 `docs/security.md` 的“对最终用户的披露”）：① 余额和每笔金额在链上**公开**，
   链保证的是“花不超限”而非“花了不被看见”；② 时间按 **~30 分钟的 epoch** 计，“每日限额/超时”都是 epoch 窗口；
   ③ 仲裁人是**被信任方**（现有白名单 + 质押/罚没约束，但单次裁决仍依赖其诚实）。
 - **不绑定单一代币**：模板对任意明文可计数资源都能用（`docs/spike.md`），便于日后迁移，降低对单一生态依赖。
-- **已上公共测试网**：三个模板已部署到 esmeralda（账户充值与发布的完整方法见 `docs/esmeralda.md`）。
-  充值卡点（公共 faucet 领币需 SDK 构造 claim+付费交易、manifest 表达不了）已用自建 Rust 交易构造器绕过。
+- **已上公共测试网**：模板已部署到 esmeralda（账户充值与发布的完整方法见 `docs/esmeralda.md`）。OtcBoard
+  在 esmeralda 上的部署是冻结前的遗留，不再维护。充值卡点（公共 faucet 领币需 SDK 构造 claim+付费交易、
+  manifest 表达不了）已用自建 Rust 交易构造器绕过。
 
 ---
 
@@ -256,7 +256,7 @@ Web 控制台里:开预算 → 正常付款(成功、余额减)→ 试试超额/
 templates/        escrow · agent_budget · otc_board — Rust→WASM 模板 + 测试
 sdk/              ootle-agentpay Python SDK —— onchain 链上适配器 + demos + tests
 site/             index.html —— 产品一页介绍网页（也发布为在线 Artifact）
-docs/             spike · interfaces · security · devnet 四份文档
+docs/             interfaces · security · audit-notes · deployment-noncustodial · esmeralda 等文档
 scripts/          发布 / 演示 / 辅助脚本（见 scripts/README.md：demo / publish / esmeralda / dev）
 node-binaries/    bins/ 预编译 Tari 节点二进制（跑本地 swarm 用；用 scripts/fetch-binaries.sh 下载）
 wasm-template/    官方模板仓库克隆（参考，纯源码，无构建产物）

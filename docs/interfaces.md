@@ -14,7 +14,7 @@ State: `Open → Released | Refunded | Disputed → Resolved`. Works with any re
 
 | Method | Caller | Effect |
 |---|---|---|
-| `new(funds, payer_account, payee_account, payee, arbiter?, treasury_account, hashlock?, timeout_epochs, fee_bps) -> Component` | payer | Lock `funds`; record payer = signer. |
+| `new(funds, payer, payer_account, payee_account, payee, arbiter?, treasury_account, hashlock?, timeout_epochs, fee_bps) -> Component` | funder | Lock `funds`; record `payer` **explicitly** (who may release/dispute), not the signer — lets a cross-template caller set the owner as payer. `timeout_epochs ≤ MAX_TIMEOUT_EPOCHS`. |
 | `release(preimage?)` | payer **or** valid preimage holder | Pay payee `amount − fee`; `fee` → treasury. → Released |
 | `refund()` | payer, at/after deadline | Return all funds to payer_account. → Refunded |
 | `dispute()` | payer or payee | Freeze. → Disputed |
@@ -37,12 +37,12 @@ budget.
 |---|---|---|
 | `new(funds, per_tx_cap, daily_cap, epochs_per_window, whitelist) -> (Component, owner_badge, agent_badge)` | owner | Create the budget; the agent badge is the first session (id `"default"`). |
 | `pay(agent_proof, merchant, amount, memo)` | agent (badge proof) | Checks: not globally revoked, proof is this budget's agent badge, the session is not individually revoked, `0 < amount ≤ per_tx_cap`, merchant whitelisted, `spent_in_window + amount ≤ daily_cap`; then pays, emits `pay`. |
-| `pay_via_escrow(agent_proof, merchant, merchant_pubkey, amount, timeout_epochs, memo) -> escrow` | agent (badge proof) | Same checks, but opens an `Escrow` (pay on delivery) instead of paying directly. Needs `configure_escrow` first. |
+| `pay_via_escrow(agent_proof, merchant, merchant_pubkey, amount, timeout_epochs, memo) -> escrow` | agent (badge proof) | Same checks, but opens an `Escrow` (pay on delivery) — with the **owner** as payer (a leaked agent key can't release it) and `timeout_epochs ≤ max_escrow_timeout`. Needs `configure_escrow` first. |
 | `issue_agent_badge(session) -> Bucket` | owner | Mint another agent session badge (one per agent/session); give the returned badge to that agent. |
 | `revoke_session(session)` | owner | Freeze **one** session; its `pay` then fails while others keep working. |
 | `top_up(funds)` | anyone (owner/keeper) | Add funds to the vault. Lets an external keeper replenish on its own cadence — there is no on-chain timer. |
 | `set_window(epochs_per_window)` | owner | Reconfigure the rolling allowance window (and restart it now). |
-| `configure_escrow(escrow_template, owner_account, treasury_account, arbiter?, fee_bps)` | owner | Wire up the escrow integration. |
+| `configure_escrow(escrow_template, owner_account, treasury_account, arbiter?, fee_bps, owner_pubkey, max_escrow_timeout)` | owner | Wire up the escrow integration. `owner_pubkey` becomes the escrow's payer (so a leaked agent key can't release); `max_escrow_timeout` caps an agent-opened escrow's timeout. |
 | `set_limits(per_tx_cap, daily_cap)` / `add_merchant(m)` / `remove_merchant(m)` | owner | Change the rules. |
 | `revoke()` | owner | Global kill switch: freeze **every** session; every `pay` then fails. |
 | `withdraw(amount) -> Bucket` | owner | Take funds back. |

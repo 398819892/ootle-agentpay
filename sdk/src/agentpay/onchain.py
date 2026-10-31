@@ -538,7 +538,7 @@ class OnChainBudget:
         manifest = (
             'fn main() {\n'
             '    let mut funder = var!["funder"];\n'
-            f'    let funds = funder.withdraw(XTR, amount!({int(amount)}));\n'
+            f'    let funds = funder.withdraw(XTR, amount!({_check_amount(amount)}));\n'
             '    let mut budget = var!["budget"];\n'
             '    budget.top_up(funds);\n'
             '}\n'

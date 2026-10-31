@@ -5,7 +5,7 @@
 #
 # The dashboard is zero-dependency: it needs only Node 18+, the server, the public SPA and the
 # pre-built TS client (clients/ts/dist). There is no `npm install` and no build step.
-FROM node:18-slim
+FROM node:22-slim
 
 ENV NODE_ENV=production \
     PORT=8787 \

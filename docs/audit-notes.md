@@ -439,6 +439,52 @@ tracked under limitations (and reinforce the standing "freeze OTC, focus AgentPa
   window), checks-effects-interactions ordering, `ADMIN_PASSWORD` defaulting to the login password,
   and the server/SDK session-label regexes disagreeing on spaces.
 
+## Fifth review (2026-10-31, round 2)
+
+Contract-layer hardening against a leaked agent key, plus the cheap-and-correct items. Design/product
+and most server-layer items are deferred (listed at the end).
+
+- **#1 — leaked agent key + `pay_via_escrow` (HIGH, fixed).** The escrow's `payer` was the transaction
+  signer (the agent), so a leaked agent key could `release` the owner's funds to a colluding merchant,
+  and `timeout_epochs` (agent-chosen, up to the ~57-year `MAX_TIMEOUT_EPOCHS`) could lock funds
+  long-term. **Fix:** `Escrow::new` now takes an explicit `payer` (the funder names it; naming another
+  party only forgoes the funder's own control, since payouts are to fixed accounts). `configure_escrow`
+  gains `owner_pubkey` (recorded as the escrow payer) and `max_escrow_timeout`; `pay_via_escrow`
+  records the **owner** as payer and asserts `timeout_epochs ≤ max_escrow_timeout`. A leaked agent key
+  can no longer release/lock the owner's money. **Tests:** `escrowed_funds_release_only_by_owner_not_agent`,
+  `leaked_agent_key_cannot_release_open_escrow`, `pay_via_escrow_rejects_timeout_above_owner_max`.
+- **#2 — empty-proof bypass of `revoke_session` (HIGH, fixed).** `authorize_session` checked only the
+  proof's resource, not that it carried a badge, so an empty proof (zero tokens) skipped the revocation
+  loop. **Fix:** `assert!(sessions.len() == 1, …)`. **Test:** `pay_with_more_than_one_session_badge_is_rejected`
+  (the `>1` case; the `==0` case is the same guard).
+- **#3 — `roll_window` overflow (fixed).** `window_start_epoch + epochs_per_window` was raw `u64` add
+  that wraps in release builds (a `set_window(u64::MAX)` misuse would reset every payment, voiding the
+  cap). **Fix:** `saturating_add`, and `overflow-checks = true` in all three templates' release profile.
+- **#6 — checks-effects-interactions (fixed).** `release`/`refund`/`resolve` set the terminal state
+  **before** any external `invoke("deposit")` now, so a reentrant call hits `assert_open()` (defense in
+  depth; no exploitable path was found, but the ordering is free).
+- **#7 — unbounded memo (fixed).** `pay`/`pay_via_escrow` now assert `memo.len() ≤ MAX_MEMO_BYTES`
+  (253), matching the SDK, so a direct caller can't bloat events/fees.
+- **SDK / repo:** `top_up` validates its amount via `_check_amount` (was `int(amount)`, allowed a
+  negative); `pyproject.toml` moves `ootle-py` to an optional `[ootle]` extra (the onchain adapter is
+  stdlib-only) and drops the "Private … stablecoin" description; the server session-label regex is
+  unified with the SDK's (no spaces, #13); runtime state files are `.gitignore`d; Docker base image
+  → `node:22-slim`; README OTC-frozen status made consistent (zh prose + quickstarts) and docs/CI
+  "no GitHub remote" notes corrected.
+
+### Deferred this round (recommendation: do server-layer next; design/product separately)
+Server-layer (not yet done): **#8** persist tx id before awaiting confirmation (crash → stuck pending);
+**#9** add an API-key revoke entry point (or drop the "runtime-revocable" claim); **#10** refuse to
+start when `ADMIN_PASSWORD == DASHBOARD_PASSWORD` in production; **#11** serialize only submits, not
+reads; **#12** make `freeze` low-friction (login only), keep `unfreeze` behind step-up; **#14** require
+`Idempotency-Key` on v1 pay + map API key → session; **#15** default MCP to attach (non-custodial) and
+read `spent_in_window` from chain; **#16** replace positional substate parsing with a typed `get_info`
+dry-run. Design/product: **#4** escrow gives the merchant little (payer picks arbiter / timeout favours
+payer) — position `pay_via_escrow` as payer-protection; **#5** the platform fee can't be enforced by an
+open-source template — revenue is from the service; SDK `payEvents` topic/dedup and `open()`
+component-discovery robustness; resource-address parametrization (drop hard-coded `XTR`); copyright
+headers (need the owner's name — not guessed) and TS-vs-rest licence consistency.
+
 ## Decision: OtcBoard frozen (2026-10-31)
 
 After the fourth review, **OtcBoard is frozen** — moved out of the supported product line, kept in
@@ -500,5 +546,6 @@ half-fixes.
 
 ### cargo test (WSL, all green)
 escrow **26** (authz 4, conservation 4, edge 4, test 14) · otc_board **45** (authz 22, conservation 4,
-test 19) · agent_budget **25** (conservation 3, escrow_integration 8, test 14). Total **96**.
-_(otc_board +3 this round for the #1/#2/#4 regression tests; the renamed timeout test now asserts burn.)_
+test 19) · agent_budget **28** (conservation 3, escrow_integration 10, test 15). Total **99**.
+_(This round: agent_budget +3 for the #1/#2 regression tests; escrow `new` gained an explicit `payer`.
+The reviewer's `review_probe.rs` is a throwaway diagnostic, not committed.)_
