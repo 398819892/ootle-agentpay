@@ -16,6 +16,7 @@ directory. See examples/demo_devnet.py for an end-to-end run against a local swa
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import urllib.request
@@ -128,9 +129,35 @@ def _is_transient(message: str) -> bool:
 class WalletdClient:
     """Minimal JSON-RPC client for a Tari Ootle wallet daemon (auth = ``none`` devnet mode)."""
 
-    def __init__(self, url: str = "http://127.0.0.1:12010/json_rpc") -> None:
+    def __init__(
+        self,
+        url: str = "http://127.0.0.1:12010/json_rpc",
+        *,
+        token: str | None = None,
+        permissions: list[str] | None = None,
+        credentials: str = "None",
+    ) -> None:
+        """Connect to a wallet daemon.
+
+        Devnet default: ``auth=none`` daemon, mint an ``Admin`` token with no credentials — fine for a
+        local swarm where one account plays every role.
+
+        **Non-custodial deployment** (the agent holds its own key in its own environment): pass a
+        least-privilege ``token`` minted out-of-band for the agent's OWN walletd (so this client never
+        asks for ``Admin``), or pass a narrower ``permissions`` list + ``credentials`` for this client
+        to mint one itself. Request only what submitting/reading a transaction needs — never ``Admin``,
+        which could sign for any account and defeats the point of the on-chain caps. See
+        ``docs/deployment-noncustodial.md``. Defaults can also come from the environment:
+        ``AGENTPAY_WALLETD_TOKEN``, ``AGENTPAY_WALLETD_PERMISSIONS`` (comma-separated),
+        ``AGENTPAY_WALLETD_CREDENTIALS``.
+        """
         self.url = url
-        self._token: str | None = None
+        self._token: str | None = token or os.environ.get("AGENTPAY_WALLETD_TOKEN") or None
+        if permissions is None:
+            env_perms = os.environ.get("AGENTPAY_WALLETD_PERMISSIONS")
+            permissions = [p.strip() for p in env_perms.split(",") if p.strip()] if env_perms else ["Admin"]
+        self._permissions = permissions
+        self._credentials = os.environ.get("AGENTPAY_WALLETD_CREDENTIALS", credentials)
 
     def _rpc(self, method: str, params: Any) -> dict:
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
@@ -141,8 +168,16 @@ class WalletdClient:
             return json.loads(r.read())
 
     def connect(self) -> "WalletdClient":
-        """Mint an admin token. On an ``auth=none`` devnet daemon this needs no credentials."""
-        r = self._rpc("auth.request", {"permissions": ["Admin"], "duration": None, "credentials": "None"})
+        """Obtain a token. If one was supplied (a least-privilege token minted out-of-band for this
+        agent's own walletd — the non-custodial path), use it as-is and request nothing. Otherwise
+        mint one with the configured ``permissions``/``credentials`` (devnet default: ``Admin`` on an
+        ``auth=none`` daemon)."""
+        if self._token:
+            return self
+        r = self._rpc(
+            "auth.request",
+            {"permissions": self._permissions, "duration": None, "credentials": self._credentials},
+        )
         self._token = r["result"]["token"]
         return self
 

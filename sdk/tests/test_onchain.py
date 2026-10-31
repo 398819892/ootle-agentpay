@@ -264,3 +264,41 @@ def test_normal_memo_and_addresses_still_pass():
 
     b.add_merchant(OTHER)                                # valid component address passes
     b.issue_agent_badge("session-1.default")             # valid label passes
+
+
+# -- non-custodial walletd auth (M5 / deployment path) --------------------------------
+# The client must support a least-privilege, credentialed connection, not only `auth=none` + Admin,
+# so an agent can hold its OWN key in its OWN walletd and the on-chain caps become the real boundary.
+
+class RecordingWalletd(WalletdClient):
+    """Records every _rpc call and fakes auth.request, so we can assert what connect() requests."""
+
+    def __init__(self, **kw):
+        super().__init__("http://fake", **kw)
+        self.rpc_calls: list[tuple[str, dict]] = []
+
+    def _rpc(self, method, params):  # no network
+        self.rpc_calls.append((method, params))
+        return {"result": {"token": "minted"}} if method == "auth.request" else {"result": {}}
+
+
+def test_connect_uses_supplied_token_without_minting():
+    """Non-custodial: a pre-minted least-privilege token is used as-is — connect() never asks for Admin."""
+    c = RecordingWalletd(token="preminted-least-privilege").connect()
+    assert c._token == "preminted-least-privilege"
+    assert all(m != "auth.request" for m, _ in c.rpc_calls)  # nothing minted, no Admin requested
+
+
+def test_connect_mints_with_configured_least_privilege_permissions():
+    c = RecordingWalletd(permissions=["TransactionSend", "TransactionGet"], credentials="None").connect()
+    assert c._token == "minted"
+    auth = [p for m, p in c.rpc_calls if m == "auth.request"]
+    assert auth and auth[0]["permissions"] == ["TransactionSend", "TransactionGet"]
+    assert auth[0]["permissions"] != ["Admin"]
+
+
+def test_connect_defaults_to_admin_on_devnet():
+    """Unchanged devnet behavior: with no token/permissions given, mint Admin (auth=none swarm)."""
+    c = RecordingWalletd().connect()
+    auth = [p for m, p in c.rpc_calls if m == "auth.request"]
+    assert auth and auth[0]["permissions"] == ["Admin"] and auth[0]["credentials"] == "None"

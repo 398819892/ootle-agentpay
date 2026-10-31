@@ -470,11 +470,14 @@ half-fixes.
   window would need an on-chain timestamped spend history. **Mitigation (now in the module docs):**
   set `daily_cap` to half the real ceiling and/or a tight `per_tx_cap`; treat `daily_cap` as a rate
   guard — the hard rails that never over-spend are `per_tx_cap` (per payment) and `revoke` (freeze).
-- **#8 — custodial reference deployment.** The web server signs with one walletd account, so it holds
-  the owner and agent badges together; on-chain caps then only bind agents that come *through the
-  API*, not the server operator. The chain-enforced limits deliver their full value only when the
-  agent holds its **own** key in its own environment (non-custodial). This is inherent to the
-  custodial reference server (see `docs/custody.md`), not a config toggle.
+- **#8 / M5 — custodial reference deployment (now has a non-custodial path).** The web *dashboard*
+  signs with one walletd account holding the owner + agent badges, so its on-chain caps bind only
+  agents coming *through the API*, not the operator — inherent to a custodial server. The limits
+  deliver their full value only when the agent holds its **own** key in its own environment. That
+  **non-custodial path is now supported**: the SDK/TS `WalletdClient` takes a least-privilege `token`
+  (or a narrow `permissions`/`credentials` request) instead of forcing an `auth=none` Admin token, the
+  SDK already supports a separate `agent_account`, and the MCP integration reads all of it from env.
+  See `docs/deployment-noncustodial.md`. The hosted dashboard stays custodial by design.
 - **#4 back-half — revoke doesn't retroactively close open escrows.** `revoke` freezes the budget's
   `pay`/`pay_via_escrow`, but an escrow a leaked agent key *already opened* still releases to the
   payee (or refunds to the fixed `payer_account` after timeout) — the escrow has no link back to the

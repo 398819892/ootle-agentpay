@@ -117,11 +117,27 @@ export interface WalletdClientOptions {
   finalizeTries?: number;
   /** Delay between `get_result` polls, in milliseconds. */
   finalizeDelayMs?: number;
+  /**
+   * A pre-minted bearer token. Pass this in a **non-custodial** deployment: the agent holds its own
+   * walletd and a least-privilege token minted for it out-of-band, so this client uses the token
+   * as-is and never requests `Admin`. Defaults to `OOTLE_WALLETD_TOKEN` from the environment.
+   */
+  token?: string;
+  /**
+   * Permissions to request if minting a token (no `token` supplied). Default `["Admin"]` suits an
+   * `auth=none` devnet; a non-custodial agent passes only what submitting/reading a tx needs — never
+   * `Admin`. See `docs/deployment-noncustodial.md`.
+   */
+  permissions?: string[];
+  /** Credential presented to `auth.request` when minting (default `"None"` for `auth=none`). */
+  credentials?: string;
 }
 
 export class WalletdClient {
   readonly url: string;
   private token: string | null = null;
+  private readonly permissions: string[];
+  private readonly credentials: string;
   readonly finalizeTries: number;
   readonly finalizeDelayMs: number;
   /**
@@ -135,6 +151,10 @@ export class WalletdClient {
     this.url = url;
     this.finalizeTries = opts.finalizeTries ?? 120;
     this.finalizeDelayMs = opts.finalizeDelayMs ?? 1_500;
+    const envToken = (typeof process !== "undefined" && process.env && process.env.OOTLE_WALLETD_TOKEN) || undefined;
+    this.token = opts.token ?? envToken ?? null;
+    this.permissions = opts.permissions ?? ["Admin"];
+    this.credentials = opts.credentials ?? "None";
   }
 
   private async rpc(method: string, params: unknown, retriedAuth = false): Promise<RpcResponse> {
@@ -164,10 +184,15 @@ export class WalletdClient {
     return out;
   }
 
-  /** Mint an admin token. On an `auth=none` devnet daemon this needs no credentials. */
+  /**
+   * Obtain a token. If one was supplied (a least-privilege token minted out-of-band for this agent's
+   * own walletd — the non-custodial path), use it as-is and request nothing. Otherwise mint one with
+   * the configured `permissions`/`credentials` (devnet default: `Admin` on an `auth=none` daemon).
+   */
   async connect(): Promise<this> {
+    if (this.token) return this;
     const r = await this.rpc("auth.request", {
-      permissions: ["Admin"], duration: null, credentials: "None",
+      permissions: this.permissions, duration: null, credentials: this.credentials,
     });
     if (r.error) throw new ChainError(r.error.message ?? "auth.request failed");
     this.token = r.result.token;

@@ -24,10 +24,26 @@ export interface WalletdClientOptions {
     finalizeTries?: number;
     /** Delay between `get_result` polls, in milliseconds. */
     finalizeDelayMs?: number;
+    /**
+     * A pre-minted bearer token. Pass this in a **non-custodial** deployment: the agent holds its own
+     * walletd and a least-privilege token minted for it out-of-band, so this client uses the token
+     * as-is and never requests `Admin`. Defaults to `OOTLE_WALLETD_TOKEN` from the environment.
+     */
+    token?: string;
+    /**
+     * Permissions to request if minting a token (no `token` supplied). Default `["Admin"]` suits an
+     * `auth=none` devnet; a non-custodial agent passes only what submitting/reading a tx needs — never
+     * `Admin`. See `docs/deployment-noncustodial.md`.
+     */
+    permissions?: string[];
+    /** Credential presented to `auth.request` when minting (default `"None"` for `auth=none`). */
+    credentials?: string;
 }
 export declare class WalletdClient {
     readonly url: string;
     private token;
+    private readonly permissions;
+    private readonly credentials;
     readonly finalizeTries: number;
     readonly finalizeDelayMs: number;
     /**
@@ -38,7 +54,11 @@ export declare class WalletdClient {
     lastTxId: string | null;
     constructor(url?: string, opts?: WalletdClientOptions);
     private rpc;
-    /** Mint an admin token. On an `auth=none` devnet daemon this needs no credentials. */
+    /**
+     * Obtain a token. If one was supplied (a least-privilege token minted out-of-band for this agent's
+     * own walletd — the non-custodial path), use it as-is and request nothing. Otherwise mint one with
+     * the configured `permissions`/`credentials` (devnet default: `Admin` on an `auth=none` daemon).
+     */
     connect(): Promise<this>;
     accountAddress(name: string): Promise<string>;
     createAccount(name: string): Promise<string>;

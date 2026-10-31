@@ -114,6 +114,10 @@ class WalletdClient {
         this.url = url;
         this.finalizeTries = opts.finalizeTries ?? 120;
         this.finalizeDelayMs = opts.finalizeDelayMs ?? 1500;
+        const envToken = (typeof process !== "undefined" && process.env && process.env.OOTLE_WALLETD_TOKEN) || undefined;
+        this.token = opts.token ?? envToken ?? null;
+        this.permissions = opts.permissions ?? ["Admin"];
+        this.credentials = opts.credentials ?? "None";
     }
     async rpc(method, params, retriedAuth = false) {
         const headers = { "Content-Type": "application/json" };
@@ -143,10 +147,16 @@ class WalletdClient {
         }
         return out;
     }
-    /** Mint an admin token. On an `auth=none` devnet daemon this needs no credentials. */
+    /**
+     * Obtain a token. If one was supplied (a least-privilege token minted out-of-band for this agent's
+     * own walletd — the non-custodial path), use it as-is and request nothing. Otherwise mint one with
+     * the configured `permissions`/`credentials` (devnet default: `Admin` on an `auth=none` daemon).
+     */
     async connect() {
+        if (this.token)
+            return this;
         const r = await this.rpc("auth.request", {
-            permissions: ["Admin"], duration: null, credentials: "None",
+            permissions: this.permissions, duration: null, credentials: this.credentials,
         });
         if (r.error)
             throw new errors_1.ChainError(r.error.message ?? "auth.request failed");
