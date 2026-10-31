@@ -611,6 +611,23 @@ async function resolveMerchant(nameOrAddr) {
   if (!COMPONENT_ADDR_RE.test(String(addr))) {
     throw httpError(502, "The wallet returned an unexpected merchant address shape.");
   }
+  // Confirm the account is actually COMMITTED ON CHAIN before we cache it or hand it to add_merchant.
+  // On a network where the faucet cannot provision a new account (e.g. the esmeralda public testnet,
+  // where `create_free_test_coins` is effectively a no-op), creation "succeeds" in the wallet but no
+  // substate is committed — add_merchant would then fail with a confusing engine 404 ("Substate …
+  // does not exist"), and we must NOT poison the cache with a non-existent address (a re-add of the
+  // same name would keep failing). A clear error here tells the operator exactly what to do instead.
+  try {
+    await c.getSubstate(String(addr));
+  } catch (e) {
+    if (!(e instanceof ChainError)) throw e;
+    throw httpError(
+      400,
+      `Merchant account "${key}" (${addr}) is not on chain: this network could not auto-provision it ` +
+        `(the faucet is unavailable on a public testnet like esmeralda). Create and fund the account ` +
+        `out of band, then paste its component_… address here instead of a name.`,
+    );
+  }
   store.merchants[key] = addr;
   saveStore();
   return addr;
