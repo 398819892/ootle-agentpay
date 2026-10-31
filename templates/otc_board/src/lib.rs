@@ -3,6 +3,16 @@
 
 //! # OtcBoard template — a P2P OTC escrow board
 //!
+//! > **⚠ FROZEN / EXPERIMENTAL — not part of the supported product line, not for production.**
+//! > As of 2026-10-31 this module is frozen. Four review rounds showed its custodial-arbiter,
+//! > off-chain-settled model keeps generating new trust/incentive risks (the arbiter-stake timing
+//! > bypass, owner power over disputes, free-`take` squatting, seller waiting out `reclaim`,
+//! > unbounded per-listing scan — see `docs/audit-notes.md`). The project's supported primitives are
+//! > **AgentBudget + Escrow**; OtcBoard is kept here, compiling and tested, only as a reference/
+//! > research artifact. Known-open issues (H4, M4, M6 and the lows in audit-notes) are **not being
+//! > fixed** while frozen. Do not build on it without owning that risk. It also carries a regulatory
+//! > dimension (a P2P fiat-settlement matcher), see the product notes in the review docs.
+//!
 //! Sellers list an asset for sale; the asset is locked in a per-listing escrow. A buyer takes a
 //! listing, pays the seller **off chain**, and the asset is released to the buyer — or refunded to
 //! the seller on timeout, or split by an arbiter on dispute. The platform takes a fee per settled

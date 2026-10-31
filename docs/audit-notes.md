@@ -439,6 +439,26 @@ tracked under limitations (and reinforce the standing "freeze OTC, focus AgentPa
   window), checks-effects-interactions ordering, `ADMIN_PASSWORD` defaulting to the login password,
   and the server/SDK session-label regexes disagreeing on spaces.
 
+## Decision: OtcBoard frozen (2026-10-31)
+
+After the fourth review, **OtcBoard is frozen** — moved out of the supported product line, kept in
+the repo (compiling, 45 tests green) only as a reference/research artifact. The supported primitives
+are **AgentBudget + Escrow**.
+
+**Why.** Across four review rounds the new risks were overwhelmingly OtcBoard's, because its model —
+a *custodial arbiter* settling an *off-chain (fiat) payment* with no on-chain proof of payment — is
+inherently trust-heavy, and each fix surfaced the next incentive gap (taker-set hashlock P0 → fee
+rug → air-coin collateral → dispute-timeout favouring the seller → arbiter-stake timing bypass →
+owner power over disputes → free-`take` squatting …). It also has the heaviest regulatory exposure (a
+P2P fiat-settlement matcher). Continuing to harden it is low-value churn relative to the agent-payment
+core.
+
+**What frozen means.** The module carries a FROZEN banner; the README presents only AgentBudget +
+Escrow as supported. Its known-open issues — **H4** (free-`take` squatting), **M4** (seller waits out
+`reclaim`; a `mark_paid` would help), **M6** (unbounded listings / per-`take` scan), and the OTC lows
+below — are **not being fixed** while frozen. CI still builds and tests it (cheap regression guard);
+the on-chain deployments are left as-is. Unfreezing would mean re-opening those issues deliberately.
+
 ## Known limitations & mitigations (disclosed, by design — not code bugs)
 
 These are architectural trade-offs, not fixable by a localised patch. They are disclosed here and in

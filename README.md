@@ -27,15 +27,24 @@ Two products on one shared escrow core:
 
 ### Templates (Rust → WASM)
 
+The **supported product line is AgentBudget + Escrow** — the on-chain payment primitives for AI
+agents. A third template, **OtcBoard, is FROZEN** (experimental, not for production — see below).
+
 | Template | What it does | Tests | Published (localnet) | Published (esmeralda) |
 |---|---|---|---|---|
 | **Escrow** | Lock funds; release (opt. hashlock) / refund after timeout / dispute → arbiter resolves; platform fee | 26 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
 | **AgentBudget** | Owner/agent badges; `pay` within per-tx + rolling-daily caps + whitelist; revoke; `pay_via_escrow` (cross-template) | 25 ✅ | `template_758d0c58…` | `template_299d49bc…` |
-| **OtcBoard** | List/take/confirm/reclaim/dispute/resolve; listing bond, max-amount cap, arbiter whitelist + **arbiter stake/slash** | 45 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
+| **OtcBoard** *(frozen)* | P2P OTC escrow board — kept compiling + tested as a reference artifact only | 45 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
 
-All three are deployed to a local swarm **and to the public esmeralda testnet**, and exercised with
-**real on-chain calls** (not just unit tests): see the demos below. Full esmeralda addresses and the
-deployment method are in [`docs/esmeralda.md`](docs/esmeralda.md).
+Escrow and AgentBudget are deployed to a local swarm **and to the public esmeralda testnet** and
+exercised with **real on-chain calls** (not just unit tests): see the demos below. Full esmeralda
+addresses and the deployment method are in [`docs/esmeralda.md`](docs/esmeralda.md).
+
+> **OtcBoard is frozen (2026-10-31).** Its custodial-arbiter, off-chain-settled design repeatedly
+> surfaced new trust/incentive risks across four review rounds, and it carries a P2P-fiat-matcher
+> regulatory dimension. It still compiles and passes its 45 tests, but its known-open issues are not
+> being fixed and you should not build on it. Rationale and the deferred issues are in
+> [`docs/audit-notes.md`](docs/audit-notes.md). Focus and future work are on AgentBudget + Escrow.
 
 ### Python SDK (`ootle-agentpay`)
 
@@ -131,14 +140,21 @@ Support level per component — read the ✅/❌ precisely:
 
 ### 模板（Rust → WASM）
 
+**受支持的产品线是 AgentBudget + Escrow**(面向 AI 代理的链上支付原语)。第三个模板 **OtcBoard 已冻结**
+(实验性,不用于生产 —— 见下)。
+
 | 模板 | 作用 | 测试 | 已发布(localnet) | 已发布(esmeralda) |
 |---|---|---|---|---|
 | **Escrow** | 锁资金；放款(可选 hashlock)/超时退款/争议→仲裁；平台手续费 | 26 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
 | **AgentBudget** | owner/agent 双 badge；`pay` 受单笔+日窗口上限+白名单约束；撤销；`pay_via_escrow`(跨模板) | 25 ✅ | `template_758d0c58…` | `template_299d49bc…` |
-| **OtcBoard** | 挂单/接单/确认/退回/争议/分配；挂单保证金、单笔上限、仲裁人白名单 + **仲裁人质押/罚没** | 45 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
+| **OtcBoard** *(已冻结)* | P2P 场外托管板 —— 仅作为参考/研究产物保留(仍可编译、测试通过) | 45 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
 
-三个模板都已部署到本地链**以及公共测试网 esmeralda**,并用**真实链上调用**验证过（不只是单测）。
-esmeralda 完整地址与部署方法见 [`docs/esmeralda.md`](docs/esmeralda.md)。
+Escrow 与 AgentBudget 都已部署到本地链**以及公共测试网 esmeralda**,并用**真实链上调用**验证过
+（不只是单测）。esmeralda 完整地址与部署方法见 [`docs/esmeralda.md`](docs/esmeralda.md)。
+
+> **OtcBoard 已于 2026-10-31 冻结。** 其托管仲裁 + 链下结算的设计在四轮评审中反复冒出新的信任/激励风险,
+> 且带 P2P 法币撮合的合规属性。它仍可编译、45 个测试通过,但已知未决问题不再修复,不应在其上构建。冻结
+> 理由与推迟项见 [`docs/audit-notes.md`](docs/audit-notes.md);后续精力集中在 AgentBudget + Escrow。
 
 ### Python SDK（`ootle-agentpay`）
 
