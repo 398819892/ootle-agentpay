@@ -489,9 +489,14 @@ export class OnChainBudget {
     const out: any[] = [];
     const seen = new Set<string>();
     for (const ev of iterEvents(result)) {
+      // Filter by topic ("pay"), not merely "payload has merchant+memo" — a `pay_via_escrow` event
+      // carries those too and would otherwise be miscounted. The de-dup key includes
+      // `spent_in_window` (strictly increasing per pay): two COPIES of one event share it and
+      // collapse, two DISTINCT pays in a tx differ and are both kept. See docs/audit-notes.md.
+      if (ev.topic !== "pay") continue;
       const p = ev.payload;
       if (p && typeof p === "object" && "merchant" in p && "memo" in p) {
-        const key = JSON.stringify([p.merchant, p.amount, p.memo]);
+        const key = JSON.stringify([p.merchant, p.amount, p.memo, p.spent_in_window]);
         if (!seen.has(key)) {
           seen.add(key);
           out.push(p);

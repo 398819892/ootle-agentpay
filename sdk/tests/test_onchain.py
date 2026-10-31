@@ -145,6 +145,24 @@ def test_pay_events_empty_on_unrelated_result():
         {"topic": "pay_fee", "payload": {"amount": 100}}]}}}) == []
 
 
+def test_pay_events_filters_by_topic_and_keeps_distinct_pays():
+    """Topic filter excludes a `pay_via_escrow` event (same merchant/memo shape); the running
+    `spent_in_window` keeps two DISTINCT identical-looking pays while still collapsing the duplicate
+    copy of each event across the two result subtrees."""
+    pay1 = {"topic": "pay", "substate_id": OWNER,
+            "payload": {"merchant": SHOP, "amount": "100", "memo": "m", "spent_in_window": "100"}}
+    pay2 = {"topic": "pay", "substate_id": OWNER,  # identical except the running total advanced
+            "payload": {"merchant": SHOP, "amount": "100", "memo": "m", "spent_in_window": "200"}}
+    escrow = {"topic": "pay_via_escrow", "substate_id": OWNER,
+              "payload": {"merchant": SHOP, "amount": "100", "memo": "m", "escrow": "component_x"}}
+    evs = [pay1, pay2, escrow]
+    result = {"result": {"events": evs}, "result2": {"Accept": {"receipt": {"events": evs}}}}  # each duplicated
+    got = OnChainBudget.pay_events(result)
+    assert len(got) == 2                                    # two distinct pays, not collapsed to one
+    assert {e["spent_in_window"] for e in got} == {"100", "200"}
+    assert all("escrow" not in e for e in got)             # the pay_via_escrow event is excluded
+
+
 # -- open() resolves badges from component state, not address sort order --------------
 
 def test_open_resolves_badges_from_state_not_sort():
@@ -302,3 +320,28 @@ def test_connect_defaults_to_admin_on_devnet():
     c = RecordingWalletd().connect()
     auth = [p for m, p in c.rpc_calls if m == "auth.request"]
     assert auth and auth[0]["permissions"] == ["Admin"] and auth[0]["credentials"] == "None"
+
+
+# -- resource parametrization (drop the hard-coded XTR) --------------------------------
+
+def test_resource_parametrization_uses_address_not_xtr():
+    """A non-XTR budget splices a validated `address!("resource_…")` into the withdraw, not the `XTR`
+    keyword; the default stays `XTR` so the devnet flow is unchanged."""
+    rescoin = "resource_" + "d" * 64
+    b = _budget(resource=rescoin)
+    b.top_up(500)
+    manifest, _ = b.client.runs[-1]
+    assert f'withdraw(address!("{rescoin}"), amount!(500))' in manifest
+    assert "withdraw(XTR" not in manifest
+
+    b2 = _budget()  # default resource
+    b2.top_up(500)
+    m2, _ = b2.client.runs[-1]
+    assert "withdraw(XTR, amount!(500))" in m2
+
+
+def test_resource_parametrization_rejects_bad_resource():
+    b = _budget(resource="resource_not_hex")
+    with pytest.raises(ChainError):
+        b.top_up(500)                       # bad resource address is rejected at manifest-build time
+    assert b.client.runs == []

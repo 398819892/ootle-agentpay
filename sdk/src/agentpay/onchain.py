@@ -412,6 +412,10 @@ class OnChainBudget:
     budget_template: str
     owner_account: str
     agent_account: str | None = None          # defaults to owner_account
+    # The resource the budget is denominated in. `"XTR"` (the native test token) is the default so the
+    # devnet flow is unchanged; a non-XTR budget passes a `resource_…` address to `open` (the template
+    # itself is resource-agnostic — it locks whatever it is funded with). `top_up` reuses this.
+    resource: str = "XTR"
     component: str | None = None
     owner_badge: str | None = None
     agent_badge: str | None = None
@@ -430,15 +434,22 @@ class OnChainBudget:
         if self.agent_account is None:
             self.agent_account = self.owner_account
 
+    def _resource_arg(self) -> str:
+        """Manifest expression for the budget's resource: the ``XTR`` keyword for the native token,
+        else a strictly-validated ``address!("resource_…")``. Keeps the resource out of a raw string
+        splice (same injection guard as every other spliced value)."""
+        return "XTR" if self.resource == "XTR" else f'address!("{_check_resource(self.resource)}")'
+
     # -- owner -----------------------------------------------------------------------
     def open(self, *, fund: int, per_tx_cap: int, daily_cap: int,
-             epochs_per_window: int, whitelist: list[str]) -> "OnChainBudget":
+             epochs_per_window: int, whitelist: list[str], resource: str = "XTR") -> "OnChainBudget":
+        self.resource = resource
         wl = ", ".join(f'address!("{_check_component(m)}")' for m in whitelist)
         manifest = (
             f'use {_check_template(self.budget_template)} as AgentBudget;\n'
             'fn main() {\n'
             '    let mut owner = var!["owner"];\n'
-            f'    let funds = owner.withdraw(XTR, amount!({_check_amount(fund)}));\n'
+            f'    let funds = owner.withdraw({self._resource_arg()}, amount!({_check_amount(fund)}));\n'
             f'    let (comp, owner_badge, agent_badge) = AgentBudget::new('
             f'funds, amount!({_check_amount(per_tx_cap)}), amount!({_check_amount(daily_cap)}), {int(epochs_per_window)}u64, [{wl}]);\n'
             '    owner.deposit(owner_badge);\n'
@@ -538,7 +549,7 @@ class OnChainBudget:
         manifest = (
             'fn main() {\n'
             '    let mut funder = var!["funder"];\n'
-            f'    let funds = funder.withdraw(XTR, amount!({_check_amount(amount)}));\n'
+            f'    let funds = funder.withdraw({self._resource_arg()}, amount!({_check_amount(amount)}));\n'
             '    let mut budget = var!["budget"];\n'
             '    budget.top_up(funds);\n'
             '}\n'
@@ -620,13 +631,21 @@ class OnChainBudget:
     def pay_events(result: dict) -> list[dict]:
         """Extract the AgentBudget ``pay`` events (payload: merchant/amount/memo/spent_in_window)
         from a tx result — this is how a watcher keeps a local ledger in sync with the chain. The
-        same event is recorded in two places in the result, so we de-duplicate."""
+        same event is recorded in two places in the result, so we de-duplicate.
+
+        Filter by the event **topic** (``pay``), not merely "the payload has merchant+memo" — a
+        ``pay_via_escrow`` event carries those fields too and would otherwise be miscounted as a direct
+        pay. The de-dup key includes ``spent_in_window`` (the running total, which strictly increases by
+        ``amount`` on each pay): two COPIES of one event share it (so they collapse), while two DISTINCT
+        pays in a single tx differ in it (so both are kept, not merged). See `docs/audit-notes.md`."""
         out: list[dict] = []
         seen: set = set()
         for ev in _iter_events(result):
+            if ev.get("topic") != "pay":
+                continue
             p = ev.get("payload")
             if isinstance(p, dict) and "merchant" in p and "memo" in p:
-                key = (p.get("merchant"), p.get("amount"), p.get("memo"))
+                key = (p.get("merchant"), p.get("amount"), p.get("memo"), p.get("spent_in_window"))
                 if key not in seen:
                     seen.add(key)
                     out.append(p)

@@ -527,10 +527,26 @@ Followed up on the fifth review's deferred server items.
   decoding a typed return) still wants validation against the live walletd result shape — tracked;
   it would also give MCP `status()` a live `spent_in_window` (#15).
 
-### Still deferred
-- Design/product (#4 escrow-for-merchant, #5 fee-not-enforceable), #14 API-key→session mapping, SDK
-  `payEvents` topic/dedup and `open()` component discovery, resource-address parametrization, and
-  copyright headers remain open.
+### Design / SDK pass
+- **SDK `payEvents` topic + dedup (fixed).** It identified events by "payload has merchant+memo",
+  which also matched `pay_via_escrow`, and deduped by `(merchant, amount, memo)`, which collapsed two
+  distinct identical pays. Now it filters by `topic == "pay"` and keys the dedup on the running
+  `spent_in_window` (strictly increasing per pay) — distinct pays are kept, duplicate copies collapse.
+  Python + TS; test `test_pay_events_filters_by_topic_and_keeps_distinct_pays`.
+- **Resource parametrization (fixed).** `open()`/`top_up()` hard-coded `XTR`. `open(resource=…)` now
+  sets the budget's resource and `top_up` reuses it; the manifest splices `XTR` (native) or a
+  validated `address!("resource_…")`. Default stays `XTR`. Test
+  `test_resource_parametrization_uses_address_not_xtr`.
+- **#4 / #5 documented** in `ootle-plan.md`: `pay_via_escrow` protects the *payer*, not the merchant
+  (position it accordingly); and the per-deal fee cannot be enforced by an open-source template, so
+  revenue comes from the operated service, not the template.
+
+### Still deferred (need live-chain validation or the owner's input)
+- **#14 API-key → session mapping** (per-key on-chain session revoke; currently one "default" session).
+- **SDK `open()` component discovery** — still finds the new component by "first unknown address";
+  the robust fix decodes the `new` return value, same live-walletd-shape validation as #16's typed read.
+- **Copyright headers** (templates say "The Tari Project" — need the owner's name) and the TS-vs-rest
+  licence split (MIT vs BSD-3) — both are the owner's call, not guessed.
 
 ## Decision: OtcBoard frozen (2026-10-31)
 
