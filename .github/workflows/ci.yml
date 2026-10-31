@@ -115,11 +115,18 @@ jobs:
         with:
           node-version: "20"
 
-      # Zero dependencies: the suite boots the real server (Node built-ins only) on a random
-      # port against throwaway state and asserts the whole web-security boundary. No install.
-      - name: node security test suite
+      # Zero dependencies: each suite boots the real server (Node built-ins only) on a random port
+      # against throwaway state. security = the web-security boundary; audit = high-risk audit
+      # durability; stepup = the step-up gate; substate = the strict chain-state parse (#16);
+      # concurrency = reads not blocked by an in-flight write (#11). No install.
+      - name: node test suites
         working-directory: web
-        run: node server/security.test.js
+        run: |
+          node server/security.test.js
+          node server/audit.test.js
+          node server/stepup.test.js
+          node server/substate.test.js
+          node server/concurrency.test.js
 
   # ------------------------------------------------------------------ TS client
   ts-client:

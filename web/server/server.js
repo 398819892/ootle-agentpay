@@ -633,29 +633,10 @@ async function liveBudget() {
 // We parse both here so treasury / spend-in-window / caps / whitelist / revoked are all derived
 // live from chain. Best-effort: callers fall back to the cached config + journal if a read fails.
 
-/** Find the AgentBudget component's positional state array anywhere in a substates.get result. */
-function findComponentState(node) {
-  if (!node || typeof node !== "object") return null;
-  if (Array.isArray(node)) {
-    for (const v of node) {
-      const r = findComponentState(v);
-      if (r) return r;
-    }
-    return null;
-  }
-  if (node.Component && node.Component.body && Array.isArray(node.Component.body.state)) {
-    return node.Component.body.state;
-  }
-  for (const v of Object.values(node)) {
-    const r = findComponentState(v);
-    if (r) return r;
-  }
-  return null;
-}
-/** A CBOR-tagged address object → its 32-byte hex, or null. */
-function cborHex(x) {
-  return x && typeof x === "object" && x.value && typeof x.value.hex === "string" ? x.value.hex : null;
-}
+// #16: the positional substate parse lives in a unit-tested module and reads by explicit index +
+// type (throws on layout drift) instead of "first N numbers" (which read wrong values silently).
+const { findComponentState, cborHex, parseBudgetState } = require("./substate");
+
 /** Pull the vault's token balance out of a vault substate as an exact decimal string (BigInt-safe). */
 function vaultBalanceFromSubstate(sub) {
   const s = JSON.stringify(sub || {});
@@ -674,15 +655,10 @@ async function readChainBudget(component) {
   const [sub, currentEpoch] = await Promise.all([c.getSubstate(component), c.currentEpoch()]);
   const state = findComponentState(sub);
   if (!state) throw new Error("could not read the budget component state");
-  // Layout (struct order, see docs/custody.md §state-model): [vault, ownerBadgeRes, agentBadgeRes,
-  //   perTxCap, dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow, [whitelist…], revoked, …]
-  const nums = state.filter((x) => typeof x === "number");
-  if (nums.length < 5) throw new Error("unexpected budget component layout");
-  const [perTxCap, dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow] = nums;
-  const revoked = state.find((x) => typeof x === "boolean");
-  const wlArr = state.find((x) => Array.isArray(x)) || [];
-  const whitelist = wlArr.map((e) => (cborHex(e) ? "component_" + cborHex(e) : null)).filter(Boolean);
-  const vaultHex = cborHex(state[0]);
+  // Strict, position-pinned parse (throws on layout drift; see substate.js / audit #16).
+  const { perTxCap, dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow, revoked, whitelistRaw, vaultHex } =
+    parseBudgetState(state);
+  const whitelist = whitelistRaw.map((e) => (cborHex(e) ? "component_" + cborHex(e) : null)).filter(Boolean);
   let vaultBalance = null;
   if (vaultHex) {
     try {
@@ -1776,7 +1752,7 @@ async function handleApiV1(req, res, urlPath) {
 
     // ---- budget ---------------------------------------------------------------------------------
     if (sub === "/budget" && method === "GET") {
-      const st = await serialize(() => dashboardState());
+      const st = await dashboardState(); // #11: read — no serial lock
       return sendJson(res, 200, { budget: v1Budget(st) });
     }
     if (sub === "/budgets" && method === "POST") {
@@ -1788,7 +1764,7 @@ async function handleApiV1(req, res, urlPath) {
 
     // ---- merchants (whitelist) ------------------------------------------------------------------
     if (sub === "/merchants" && method === "GET") {
-      const st = await serialize(() => dashboardState());
+      const st = await dashboardState(); // #11: read — no serial lock
       const whitelist = (st.budget && st.budget.whitelist) || [];
       return sendJson(res, 200, { merchants: whitelist, source: st.budget ? "chain" : "none" });
     }
@@ -1983,8 +1959,14 @@ const server = http.createServer(async (req, res) => {
     const body = req.method === "POST" ? await readBody(req) : {};
     const query = Object.fromEntries(new URL(req.url, "http://localhost").searchParams);
     const ctx = requestCtx(req, body);
-    // all chain-touching ops run one at a time; the authorizer enforces policy + audit inside
-    const result = await serialize(() => handler(body, ctx, query));
+    // #11: serialize only STATE-CHANGING ops (POST). The serial lock exists to keep fund ops one at a
+    // time (and so the shared `wd.lastTxId` is unambiguous); a GET read never submits or touches
+    // lastTxId, so queueing reads behind an in-flight tx — up to minutes on a slow confirm — only
+    // stalls the dashboard for no safety benefit. Reads (GET) now run concurrently, outside the lock.
+    const result =
+      req.method === "GET"
+        ? await handler(body, ctx, query)
+        : await serialize(() => handler(body, ctx, query));
     sendJson(res, 200, result);
   } catch (e) {
     const status = e.status || 500;

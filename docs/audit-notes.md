@@ -512,14 +512,25 @@ Followed up on the fifth review's deferred server items.
   opening one with the owner key. Provision is opt-in for demos. The `status()` docstring is corrected
   to stop claiming `spent_in_window` is chain-confirmed (it is a local estimate; `revoked` is probed).
 
-### Still deferred (need focused work, not a rushed edit)
-- **#11 — serial lock blocks reads.** Letting reads bypass the lock is valuable but concurrency-
-  sensitive (the lock also guards the shared `lastTxId` for writes); it deserves a concurrency test,
-  not a quick edit.
-- **#16 — positional substate parsing.** The robust fix is a typed `get_info` dry-run read; a larger
-  SDK+client change. This also gates a live-chain `spent_in_window` for MCP `status()` (#15).
-- Design/product (#4 escrow-for-merchant, #5 fee-not-enforceable), SDK `payEvents` topic/dedup and
-  `open()` component discovery, resource-address parametrization, and copyright headers remain open.
+### #11 + #16 (done, with a concurrency / parse test each)
+- **#11 — serial lock blocked reads (fixed).** The dashboard router wrapped *every* handler in the
+  serial lock, so a GET queued behind an in-flight write (up to minutes on a slow confirm). Now only
+  state-changing (POST) handlers serialize; GET reads run concurrently (they never submit or touch
+  the shared `lastTxId`). The v1 `/budget` and `/merchants` GETs also drop their `serialize`. **Test:**
+  `web/server/concurrency.test.js` — a mock walletd parks a write ~2s in the lock and a concurrent
+  `GET /api/state` still returns in < 1s.
+- **#16 — positional substate parse (hardened; loud-fail, testable).** The reader took "the first 5
+  numbers / first boolean / first array", so a struct reorder returned WRONG values silently. It now
+  lives in `web/server/substate.js` and reads by **explicit index + type assertion**, throwing a
+  descriptive error on layout drift (the caller falls back to cache). **Test:**
+  `web/server/substate.test.js`. *Remaining:* a fully type-safe read (template `get_info` via dry-run,
+  decoding a typed return) still wants validation against the live walletd result shape — tracked;
+  it would also give MCP `status()` a live `spent_in_window` (#15).
+
+### Still deferred
+- Design/product (#4 escrow-for-merchant, #5 fee-not-enforceable), #14 API-key→session mapping, SDK
+  `payEvents` topic/dedup and `open()` component discovery, resource-address parametrization, and
+  copyright headers remain open.
 
 ## Decision: OtcBoard frozen (2026-10-31)
 
