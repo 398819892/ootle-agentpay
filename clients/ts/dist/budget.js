@@ -450,11 +450,17 @@ class OnChainBudget {
         const out = [];
         const seen = new Set();
         for (const ev of iterEvents(result)) {
-            // Filter by topic ("pay"), not merely "payload has merchant+memo" — a `pay_via_escrow` event
-            // carries those too and would otherwise be miscounted. The de-dup key includes
-            // `spent_in_window` (strictly increasing per pay): two COPIES of one event share it and
+            // Filter by the event topic, not merely "payload has merchant+memo" — a `pay_via_escrow` event
+            // carries those too and would otherwise be miscounted. The engine NAMESPACES a template event
+            // topic as "<Struct>.<event>", so the on-chain topic is "AgentBudget.pay" (and escrow is
+            // "AgentBudget.pay_via_escrow"); match the final segment == "pay" so both the namespaced form
+            // and a bare "pay" are accepted while "pay_via_escrow"/"pay_fee" are still excluded. (A bare
+            // "pay" check silently dropped EVERY real pay event, emptying the ledger.) The de-dup key
+            // includes `spent_in_window` (strictly increasing per pay): two COPIES of one event share it and
             // collapse, two DISTINCT pays in a tx differ and are both kept. See docs/audit-notes.md.
-            if (ev.topic !== "pay")
+            const topic = typeof ev.topic === "string" ? ev.topic : "";
+            const leaf = topic.includes(".") ? topic.slice(topic.lastIndexOf(".") + 1) : topic;
+            if (leaf !== "pay")
                 continue;
             const p = ev.payload;
             if (p && typeof p === "object" && "merchant" in p && "memo" in p) {

@@ -969,12 +969,19 @@ async function runChainOp(key, opName, component, params, submitFn, fpParams) {
 /** On startup, settle every open record we can by its tx id (ledger is then rebuilt from chain). */
 async function reconcileAll() {
   const open = txlog.pendingOrUnknown();
-  if (!open.length) return { checked: 0, resolved: 0 };
+  // Confirmed pays whose on-chain event was never captured — e.g. journaled before the topic-parse
+  // fix, when a namespaced "AgentBudget.pay" topic was dropped. The ledger renders the STORED event,
+  // so such a pay is invisible (money moved, no row) until its event is re-derived from chain here.
+  const eventless = txlog.list().filter(
+    (r) => r.op === "pay" && r.status === "confirmed" && !r.event && r.txId,
+  );
+  if (!open.length && !eventless.length) return { checked: 0, resolved: 0, backfilled: 0 };
+  let c;
   try {
-    await walletd();
+    c = await walletd();
   } catch (e) {
     console.error("reconcile: walletd unreachable, deferring:", e.message);
-    return { checked: 0, resolved: 0 };
+    return { checked: 0, resolved: 0, backfilled: 0 };
   }
   let resolved = 0;
   for (const rec of open) {
@@ -986,7 +993,19 @@ async function reconcileAll() {
       console.error(`reconcile: ${rec.key} failed:`, e.message);
     }
   }
-  return { checked: open.length, resolved };
+  let backfilled = 0;
+  for (const rec of eventless) {
+    try {
+      const got = await c.getResult(rec.txId);
+      if (got.status === "accept") {
+        const ev = firstPayEvent(got.result);
+        if (ev) { txlog.settle(rec.key, { event: ev }); backfilled += 1; }
+      }
+    } catch (e) {
+      console.error(`reconcile: backfill ${rec.key} failed:`, e.message);
+    }
+  }
+  return { checked: open.length, resolved, backfilled };
 }
 
 /** Persist the config/reference fields (NOT balances) of a confirmed budget back to the store. */

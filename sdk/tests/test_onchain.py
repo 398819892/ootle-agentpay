@@ -21,8 +21,9 @@ AGENT_BADGE = "resource_" + "b" * 64
 
 
 def _pay_event(merchant: str, amount: int, memo: str, spent: int) -> dict:
-    # shaped like a real finalized-tx event (appears twice in a real result → tests de-dup)
-    ev = {"topic": "pay", "substate_id": OWNER,
+    # shaped like a real finalized-tx event: the engine namespaces the topic as "<Struct>.<event>",
+    # so a real pay carries "AgentBudget.pay" (NOT a bare "pay"). Appears twice in a real result → de-dup.
+    ev = {"topic": "AgentBudget.pay", "substate_id": OWNER,
           "payload": {"amount": str(amount), "memo": memo, "merchant": merchant,
                       "spent_in_window": str(spent)}}
     return {"result": {"events": [ev]},
@@ -146,14 +147,15 @@ def test_pay_events_empty_on_unrelated_result():
 
 
 def test_pay_events_filters_by_topic_and_keeps_distinct_pays():
-    """Topic filter excludes a `pay_via_escrow` event (same merchant/memo shape); the running
-    `spent_in_window` keeps two DISTINCT identical-looking pays while still collapsing the duplicate
-    copy of each event across the two result subtrees."""
-    pay1 = {"topic": "pay", "substate_id": OWNER,
+    """The namespaced topic filter matches "AgentBudget.pay" (the engine prefixes template events with
+    the struct name) and excludes the namespaced "AgentBudget.pay_via_escrow" (same merchant/memo
+    shape); the running `spent_in_window` keeps two DISTINCT identical-looking pays while still
+    collapsing the duplicate copy of each event across the two result subtrees."""
+    pay1 = {"topic": "AgentBudget.pay", "substate_id": OWNER,
             "payload": {"merchant": SHOP, "amount": "100", "memo": "m", "spent_in_window": "100"}}
-    pay2 = {"topic": "pay", "substate_id": OWNER,  # identical except the running total advanced
+    pay2 = {"topic": "AgentBudget.pay", "substate_id": OWNER,  # identical except the running total advanced
             "payload": {"merchant": SHOP, "amount": "100", "memo": "m", "spent_in_window": "200"}}
-    escrow = {"topic": "pay_via_escrow", "substate_id": OWNER,
+    escrow = {"topic": "AgentBudget.pay_via_escrow", "substate_id": OWNER,
               "payload": {"merchant": SHOP, "amount": "100", "memo": "m", "escrow": "component_x"}}
     evs = [pay1, pay2, escrow]
     result = {"result": {"events": evs}, "result2": {"Accept": {"receipt": {"events": evs}}}}  # each duplicated

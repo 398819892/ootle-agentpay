@@ -641,15 +641,22 @@ class OnChainBudget:
         from a tx result — this is how a watcher keeps a local ledger in sync with the chain. The
         same event is recorded in two places in the result, so we de-duplicate.
 
-        Filter by the event **topic** (``pay``), not merely "the payload has merchant+memo" — a
+        Filter by the event **topic**, not merely "the payload has merchant+memo" — a
         ``pay_via_escrow`` event carries those fields too and would otherwise be miscounted as a direct
-        pay. The de-dup key includes ``spent_in_window`` (the running total, which strictly increases by
-        ``amount`` on each pay): two COPIES of one event share it (so they collapse), while two DISTINCT
-        pays in a single tx differ in it (so both are kept, not merged). See `docs/audit-notes.md`."""
+        pay. The engine NAMESPACES a template event topic as ``<Struct>.<event>``, so the on-chain topic
+        is ``AgentBudget.pay`` (escrow is ``AgentBudget.pay_via_escrow``); match the final segment
+        ``pay`` so both the namespaced form and a bare ``pay`` are accepted while
+        ``pay_via_escrow``/``pay_fee`` are excluded. (A bare ``pay`` check silently dropped EVERY real
+        pay event, emptying the ledger.) The de-dup key includes ``spent_in_window`` (the running total,
+        which strictly increases by ``amount`` on each pay): two COPIES of one event share it (so they
+        collapse), while two DISTINCT pays in a single tx differ in it (so both are kept, not merged).
+        See `docs/audit-notes.md`."""
         out: list[dict] = []
         seen: set = set()
         for ev in _iter_events(result):
-            if ev.get("topic") != "pay":
+            topic = ev.get("topic")
+            leaf = topic.rsplit(".", 1)[-1] if isinstance(topic, str) else topic
+            if leaf != "pay":
                 continue
             p = ev.get("payload")
             if isinstance(p, dict) and "merchant" in p and "memo" in p:
