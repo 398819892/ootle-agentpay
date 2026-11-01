@@ -68,7 +68,7 @@ All optional; defaults target the local swarm.
 | `COOKIE_SECURE` | force the `Secure` cookie flag behind HTTPS | *(inferred from `X-Forwarded-Proto`)* |
 
 Point it at **esmeralda** by setting `AGENTPAY_WALLETD_URL=http://127.0.0.1:5100/json_rpc`,
-`AGENTPAY_BUDGET_TEMPLATE=template_299d49bc…` and `AGENTPAY_OWNER_ACCOUNT=dev` (see
+`AGENTPAY_BUDGET_TEMPLATE=template_88b11261…` (the current agent_budget) and `AGENTPAY_OWNER_ACCOUNT=<your funded account>` (see
 [`../docs/esmeralda.md`](../docs/esmeralda.md)).
 
 ## Authentication

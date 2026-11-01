@@ -32,8 +32,8 @@ agents. A third template, **OtcBoard, is FROZEN** (experimental, not for product
 
 | Template | What it does | Tests | Published (localnet) | Published (esmeralda) |
 |---|---|---|---|---|
-| **Escrow** | Lock funds; release (opt. hashlock) / refund after timeout / dispute → arbiter resolves; platform fee | 26 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
-| **AgentBudget** | Owner/agent badges; `pay` within per-tx + rolling-daily caps + whitelist; revoke; `pay_via_escrow` (cross-template) | 28 ✅ | `template_758d0c58…` | `template_299d49bc…` |
+| **Escrow** | Lock funds; release (opt. hashlock) / refund after timeout / dispute → arbiter resolves; platform fee | 26 ✅ | `template_9b230fab…` | `template_11dc03f7…` (2026-11-01; the old `7de6ee2d…` is superseded) |
+| **AgentBudget** | Owner/agent badges; `pay` within per-tx + rolling-daily caps + whitelist; revoke; `pay_via_escrow` (cross-template) | 28 ✅ | `template_758d0c58…` | `template_88b11261…` |
 | **OtcBoard** *(frozen)* | P2P OTC escrow board — kept compiling + tested as a reference artifact only | 45 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
 
 Escrow and AgentBudget are deployed to a local swarm **and to the public esmeralda testnet** and
@@ -147,8 +147,8 @@ Support level per component — read the ✅/❌ precisely:
 
 | 模板 | 作用 | 测试 | 已发布(localnet) | 已发布(esmeralda) |
 |---|---|---|---|---|
-| **Escrow** | 锁资金；放款(可选 hashlock)/超时退款/争议→仲裁；平台手续费 | 26 ✅ | `template_9b230fab…` | `template_7de6ee2d…` |
-| **AgentBudget** | owner/agent 双 badge；`pay` 受单笔+日窗口上限+白名单约束；撤销；`pay_via_escrow`(跨模板) | 28 ✅ | `template_758d0c58…` | `template_299d49bc…` |
+| **Escrow** | 锁资金；放款(可选 hashlock)/超时退款/争议→仲裁；平台手续费 | 26 ✅ | `template_9b230fab…` | `template_11dc03f7…`（2026-11-01 重发；旧 `7de6ee2d…` 已作废） |
+| **AgentBudget** | owner/agent 双 badge；`pay` 受单笔+日窗口上限+白名单约束；撤销；`pay_via_escrow`(跨模板) | 28 ✅ | `template_758d0c58…` | `template_88b11261…`（2026-11-01 重发；旧 `299d49bc…` 已作废） |
 | **OtcBoard** *(已冻结)* | P2P 场外托管板 —— 仅作为参考/研究产物保留(仍可编译、测试通过) | 45 ✅ | `template_8bfa294d…` | `template_bafbe76e…` |
 
 Escrow 与 AgentBudget 都已部署到本地链**以及公共测试网 esmeralda**,并用**真实链上调用**验证过

@@ -82,7 +82,7 @@ overridable by a CLI flag. **Defaults target a local swarm, so a dev usually set
 | `AGENTPAY_AUTO_PROVISION` | `--no-provision` (forces off) | `false` | open a budget automatically when none is given. Default **off** (attach / non-custodial); set `true` for local demos |
 
 **esmeralda preset:** walletd `http://127.0.0.1:5100/json_rpc`, template
-`template_299d49bc…` (the published `agent_budget`), owner `dev`. See
+`template_88b11261…` (the current `agent_budget`, published 2026-11-01), owner `dev` (or whichever funded account your walletd holds). See
 [`../../docs/esmeralda.md`](../../docs/esmeralda.md).
 
 ### Two modes (chosen automatically)

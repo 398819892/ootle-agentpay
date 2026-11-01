@@ -20,3 +20,4 @@
 - [Manifest 注入修复](manifest-injection-fix.md) — #7：manifest builder 底层强制校验(memo 拒危险字符非转义/地址严格正则)+注入被拒测试;#9 memo 注释改正
 - [事件 topic 命名空间](event-topic-namespacing.md) — 引擎把 topic 改成 "AgentBudget.pay";裸 "pay" 过滤会丢掉所有付款→账本空(commit eac1c6c,含 reconcile backfill)
 - [本机环境 (Y 盘 WebDAV)](machine-y-drive-env.md) — 2026-11-01 起项目在 Y:\公用1\oolte（RaiDrive WebDAV 挂载），git 要加 safe.directory；网络盘上 npm install 会损坏 node_modules，TS 在本地盘构建；本机 WSL 是空的，没有 /root/ootle 私链环境
+- [I 盘 WSL ootle-dev 环境](ootle-dev-wsl-on-i-drive.md) — 新机器 I:\wsl\ootle-dev：Tari 0.47.0 二进制 + Rust + tari CLI + esmeralda walletd(:5100, 账户 STBZ 已充值)；从 Windows 驱动 WSL 只能用脚本文件 + PowerShell；DNS 要固定 IPv4

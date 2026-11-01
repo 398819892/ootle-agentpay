@@ -220,7 +220,7 @@ services:
       - key: AGENTPAY_WALLETD_URL      # the private tunnel address to your walletd host
         sync: false
       - key: AGENTPAY_BUDGET_TEMPLATE
-        value: template_299d49bcace827cb86a8cdd9e6b1880783ae40a8a29ab28ba94b6b3ded6123a8
+        value: template_88b112610740f457bcc04be70740edebc53c132885a3dda928b1c068d98db8f6
       - key: AGENTPAY_OWNER_ACCOUNT
         value: dev
 ```

@@ -98,7 +98,7 @@ AgentBudget template (see [`docs/esmeralda.md`](../../docs/esmeralda.md)):
 
 ```bash
 AGENTPAY_WALLETD_URL=http://127.0.0.1:5100/json_rpc \
-AGENTPAY_BUDGET_TEMPLATE=template_299d49bcace827cb86a8cdd9e6b1880783ae40a8a29ab28ba94b6b3ded6123a8 \
+AGENTPAY_BUDGET_TEMPLATE=template_88b112610740f457bcc04be70740edebc53c132885a3dda928b1c068d98db8f6 \
 AGENTPAY_OWNER_ACCOUNT=dev \
 node dist/demo.js
 ```

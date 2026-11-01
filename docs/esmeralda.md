@@ -1,8 +1,11 @@
 # Esmeralda (public testnet) deployment
 
-**Date:** 2026-10-24 (funding + escrow/agent_budget); 2026-10-26 (otc_board confirmed)
+**Date:** 2026-10-24 (funding + escrow/agent_budget); 2026-10-26 (otc_board confirmed);
+**2026-11-01 (current `agent_budget` republished from a new machine — see the last section)**
 **Status:** ✅ **COMPLETE** — account funded on chain, and **all three templates published on
-chain** (escrow, agent_budget, otc_board). Publishing fought intermittent public-indexer
+chain** (escrow, agent_budget, otc_board). The dashboard / SDK / MCP must point at the
+**2026-11-01 `agent_budget`** (`template_88b11261…`); the 10-24 `template_299d49bc…` has the old
+3-argument `pay` and rejects every payment from the current clients. Publishing fought intermittent public-indexer
 timeouts; `tari publish`'s short finalization wait meant some submits printed "timed out" while the
 tx actually landed (confirmed by querying the substate afterwards).
 
@@ -14,8 +17,11 @@ tx actually landed (confirmed by querying the substate afterwards).
 |------|--------------|-------|
 | Account `dev` | `component_bfb548cf666300a09e374f8ad069e5b0688ce6418f7b9745734efdd22f1ce889` | **confirmed on chain, funded** |
 | Funding tx | `bf15ebd8a9b39c15cf3c999878104a374d333ea654b50517fdfeb81fc6044f59` | Accepted |
-| **escrow** template | `template_7de6ee2d11af98037cb408b47621ec79175b07866bcd57b3da2233c099b2be0e` | **published** |
-| **agent_budget** template | `template_299d49bcace827cb86a8cdd9e6b1880783ae40a8a29ab28ba94b6b3ded6123a8` | **published** (tx `accc3704…`, Accepted) |
+| **escrow** template (10-24 baseline, signer-as-payer `new` — **superseded**) | `template_7de6ee2d11af98037cb408b47621ec79175b07866bcd57b3da2233c099b2be0e` | published; do not point clients at it |
+| **escrow** template (**current**, 2026-11-01, explicit `payer` in `new`) | `template_11dc03f70679e981afc5e2e48e261a74be54f87f71e35a6977313f34bbd49d09` | **published** from account `STBZ`, metadata hash `12204315…` |
+| **agent_budget** template (10-24 baseline, 3-arg `pay` — **superseded**) | `template_299d49bcace827cb86a8cdd9e6b1880783ae40a8a29ab28ba94b6b3ded6123a8` | published (tx `accc3704…`); do not point clients at it |
+| **agent_budget** template (**current**, 2026-11-01, multi-session `pay(proof, …)`) | `template_88b112610740f457bcc04be70740edebc53c132885a3dda928b1c068d98db8f6` | **published** from account `STBZ`, at_epoch 12785, metadata hash `1220bb20…`; confirmed pay verified (below) |
+| Account `STBZ` (second funded account, new machine) | `component_63d78f7de802294cd9cb9b0bf67eb873abdafc982acebc62e0b6fcbeabdd8d46` | **funded** 999,980,000 µT via faucet tx `8f23a540…` |
 | **otc_board** template | `template_bafbe76e296da399e3b9e266c096fb46ccb0cc53b670b570279d7cff9a371b13` | **published** (author `2c049e88…`, at_epoch 12644; verified via `substates.get`) |
 
 - Account pubkey: `2c049e88b8271733616f429dc51cfc34cc53c04cd6c300fbfb7a8f154f2df06f`,
@@ -164,3 +170,36 @@ node server/server.js
 已在 config)。esmeralda 仪表盘现运行在 **`http://localhost:8787`**(连 :5100,owner=dev),Windows loopback 可达。
 本地 swarm(:12010)**未改动**(留着,但仪表盘已不依赖它)。启动方式:`scratchpad/start-esme-dash-8787.sh`
 (setsid 常驻 `node server/server.js` + 上面那套 esmeralda env)。
+
+---
+
+## 2026-11-01：新机器上重发当前 `agent_budget`（拥堵已过，一次成功）
+
+原机器的 WSL（含已充值的 `dev` 账户密钥）没有搬过来，所以在新机器上从零搭了 `ootle-dev`
+WSL（`I:\wsl\`，Tari 0.47.0 二进制 + Rust + `tari-ootle-cli` 0.33.0）并走水龙头路径重新充值了一个账户：
+
+| 项 | 值 |
+|---|---|
+| 新账户 `STBZ`（account 分支 key 0） | `component_63d78f7de802294cd9cb9b0bf67eb873abdafc982acebc62e0b6fcbeabdd8d46`，pubkey `e6a9fae6…` |
+| 充值 tx（claim→TakeFromBucket(fee)→PayFeeFromBucket→CreateAccount） | `8f23a540b1b6568a9efad960923b790b630ca379e727124b71becaeaedd76836` Accepted，余额 999,980,000 µT |
+| **当前 `agent_budget`** | `template_88b112610740f457bcc04be70740edebc53c132885a3dda928b1c068d98db8f6`（WASM 244.9 KiB，at_epoch 12785） |
+| **当前 `escrow`**（`Escrow::new` 带显式 `payer`，供 `configure_escrow`/`pay_via_escrow` 用） | `template_11dc03f70679e981afc5e2e48e261a74be54f87f71e35a6977313f34bbd49d09`（WASM 156.1 KiB） |
+| 验证用预算 | `component_dff2951f83370be6e1c1bd5e2081227ae711d5520aae2a049e701e93853811a9`（fund 5000 / per-tx 1000 / daily 1500） |
+
+**验证（真链，Python SDK `agentpay.onchain`）**：开预算 → `pay` 500 **确认上链**（`AgentBudget.pay` 事件
+`spent_in_window=500`，金库从 tx diff 读到 4500）→ `would_reject(1001)` 返回验证节点原话
+`Amount exceeds the per-transaction cap`（不是 badge/参数不符）。10-30 卡住的"确认付款受阻"到此解决。
+
+**这次踩的坑（都已修）**：
+- 仓库里的 `scripts/esme-fund/src/main.rs` 是旧版，直接 `PayFeeFromBucket("claimed")` 会吃掉整桶，后面
+  `CreateAccount` 报 `unknown or out of scope bucket BucketId(2)`；已改回上表的四步序列（commit `30fa227`），
+  手续费作为可选第 5 个参数（默认 20000 µT，dry-run 实报 ~3249）。
+- 公网 indexer 这次没有拥堵：`tari publish` 一次就拿到地址，整个发布 32 秒。
+- `tari publish` 第一次发 `escrow` 被拒 `Insufficient fees paid: Required 1353114 but 1353066 paid`——CLI 的
+  费用估算偶尔差几十 µT；加 `--max-fee 1600000` 重发一次即成功（`template_11dc03f7…`）。
+- 本机 WSL 的默认 NAT 解析器会返回 IPv6-only/空答案，`cargo install` 解析 `index.crates.io` 失败：发行版里
+  固定 IPv4 DNS 并 `generateResolvConf=false` 后正常。
+
+esmeralda walletd（`:5100`，`auth=none`，`indexer_trust=trust`）现在跑在 `ootle-dev` 里（启动脚本
+`I:\wsl\setup\start-esme-walletd.sh`）；仪表盘/SDK/MCP 用 `AGENTPAY_OWNER_ACCOUNT=STBZ` +
+`AGENTPAY_BUDGET_TEMPLATE=template_88b11261…` 即可。原 `dev` 账户仍在链上有币，但其密钥只在旧机器。

@@ -113,10 +113,11 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
    会话「活」地召回这些记忆，把 `docs/memory/*.md` 拷到 Claude 内存目录
    `%USERPROFILE%\.claude\projects\<项目>\memory\`（本机原位置 `C:\Users\cam\.claude\projects\F--oolte\memory\`）。
    详见 `docs/memory/README.md`。关键几条也已折进本文件 §5。
-3. **esmeralda 相关**（如果还要上公共测试网）：见 `docs/esmeralda.md` 和内存 `esmeralda-deploy-blocked` /
-   `esmeralda-deploy`。注意：公共 indexer 对 ~278KiB 的大模板发布**长期拥堵**（submit 30s 超时），
-   三模板曾分别上链成功（escrow 7de6 / agent_budget 299d / otc_board bafb），但 299d 是旧 `pay` 签名的 baseline，
-   仪表盘连它会付款报错——要用当前源码重发。
+3. **esmeralda 相关**：见 `docs/esmeralda.md`。**2026-11-01 已在新机器重发当前 `agent_budget` =
+   `template_88b112610740f457bcc04be70740edebc53c132885a3dda928b1c068d98db8f6`**，并用 SDK 做了真链确认付款；
+   发布账户是新充值的 `STBZ`（`component_63d78f7d…`，密钥在新机器 `ootle-dev` WSL 的 walletd 里）。旧 `dev`
+   账户的密钥只在旧机器。旧 `299d49bc…`（3 参 `pay`）已作废，别再指向它。**escrow 也已重发** =
+   `template_11dc03f70679e981afc5e2e48e261a74be54f87f71e35a6977313f34bbd49d09`（显式 `payer` 版）；旧 `7de6…` 作废。
 
 ---
 
@@ -179,8 +180,11 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
 - API key → 链上会话映射（每 key 一个 session badge）未做。
 - `remove_merchant` / `set_limits` 已在三层接通，但只跑过 mock/dead-walletd 测试；**还没在本地 swarm 上真实跑过一次**
   （移除后 pay 被链拒、改限额后新上限生效），接链时补一条 e2e。
-- esmeralda 上重发当前 `agent_budget`（公网 indexer 拥堵阻塞，见 §3.3）。
-- 新机器的 WSL 是空的（没有 `/root/ootle`、cargo、tari、swarm），模板 `cargo test` / `make ci` 要先按 §2 重搭，或信 GitHub CI。
+- ~~esmeralda 上重发当前 `agent_budget`~~ ✅ 2026-11-01 完成（`template_88b11261…`，真链确认付款通过）；
+  escrow 也重发为 `template_11dc03f7…`（第一次被 `Insufficient fees paid` 拒，`--max-fee 1600000` 后成功）。
+  `pay_via_escrow` 在 esmeralda 上尚未实跑（需要先 `configure_escrow` 指向新 escrow）。
+- ~~新机器的 WSL 是空的~~ ✅ 已在 I 盘建好 `ootle-dev`（二进制、Rust、tari CLI、模板 ext4 副本、esmeralda walletd；
+  本地 swarm 还没 init）。细节见 `docs/memory/ootle-dev-wsl-on-i-drive.md`。
 
 **已完成**：7 轮外部评审的真实 bug 已逐条修复并带攻击场景回归测试（合约授权/资金、提交模糊性、
 幂等、部署加固、OTC 冻结、非托管部署、许可证统一 BSD-3、仪表盘链为权威、集成 API、稳定性 harness、
