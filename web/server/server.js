@@ -372,7 +372,12 @@ function confirmParams(op, body) {
       f.amount = s(b.amount);
       break;
     case "addMerchant":
+    case "removeMerchant":
       f.merchant = s(b.merchant);
+      break;
+    case "setLimits": // a token for caps (100, 300) must not confirm caps (100, 900)
+      f.perTxCap = s(b.perTxCap);
+      f.dailyCap = s(b.dailyCap);
       break;
     case "issueSession":
     case "revokeSession":
@@ -631,6 +636,28 @@ async function resolveMerchant(nameOrAddr) {
   store.merchants[key] = addr;
   saveStore();
   return addr;
+}
+
+/**
+ * Resolve a merchant for REMOVAL: a validated `component_…` address, or a name already known to the
+ * local alias table. Unlike `resolveMerchant` this never asks walletd and never auto-creates an
+ * account — you cannot remove what was never added, and a typo must not provision a devnet account.
+ */
+function lookupMerchant(nameOrAddr) {
+  const raw = String(nameOrAddr || "").trim();
+  if (!raw) throw httpError(400, "A merchant name or component address is required.");
+  if (raw.startsWith("component_")) {
+    if (!COMPONENT_ADDR_RE.test(raw)) {
+      throw httpError(400, "That is not a valid component_… address (expected component_ + 64 hex chars).");
+    }
+    return { name: nameByAddr()[raw] || null, address: raw };
+  }
+  const key = raw.toLowerCase();
+  const cached = store.merchants[key];
+  if (!cached || !COMPONENT_ADDR_RE.test(String(cached))) {
+    throw httpError(400, `No merchant named "${key}" is known here. Paste its component_… address instead.`);
+  }
+  return { name: key, address: cached };
 }
 
 /** Rebuild a live OnChainBudget from the persisted snapshot (or null if none open). */
@@ -1226,6 +1253,66 @@ const OPS = {
     },
   },
 
+  // Shrink the on-chain whitelist → high-risk (owner-badge call; changes who the agent may pay).
+  // Resolution never provisions an account; the merchant must be on the CHAIN whitelist right now.
+  removeMerchant: {
+    tier: TIERS.ADMIN,
+    highRisk: true,
+    async run(body, ctx) {
+      const b = await liveBudget();
+      if (!b) throw httpError(409, "No budget is open.");
+      const { name, address } = lookupMerchant(body.merchant);
+      // Chain is the authority on membership; fall back to the cached mirror only if the read fails.
+      let whitelist = b.whitelist || [];
+      try {
+        whitelist = (await readChainBudget(b.component)).whitelist;
+      } catch (e) {
+        console.error("warn: removeMerchant could not read the chain whitelist:", e.message);
+      }
+      if (!whitelist.includes(address)) throw httpError(400, "That merchant is not on the whitelist.");
+      const key = idemKey(body, "removeMerchant:" + crypto.randomUUID());
+      let r;
+      try {
+        r = await runChainOp(key, "removeMerchant", b.component, { merchant: address }, () => b.removeMerchant(address));
+      } catch (e) {
+        if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
+        throw httpError(422, chainMessage(e));
+      }
+      ctx.meta.txId = r.record.txId;
+      ctx.meta.params = { merchant: address };
+      if (r.outcome === "unknown") return await pendingResult(r.record, "Remove-merchant");
+      snapshotBudget(b); // refresh the cached whitelist (chain remains authority)
+      return { ...(await dashboardState()), removed: { name, address } };
+    },
+  },
+
+  // Change both caps on chain → high-risk (raising them widens what the agent can spend).
+  // The step-up token is bound to the exact (perTxCap, dailyCap) pair — see confirmParams.
+  setLimits: {
+    tier: TIERS.ADMIN,
+    highRisk: true,
+    async run(body, ctx) {
+      const b = await liveBudget();
+      if (!b) throw httpError(409, "No budget is open.");
+      const perTxCap = toAmount(body.perTxCap, "per-transaction cap");
+      const dailyCap = toAmount(body.dailyCap, "daily cap");
+      if (big(perTxCap) > big(dailyCap)) throw httpError(400, "Per-transaction cap cannot exceed the daily cap.");
+      const key = idemKey(body, "setLimits:" + crypto.randomUUID());
+      let r;
+      try {
+        r = await runChainOp(key, "setLimits", b.component, { perTxCap, dailyCap }, () => b.setLimits(perTxCap, dailyCap));
+      } catch (e) {
+        if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
+        throw httpError(422, chainMessage(e));
+      }
+      ctx.meta.txId = r.record.txId;
+      ctx.meta.params = { perTxCap, dailyCap };
+      if (r.outcome === "unknown") return await pendingResult(r.record, "Set-limits");
+      snapshotBudget(b); // refresh the cached caps (chain remains authority)
+      return await dashboardState();
+    },
+  },
+
   // Pull funds out of the vault back to the owner → highest-risk money extraction.
   withdraw: {
     tier: TIERS.ADMIN,
@@ -1456,6 +1543,8 @@ const api = {
   "POST /api/budget": (body, ctx) => authz.execute("createBudget", body, ctx),
   "POST /api/pay": (body, ctx) => authz.execute("pay", body, ctx),
   "POST /api/merchants": (body, ctx) => authz.execute("addMerchant", body, ctx),
+  "POST /api/merchants/remove": (body, ctx) => authz.execute("removeMerchant", body, ctx),
+  "POST /api/limits": (body, ctx) => authz.execute("setLimits", body, ctx),
   "POST /api/withdraw": (body, ctx) => authz.execute("withdraw", body, ctx),
   "POST /api/top-up": (body, ctx) => authz.execute("topUp", body, ctx),
   "POST /api/revoke": (body, ctx) => authz.execute("revoke", body, ctx),
@@ -1609,7 +1698,8 @@ function readBody(req) {
 // It does NOT touch the browser's session cookie, CSRF or login throttle: a v1 request is dispatched
 // here BEFORE those gates, and it authenticates with a bearer API key instead. Tiered access:
 //   • an `agent` key may create payments and read (payments / budget / merchants);
-//   • an `admin` key may additionally open a budget, register merchants and read the audit log.
+//   • an `admin` key may additionally open a budget, add/remove merchants, change the caps and read
+//     the audit log.
 // The on-chain AgentBudget still enforces the real spend limits regardless of which key calls.
 // See docs/api.md for the full reference + integration guide.
 // ================================================================================================
@@ -1704,8 +1794,9 @@ async function handleApiV1(req, res, urlPath) {
         "GET    /api/v1/budget          (agent) — caps, remaining window, treasury (chain-derived)",
         "GET    /api/v1/merchants       (agent) — the on-chain whitelist",
         "POST   /api/v1/merchants       (admin) — add a merchant to the whitelist",
-        "DELETE /api/v1/merchants/:name (admin) — remove a local merchant alias",
+        "DELETE /api/v1/merchants/:name (admin) — remove a merchant from the ON-CHAIN whitelist",
         "POST   /api/v1/budgets         (admin) — open/fund a budget",
+        "POST   /api/v1/budget/limits   (admin) — change the per-tx / daily caps on chain",
         "GET    /api/v1/audit           (admin) — recent audit entries",
         "GET    /api/v1/keys            (admin) — list API keys (id/role/revoked)",
         "POST   /api/v1/keys/:id/revoke (admin) — revoke an API key at runtime",
@@ -1840,6 +1931,18 @@ async function handleApiV1(req, res, urlPath) {
       const st = await dashboardState();
       return sendJson(res, 201, { budget: v1Budget(st) });
     }
+    if (sub === "/budget/limits" && method === "POST") {
+      if (denyIfNotAdmin("setLimits")) return;
+      const r = await serialize(() =>
+        executeAsKey("setLimits", { perTxCap: body.perTxCap, dailyCap: body.dailyCap }, ctx),
+      );
+      const st = await dashboardState();
+      // 200 once the chain confirmed; 202 when submitted but not yet confirmed (reconciled later).
+      return sendJson(res, r && r.pending ? 202 : 200, {
+        budget: v1Budget(st),
+        ...(r && r.pending ? { pending: true, txId: r.txId || null, notice: r.notice } : {}),
+      });
+    }
 
     // ---- merchants (whitelist) ------------------------------------------------------------------
     if (sub === "/merchants" && method === "GET") {
@@ -1854,22 +1957,20 @@ async function handleApiV1(req, res, urlPath) {
       return sendJson(res, 201, { merchants: (st.budget && st.budget.whitelist) || [] });
     }
     if (sub.startsWith("/merchants/") && method === "DELETE") {
-      if (denyIfNotAdmin("deleteMerchantAlias")) return;
-      const name = decodeURIComponent(sub.slice("/merchants/".length)).trim().toLowerCase();
-      const existed = Object.prototype.hasOwnProperty.call(store.merchants, name);
-      if (existed) {
-        delete store.merchants[name];
-        saveStore();
-      }
-      audit.append({ actor: `key:${who.id}`, ip, op: "deleteMerchantAlias", tier: "admin", status: "ok", params: { name } });
-      return sendJson(res, 200, {
-        removedAlias: existed,
-        name,
-        notice:
-          "Removed the local merchant alias only. NOTE: this endpoint does NOT call the template's " +
-          "on-chain remove_merchant — the address stays whitelisted (spendable) on chain. To remove " +
-          "it on chain, use the owner-badge remove_merchant method directly, or revoke the agent / " +
-          "open a new budget. See docs/api.md 'Known limitations'.",
+      // The REAL on-chain removal: the owner badge signs the template's `remove_merchant`, so the
+      // address stops being payable once the tx finalizes. Goes through the same authorizer / step-up
+      // binding / idempotent journal as the dashboard. The local name→address alias is kept so the
+      // merchant can be re-added by name later (it is only a label, not an authorization).
+      if (denyIfNotAdmin("removeMerchant")) return;
+      const merchant = decodeURIComponent(sub.slice("/merchants/".length)).trim();
+      const r = await serialize(() => executeAsKey("removeMerchant", { merchant }, ctx));
+      const st = await dashboardState();
+      return sendJson(res, r && r.pending ? 202 : 200, {
+        removed: (r && r.removed) || null,
+        merchants: (st.budget && st.budget.whitelist) || [],
+        ...(r && r.pending
+          ? { pending: true, txId: r.txId || null, notice: r.notice }
+          : { notice: "Removed from the on-chain whitelist via the owner badge; the agent can no longer pay this address." }),
       });
     }
 

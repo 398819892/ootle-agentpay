@@ -120,6 +120,65 @@ test("session labels with manifest-breaking characters are rejected", async () =
   }
 });
 
+test("removeMerchant validates the address at the manifest layer and mirrors the whitelist", async () => {
+  const bad = [
+    "component_not_hex",
+    "component_" + "a".repeat(63),
+    "resource_" + "a".repeat(64),
+    'component_' + "a".repeat(64) + '"); drop_all_proofs!(); //',
+    "",
+  ];
+  for (const m of bad) {
+    const { b, fake } = budget();
+    await assert.rejects(() => b.removeMerchant(m), ChainError);
+    assert.deepEqual(fake.runs, []);
+    assert.deepEqual(b.whitelist, [SHOP]); // untouched on failure
+  }
+
+  const { b, fake } = budget();
+  await b.removeMerchant(SHOP);
+  const run = fake.runs[fake.runs.length - 1];
+  // owner-badge proof + the exact owner call; the component rides in `variables`, never in the text
+  assert.ok(run.manifest.includes(`owner.create_proof_for_resource(address!("${OWNER_BADGE}"))`));
+  assert.ok(run.manifest.includes(`budget.remove_merchant(address!("${SHOP}"));`));
+  assert.ok(run.manifest.includes("drop_all_proofs!();"));
+  assert.deepEqual(run.variables, { owner: OWNER, budget: b.component });
+  assert.deepEqual(b.whitelist, []); // local mirror follows the accepted call
+});
+
+test("setLimits normalises both caps and rejects unsafe amounts before any manifest is built", async () => {
+  const bad: Array<[any, any]> = [
+    [-1, 100],
+    [100, -1],
+    [1.5, 100],
+    ["1); drop_all_proofs!(); amount!(1", 100],
+    [100, "1_000"],
+    [Number.MAX_SAFE_INTEGER + 1, 100], // would stringify lossily
+    ["nan", 100],
+  ];
+  for (const [p, d] of bad) {
+    const { b, fake } = budget();
+    await assert.rejects(() => b.setLimits(p, d), ChainError);
+    assert.deepEqual(fake.runs, []);
+    assert.equal(b.perTxCap, "1000"); // untouched on failure
+    assert.equal(b.dailyCap, "3000");
+  }
+
+  const { b, fake } = budget();
+  const huge = "123456789012345678901234567890"; // > 2^53: must survive as an exact string
+  await b.setLimits(250, huge);
+  const run = fake.runs[fake.runs.length - 1];
+  assert.ok(run.manifest.includes(`budget.set_limits(amount!(250), amount!(${huge}));`));
+  assert.ok(run.manifest.includes(`owner.create_proof_for_resource(address!("${OWNER_BADGE}"))`));
+  assert.equal(b.perTxCap, "250");
+  assert.equal(b.dailyCap, huge);
+
+  await b.setLimits(7n, "8"); // bigint + string inputs normalise the same way
+  assert.ok(fake.runs[fake.runs.length - 1].manifest.includes("set_limits(amount!(7), amount!(8))"));
+  assert.equal(b.perTxCap, "7");
+  assert.equal(b.dailyCap, "8");
+});
+
 test("legitimate memo, invoice memo and addresses still build a well-formed manifest", async () => {
   const { b, fake } = budget();
   await b.pay(SHOP, 500, { memo: "order #42 — café latte" }); // punctuation / unicode is fine

@@ -148,9 +148,29 @@ class AgentPayApiClient {
         const r = await this.request("POST", "/merchants", { merchant });
         return r.merchants;
     }
-    /** Remove a local merchant alias (admin key). See docs/api.md for the on-chain caveat. */
+    /**
+     * Remove a merchant from the ON-CHAIN whitelist (admin key): the owner badge signs the template's
+     * `remove_merchant`, so the address stops being payable once the tx finalizes. `merchant` is a
+     * friendly name the service already knows, or a `component_…` address. Returns the updated
+     * whitelist; `pending: true` + `txId` when the chain has not confirmed yet (poll `getBudget`).
+     */
+    async removeMerchant(merchant) {
+        return await this.request("DELETE", `/merchants/${encodeURIComponent(merchant)}`);
+    }
+    /** @deprecated Renamed `removeMerchant` — the endpoint now removes the merchant ON CHAIN. */
     async removeMerchantAlias(name) {
-        return await this.request("DELETE", `/merchants/${encodeURIComponent(name)}`);
+        return await this.removeMerchant(name);
+    }
+    /**
+     * Change both on-chain caps in one owner-badge call (admin key; template `set_limits`). The new
+     * per-transaction cap binds on the very next payment. Returns the updated (chain-read) budget.
+     */
+    async setLimits(perTxCap, dailyCap) {
+        const r = await this.request("POST", "/budget/limits", {
+            perTxCap: String(perTxCap),
+            dailyCap: String(dailyCap),
+        });
+        return r.budget;
     }
     /** Recent audit entries (admin key). */
     async getAudit(limit = 100) {

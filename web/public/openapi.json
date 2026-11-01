@@ -116,6 +116,29 @@
         }
       }
     },
+    "/api/v1/budget/limits": {
+      "post": {
+        "tags": ["budget"],
+        "summary": "Change the per-transaction / daily caps on chain (admin)",
+        "description": "One owner-badge `set_limits` call on the AgentBudget template. The new per-transaction cap binds on the very next payment; the daily cap applies to the current rolling window (spend already counted is kept — not a window reset). `perTxCap` must not exceed `dailyCap`. Admin key only; idempotent and journaled like every other chain op.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "required": ["perTxCap", "dailyCap"], "properties": { "perTxCap": { "type": "string", "description": "Base units, decimal string" }, "dailyCap": { "type": "string", "description": "Base units, decimal string" } } },
+              "example": { "perTxCap": "500", "dailyCap": "2000" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Confirmed; the budget is read back from chain", "content": { "application/json": { "schema": { "type": "object", "properties": { "budget": { "$ref": "#/components/schemas/Budget" } } } } } },
+          "202": { "description": "Submitted, not yet confirmed (`pending: true`, `txId`); poll GET /budget", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "400": { "description": "Bad amount, or perTxCap > dailyCap", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "No budget is open", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
     "/api/v1/merchants": {
       "get": {
         "tags": ["merchants"],
@@ -135,12 +158,15 @@
     "/api/v1/merchants/{name}": {
       "delete": {
         "tags": ["merchants"],
-        "summary": "Remove a local merchant alias (admin)",
-        "description": "Removes the friendly name→address mapping ONLY. The AgentBudget template does have an owner-badge `remove_merchant`, but this API/client do not expose it yet, so the address stays spendable on chain until `remove_merchant` is called directly, the agent is revoked, or a new budget is opened. See docs/api.md.",
+        "summary": "Remove a merchant from the on-chain whitelist (admin)",
+        "description": "The owner badge signs the AgentBudget template's `remove_merchant`: once the transaction finalizes the validators refuse any payment to that address. `name` is a friendly name the service already knows or a `component_…` address (URL-encoded); an unknown name is a 400 (nothing is auto-provisioned). The local name→address alias is kept so the merchant can be re-added by name. Idempotent and journaled like every other chain op. See docs/api.md.",
         "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
         "responses": {
-          "200": { "description": "Alias removed (with a note about on-chain scope)", "content": { "application/json": { "schema": { "type": "object" } } } },
-          "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+          "200": { "description": "Removed on chain", "content": { "application/json": { "schema": { "type": "object", "properties": { "removed": { "type": "object", "properties": { "name": { "type": "string", "nullable": true }, "address": { "type": "string" } } }, "merchants": { "type": "array", "items": { "$ref": "#/components/schemas/Merchant" } }, "notice": { "type": "string" } } } } } },
+          "202": { "description": "Submitted, not yet confirmed (`pending: true`, `txId`); poll GET /merchants", "content": { "application/json": { "schema": { "type": "object" } } } },
+          "400": { "description": "Unknown merchant name / not on the whitelist / malformed address", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "No budget is open", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
         }
       }
     },

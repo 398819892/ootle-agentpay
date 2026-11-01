@@ -270,6 +270,47 @@ def test_session_label_injection_is_rejected():
     assert b.client.runs == []                      # nothing reached the daemon
 
 
+def test_remove_merchant_validates_address_and_mirrors_whitelist():
+    for bad in ["component_not_hex", "component_" + "a" * 63, "resource_" + "a" * 64,
+                'component_' + "a" * 64 + '"); drop_all_proofs!(); //', ""]:
+        b = _budget()
+        with pytest.raises(ChainError):
+            b.remove_merchant(bad)
+        assert b.client.runs == []                  # nothing reached the daemon
+        assert b.whitelist == [SHOP]                # untouched on failure
+
+    b = _budget()
+    b.remove_merchant(SHOP)
+    manifest, variables = b.client.runs[-1]
+    assert f'owner.create_proof_for_resource(address!("{OWNER_BADGE}"))' in manifest
+    assert f'budget.remove_merchant(address!("{SHOP}"));' in manifest
+    assert "drop_all_proofs!();" in manifest
+    assert variables == {"owner": OWNER, "budget": b.component}   # component never in the text
+    assert b.whitelist == []                        # local mirror follows the accepted call
+
+
+def test_set_limits_normalises_caps_and_rejects_bad_amounts():
+    for p, d in [(-1, 100), (100, -1), (1.5, 100), ("1); drop_all_proofs!(); amount!(1", 100),
+                 (100, "1_000"), ("nan", 100), (True, 100)]:
+        b = _budget()
+        with pytest.raises(ChainError):
+            b.set_limits(p, d)
+        assert b.client.runs == []
+        assert (b.per_tx_cap, b.daily_cap) == (1_000, 3_000)   # untouched on failure
+
+    b = _budget()
+    huge = 123456789012345678901234567890             # > 2^63: must stay an exact integer literal
+    b.set_limits(250, huge)
+    manifest, _ = b.client.runs[-1]
+    assert f"budget.set_limits(amount!(250), amount!({huge}));" in manifest
+    assert f'owner.create_proof_for_resource(address!("{OWNER_BADGE}"))' in manifest
+    assert (b.per_tx_cap, b.daily_cap) == (250, huge)
+
+    b.set_limits("7", 8)                             # a decimal string normalises the same way
+    assert "set_limits(amount!(7), amount!(8))" in b.client.runs[-1][0]
+    assert (b.per_tx_cap, b.daily_cap) == (7, 8)
+
+
 def test_normal_memo_and_addresses_still_pass():
     """The guard must not reject legitimate input: a plain memo, the invoice-codec memo, and valid
     addresses all build a well-formed manifest and reach the (fake) daemon."""

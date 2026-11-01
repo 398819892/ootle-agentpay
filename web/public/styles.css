@@ -818,6 +818,31 @@ button {
   font-size: 12px;
   color: var(--text-muted);
 }
+.chip .chip__rm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+}
+.chip .chip__rm:hover,
+.chip .chip__rm:focus-visible {
+  background: var(--danger-tint);
+  color: var(--danger);
+  outline: none;
+}
+.chip .chip__rm:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
 
 /* ---- address pill (truncate + copy) --------------------------------------- */
 .addr {

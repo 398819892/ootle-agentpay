@@ -337,6 +337,31 @@ export class OnChainBudget {
   }
 
   /**
+   * Owner removes `merchant` from the on-chain whitelist (template `remove_merchant`, owner-badge
+   * gated). The address stops being payable the moment the tx finalizes; the local mirror is
+   * updated only after the chain accepted the call. Removing an address that is not whitelisted is
+   * a no-op on chain (the template's set-remove is idempotent).
+   */
+  async removeMerchant(merchant: string): Promise<void> {
+    await this.ownerCall(`remove_merchant(address!("${checkComponent(merchant)}"))`);
+    this.whitelist = this.whitelist.filter((m) => m !== merchant);
+  }
+
+  /**
+   * Owner changes both caps in one on-chain call (template `set_limits`, owner-badge gated). The
+   * chain enforces the new per-transaction cap on the very next `pay`; the daily cap applies to the
+   * current rolling window (spend already counted in the window is kept, not reset). Amounts are
+   * normalised through the same guard as every other `amount!(…)` literal.
+   */
+  async setLimits(perTxCap: AmountInput, dailyCap: AmountInput): Promise<void> {
+    const p = amt(perTxCap);
+    const d = amt(dailyCap);
+    await this.ownerCall(`set_limits(amount!(${p}), amount!(${d}))`);
+    this.perTxCap = p;
+    this.dailyCap = d;
+  }
+
+  /**
    * Owner mints a new agent session badge labelled `session` and deposits it into `toAccount`
    * (defaults to this budget's agent account). The new badge can `pay` within the same on-chain
    * caps/whitelist until the owner revokes that session. Returns the session label.

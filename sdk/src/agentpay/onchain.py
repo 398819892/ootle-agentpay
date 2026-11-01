@@ -505,6 +505,22 @@ class OnChainBudget:
         if merchant not in self.whitelist:
             self.whitelist.append(merchant)
 
+    def remove_merchant(self, merchant: str) -> None:
+        """Owner removes `merchant` from the on-chain whitelist (template ``remove_merchant``,
+        owner-badge gated). The address stops being payable once the tx finalizes; the local
+        mirror follows the accepted call. Removing a non-whitelisted address is a chain no-op."""
+        self._owner_call(f'remove_merchant(address!("{_check_component(merchant)}"))')
+        self.whitelist = [m for m in self.whitelist if m != merchant]
+
+    def set_limits(self, per_tx_cap: int, daily_cap: int) -> None:
+        """Owner changes both caps in one on-chain call (template ``set_limits``, owner-badge gated).
+        The new per-tx cap binds on the very next ``pay``; the daily cap applies to the current
+        rolling window (spend already counted is kept). Both go through ``_check_amount``."""
+        p, d = _check_amount(per_tx_cap), _check_amount(daily_cap)
+        self._owner_call(f"set_limits(amount!({p}), amount!({d}))")
+        self.per_tx_cap = int(p)
+        self.daily_cap = int(d)
+
     def issue_agent_badge(self, session: str, *, to_account: str | None = None) -> str:
         """Owner mints a new agent session badge labelled `session` and deposits it into `to_account`
         (defaults to this budget's agent account). The new badge can `pay` within the same on-chain

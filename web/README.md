@@ -133,9 +133,10 @@ The browser dashboard and its auth/CSRF/kill-switch are unchanged by this surfac
   **Check on chain** dry-runs the payment and surfaces the validator's real reject reason
   (e.g. *"Amount exceeds the per-transaction cap"*, *"Merchant is not whitelisted"*,
   *"Amount exceeds the daily cap"*, *"Agent has been revoked"*).
-- **Governance** — add a merchant to the on-chain whitelist, withdraw from the treasury
-  (confirm dialog), and the **kill switch** to revoke the agent (double-confirm: an explicit
-  acknowledgement is required before the button enables).
+- **Governance** — add a merchant to the on-chain whitelist or remove one (the ✕ on its chip,
+  step-up confirmed), change the per-transaction / daily caps on chain (*Spending limits* card),
+  withdraw from the treasury (confirm dialog), and the **kill switch** to revoke the agent
+  (double-confirm: an explicit acknowledgement is required before the button enables).
 
 ### The "daily cap" is a rolling epoch window (shown honestly)
 
@@ -158,11 +159,13 @@ If the chain read ever fails, the card falls back to the stored figures and stil
 
 ### Scope note
 
-The three governance actions above are exactly what the current on-chain `AgentBudget` template
-and the `clients/ts` client expose (`add_merchant`, `withdraw`, `revoke`). Removing a merchant and
-editing the caps after creation aren't in the template yet, so this dashboard deliberately does
-**not** fake them — it only drives operations the chain actually supports. (The source in
-`templates/`, `sdk/` and `clients/ts/` is left untouched; this app only imports the TS client.)
+The governance actions above are exactly what the on-chain `AgentBudget` template and the
+`clients/ts` client expose: `add_merchant` / `remove_merchant`, `set_limits`, `withdraw`, `top_up`,
+`issue_agent_badge` / `revoke_session`, `revoke`. The dashboard drives only operations the chain
+actually supports — nothing is faked locally. Removing a merchant (the ✕ on a whitelist chip) and
+changing the caps (the *Spending limits* card) are owner-badge transactions like the others: step-up
+gated with the token bound to the exact merchant / cap pair, idempotent, journaled and reconciled.
+(The source in `templates/` and `sdk/` is left untouched; this app only imports the TS client.)
 
 ## UX
 

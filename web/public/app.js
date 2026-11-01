@@ -249,6 +249,17 @@ const I18N = {
     add_merchant_placeholder: "Add merchant by name",
     gov_wl_hint: "Adds a merchant to the on-chain whitelist via the owner badge. ",
     gov_wl_hint_revoked: "<b>The agent is revoked, but the whitelist can still be edited.</b>",
+    remove_merchant: "Remove from whitelist",
+    confirm_remove_merchant_title: (p) => `Remove “${p.name}” from the whitelist?`,
+    confirm_remove_merchant_body:
+      "The owner badge signs the template's on-chain <code>remove_merchant</code>. Once the transaction finalizes the agent can no longer pay this address — the validators refuse it. You can add it back later.",
+    confirm_remove_merchant_ok: "Remove merchant",
+    limits_title: "Spending limits",
+    limits_hint:
+      "Signs an on-chain <code>set_limits</code> with the owner badge. The new per-transaction cap binds on the very next payment; the daily cap applies to the current window (spend already counted in it is kept).",
+    limits_pertx_err: "Enter a per-transaction cap of at least 1.",
+    limits_unchanged: "These are already the current limits.",
+    update_limits: "Update limits",
     treasury: "Treasury",
     treasury_hint: (p) => `available to withdraw · ${p.funded} funded, ${p.spent} spent`,
     topup_label: "Top up (add funds)",
@@ -324,6 +335,8 @@ const I18N = {
     p_asking: "Asking the chain…",
     p_submitting: "Submitting…",
     p_adding: "Adding…",
+    p_removing: "Removing…",
+    p_updating_limits: "Updating…",
     p_topping: "Topping up…",
     p_issuing: "Issuing…",
     p_withdrawing: "Withdrawing…",
@@ -354,6 +367,12 @@ const I18N = {
     t_merchant_wl: "Merchant whitelisted",
     t_merchant_wl_msg: (p) => `${p.name} can now receive payments.`,
     t_merchant_failed: "Couldn't add merchant",
+    t_merchant_removed: "Merchant removed",
+    t_merchant_removed_msg: (p) => `${p.name} is no longer whitelisted on chain.`,
+    t_merchant_remove_failed: "Couldn't remove merchant",
+    t_limits_updated: "Limits updated",
+    t_limits_updated_msg: (p) => `Per-tx ${p.perTx} ${p.unit} · daily ${p.daily} ${p.unit} — enforced on chain.`,
+    t_limits_failed: "Couldn't update limits",
     t_topped_up: "Topped up",
     t_topped_up_msg: (p) => `${p.amount} ${p.unit} added to the budget's vault.`,
     t_topup_failed: "Top-up failed",
@@ -550,6 +569,17 @@ const I18N = {
     add_merchant_placeholder: "按名称添加商户",
     gov_wl_hint: "通过所有者凭证把商户加入链上白名单。",
     gov_wl_hint_revoked: "<b>代理虽已停用,但白名单仍可编辑。</b>",
+    remove_merchant: "移出白名单",
+    confirm_remove_merchant_title: (p) => `要把「${p.name}」移出白名单吗?`,
+    confirm_remove_merchant_body:
+      "将用所有者凭证签名并调用模板的链上 <code>remove_merchant</code>。交易确认后,代理就无法再向这个地址付款——验证节点会直接拒绝。以后可以再加回来。",
+    confirm_remove_merchant_ok: "移除商户",
+    limits_title: "支出限额",
+    limits_hint:
+      "用所有者凭证签名并调用链上 <code>set_limits</code>。新的单笔上限从下一笔付款起生效;每日上限作用于当前窗口(窗口内已计入的花费保留)。",
+    limits_pertx_err: "单笔上限至少为 1。",
+    limits_unchanged: "这已经是当前的限额了。",
+    update_limits: "更新限额",
     treasury: "资金",
     treasury_hint: (p) => `可提现 · 已注资 ${p.funded},已花费 ${p.spent}`,
     topup_label: "充值(追加资金)",
@@ -623,6 +653,8 @@ const I18N = {
     p_asking: "正在询问链上…",
     p_submitting: "提交中…",
     p_adding: "添加中…",
+    p_removing: "移除中…",
+    p_updating_limits: "更新中…",
     p_topping: "充值中…",
     p_issuing: "发放中…",
     p_withdrawing: "提现中…",
@@ -653,6 +685,12 @@ const I18N = {
     t_merchant_wl: "商户已加入白名单",
     t_merchant_wl_msg: (p) => `${p.name} 现在可以收款了。`,
     t_merchant_failed: "商户添加失败",
+    t_merchant_removed: "商户已移除",
+    t_merchant_removed_msg: (p) => `${p.name} 已不在链上白名单中。`,
+    t_merchant_remove_failed: "商户移除失败",
+    t_limits_updated: "限额已更新",
+    t_limits_updated_msg: (p) => `单笔 ${p.perTx} ${p.unit} · 每日 ${p.daily} ${p.unit}——已在链上生效。`,
+    t_limits_failed: "限额更新失败",
     t_topped_up: "充值成功",
     t_topped_up_msg: (p) => `已向预算金库追加 ${p.amount} ${p.unit}。`,
     t_topup_failed: "充值失败",
@@ -1534,7 +1572,8 @@ function viewGovernance() {
     ? b.whitelist
         .map(
           (m) => `<span class="chip"><span class="chip__dot" style="background:${avatarColor(m.name || m.address)}"></span>
-          ${m.name ? `<b>${esc(m.name)}</b>` : ""}<code>${esc(shorten(m.address, 10, 6))}</code></span>`,
+          ${m.name ? `<b>${esc(m.name)}</b>` : ""}<code>${esc(shorten(m.address, 10, 6))}</code>
+          <button type="button" class="chip__rm" data-remove-merchant="${esc(m.address)}" data-merchant-name="${esc(m.name || "")}" title="${esc(t("remove_merchant"))}" aria-label="${esc(t("remove_merchant"))}">${icon("x", 12)}</button></span>`,
         )
         .join("")
     : `<span class="muted" style="font-size:13px">${esc(t("no_wl_merchants"))}</span>`;
@@ -1578,6 +1617,27 @@ function viewGovernance() {
               </div>
               <button type="submit" class="btn btn--secondary btn--block" id="g-withdraw" ${amtBig(b.treasury) <= 0n ? "disabled" : ""}>${icon("up", 16)} ${esc(t("withdraw_to_owner"))}</button>
             </form>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card__head"><h3>${esc(t("limits_title"))}</h3></div>
+          <div class="card__body">
+            <form id="limits-form" novalidate>
+              <div class="form-grid">
+                <div class="field">
+                  <label class="field__label" for="g-pertx">${esc(t("pertx_cap"))}</label>
+                  <div class="input-affix"><input class="input" id="g-pertx" type="number" min="1" value="${esc(String(b.perTxCap))}"/><span class="affix">${UNIT}</span></div>
+                  <div class="field__err">${esc(t("limits_pertx_err"))}</div>
+                </div>
+                <div class="field">
+                  <label class="field__label" for="g-daily">${esc(t("daily_cap"))}</label>
+                  <div class="input-affix"><input class="input" id="g-daily" type="number" min="1" value="${esc(String(b.dailyCap))}"/><span class="affix">${UNIT}</span></div>
+                  <div class="field__err">${esc(t("daily_cap_err"))}</div>
+                </div>
+              </div>
+              <button type="submit" class="btn btn--primary btn--block" id="g-limits">${icon("zap", 16)} ${esc(t("update_limits"))}</button>
+            </form>
+            <div class="field__hint mt-12">${t("limits_hint")}</div>
           </div>
         </div>
       </div>
@@ -1764,6 +1824,9 @@ function wire() {
 
     const rs = e.target.closest("[data-revoke-session]");
     if (rs) return revokeSession(rs.dataset.revokeSession, rs);
+
+    const rmm = e.target.closest("[data-remove-merchant]");
+    if (rmm) return removeMerchant(rmm.dataset.removeMerchant, rmm.dataset.merchantName, rmm);
   };
 
   // theme toggle
@@ -1939,6 +2002,30 @@ async function revokeSession(session, btn) {
   });
 }
 
+async function removeMerchant(address, name, btn) {
+  const label = name || shorten(address, 10, 6);
+  const res = await confirmDialog({
+    tone: "warn",
+    icon: "x",
+    title: t("confirm_remove_merchant_title", { name: label }),
+    body: t("confirm_remove_merchant_body"),
+    confirmLabel: t("confirm_remove_merchant_ok"),
+    stepUp: S.stepUpRequired ? "removeMerchant" : null,
+    // Bound into the step-up token; the op call below sends the SAME address (see confirmParams).
+    stepUpParams: { merchant: address },
+  });
+  if (!res) return;
+  await withPending(btn, t("p_removing"), async () => {
+    try {
+      S.data = await api("/api/merchants/remove", { merchant: address, confirmToken: res.token });
+      render();
+      toast("success", t("t_merchant_removed"), t("t_merchant_removed_msg", { name: esc(label) }));
+    } catch (e) {
+      toast("error", t("t_merchant_remove_failed"), e.message);
+    }
+  });
+}
+
 /* ---- create wiring -------------------------------------------------------- */
 function wireCreate() {
   renderTags();
@@ -2091,6 +2178,37 @@ function wireGovernance() {
       }
     });
   });
+
+  const limitsForm = el("limits-form");
+  if (limitsForm) {
+    limitsForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const perTxCap = readAmt("g-pertx");
+      const dailyCap = readAmt("g-daily");
+      const perTxOk = perTxCap !== null && amtBig(perTxCap) > 0n;
+      const dailyOk = dailyCap !== null && amtBig(dailyCap) > 0n && amtBig(dailyCap) >= amtBig(perTxCap);
+      setErr("g-pertx", !perTxOk);
+      setErr("g-daily", !dailyOk);
+      if (!perTxOk || !dailyOk) return;
+      const cur = S.data.budget;
+      if (amtBig(perTxCap) === amtBig(cur.perTxCap) && amtBig(dailyCap) === amtBig(cur.dailyCap)) {
+        toast("info", t("limits_title"), t("limits_unchanged"));
+        return;
+      }
+      // The step-up token is bound to this exact (perTxCap, dailyCap) pair; the op call sends the same.
+      const gate = await stepUpToken("setLimits", { perTxCap, dailyCap });
+      if (!gate) return;
+      await withPending(el("g-limits"), t("p_updating_limits"), async () => {
+        try {
+          S.data = await api("/api/limits", { perTxCap, dailyCap, confirmToken: gate.token });
+          render();
+          toast("success", t("t_limits_updated"), t("t_limits_updated_msg", { perTx: fmt(perTxCap), daily: fmt(dailyCap), unit: UNIT }));
+        } catch (err) {
+          toast("error", t("t_limits_failed"), err.message);
+        }
+      });
+    });
+  }
 
   const topupForm = el("topup-form");
   if (topupForm) {

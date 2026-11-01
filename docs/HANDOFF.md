@@ -168,11 +168,17 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
   web README/DEPLOYMENT 的 HOST 默认改为 `127.0.0.1`；MCP README 的默认模式改为 attach（provision 需 `AGENTPAY_AUTO_PROVISION=true`）；
   interfaces.md 的 Escrow `refund`/`dispute` 行、custody.md 的 badge 顺序、security.md 测试数、audit-notes §1/§2 表格的过时格子。
 - TS 客户端 README 许可证 MIT → BSD-3-Clause。
+- **`remove_merchant` / `set_limits` 三层接通 ✅**（模板未改）：TS `removeMerchant`/`setLimits`、Python `remove_merchant`/`set_limits`
+  （都走 builder 底层校验）；仪表盘 OPS 注册 `removeMerchant`/`setLimits`（admin、highRisk、step-up 参数绑定 merchant / perTxCap+dailyCap、
+  `runChainOp` 幂等 + `snapshotBudget`），路由 `POST /api/merchants/remove`、`POST /api/limits`；`/api/v1` 的 `DELETE /merchants/:name`
+  改为真正链上移除（本地别名保留，便于按名重加），新增 `POST /api/v1/budget/limits`；治理页白名单 chip 带 ✕ 移除 + "支出限额"表单（中英）。
+  测试：TS 注入/形状、Python、`stepup.test.js` 的 setLimits/removeMerchant 参数绑定用例；api.md / openapi.json / web README 已同步。
 
 **仍待办（需要人拍板/链环境）**：
 - 三个模板 `lib.rs` 的版权头仍是 `Copyright 2026 The Tari Project`（上游模板遗留）——要换成项目所有者的名字，**需你提供**。
-- `remove_merchant` / `set_limits` 模板已有，但 TS 客户端、仪表盘、`/api/v1` 都没暴露（api.md 已如实写明）；
-  API key → 链上会话映射（每 key 一个 session badge）也未做。
+- API key → 链上会话映射（每 key 一个 session badge）未做。
+- `remove_merchant` / `set_limits` 已在三层接通，但只跑过 mock/dead-walletd 测试；**还没在本地 swarm 上真实跑过一次**
+  （移除后 pay 被链拒、改限额后新上限生效），接链时补一条 e2e。
 - esmeralda 上重发当前 `agent_budget`（公网 indexer 拥堵阻塞，见 §3.3）。
 - 新机器的 WSL 是空的（没有 `/root/ootle`、cargo、tari、swarm），模板 `cargo test` / `make ci` 要先按 §2 重搭，或信 GitHub CI。
 

@@ -73,7 +73,7 @@ AGENTPAY_API_KEYS="agent:bot1:sk_agent_<32+hex>, admin:ops:sk_admin_<32+hex>"
 | --- | :---: | :---: |
 | `GET /budget`, `GET /merchants`, `GET/POST /payments`, `GET /payments/:id` | ✅ | ✅ |
 | `POST /budgets` (open/fund a budget) | — | ✅ |
-| `POST /merchants`, `DELETE /merchants/:name` | — | ✅ |
+| `POST /merchants`, `DELETE /merchants/:name`, `POST /budget/limits` | — | ✅ |
 | `GET /audit` | — | ✅ |
 | `GET /keys`, `POST /keys/:id/revoke` | — | ✅ |
 
@@ -178,10 +178,22 @@ Owner-side provisioning. Body: `{ "fund", "perTxCap", "dailyCap", "epochsPerWind
 Body: `{ "merchant": "coffee-bar" }` (friendly name or `component_…` address). Returns the updated
 whitelist.
 
-### `DELETE /api/v1/merchants/:name` — remove a merchant alias  *(admin)*
-Removes the local friendly-name → address mapping. **See [Known limitations](#known-limitations):**
-this template has no on-chain whitelist-remove, so the address stays spendable on chain until you
-revoke the agent or open a new budget. The response says so explicitly.
+### `DELETE /api/v1/merchants/:name` — remove from the whitelist, on chain  *(admin)*
+Removes the merchant from the **on-chain** whitelist: the owner badge signs the template's
+`remove_merchant`, so once the tx finalizes the validators refuse any payment to that address.
+`:name` is a friendly name the service already knows, or a `component_…` address (URL-encoded). A
+name that was never added is a `400` — nothing is auto-provisioned on this path. The local
+name → address alias is kept so the merchant can be re-added by name later. Returns
+`{ "removed": { "name", "address" }, "merchants": [ … ] }`: `200` once confirmed, `202` with
+`pending: true` + `txId` when submitted but not yet confirmed (reconciled against chain like every
+other op; poll `GET /merchants`).
+
+### `POST /api/v1/budget/limits` — change the caps on chain  *(admin)*
+Body: `{ "perTxCap": "500", "dailyCap": "2000" }` (amounts as strings, `perTxCap ≤ dailyCap`). One
+owner-badge `set_limits` call. The new per-transaction cap binds on the very next payment; the daily
+cap applies to the current rolling window (spend already counted in it is kept — this is not a
+window reset). Returns `{ "budget": … }` read back from chain: `200` confirmed, `202` pending as
+above.
 
 ### `GET /api/v1/audit?limit=100` — audit trail  *(admin)*
 Recent append-only audit entries (secrets redacted). Every state-changing API call, and every denial
@@ -239,14 +251,11 @@ chain's as truth.
 
 ## Known limitations
 
-- **No on-chain whitelist removal through this API.** The AgentBudget template does have an
-  owner-badge `remove_merchant` method, but neither the TS client nor this API exposes it yet, so
-  `DELETE /merchants/:name` only drops the local friendly-name alias — the address stays spendable on
-  chain. To actually stop payments to an address today: call `remove_merchant` directly with the
-  owner badge, `revoke` the agent, or open a new budget. (Exposing `remove_merchant` is a client +
-  API follow-up, not a template change.)
-- **No cap change through this API.** The template has an owner-badge `set_limits`, but the client /
-  API do not expose it yet; changing `perTxCap`/`dailyCap` currently means opening a new budget.
+- **Removing a merchant / changing the caps are owner-badge transactions, not instant.** Both are
+  exposed (`DELETE /merchants/:name`, `POST /budget/limits`) and take effect when the tx finalizes;
+  a payment that is already in flight on the old rules may still land. `set_limits` does not restart
+  the rolling window — lower the daily cap below what is already spent and the next payment is
+  refused until the window rolls over.
 - **Keep the client and the deployed template in step.** `pay` is driven by a transaction manifest,
   so the client (SDK / TS / web) must match the AgentBudget template deployed on the swarm. A real
   confirmed payment on the current multi-session template **is** exercised end-to-end — `POST

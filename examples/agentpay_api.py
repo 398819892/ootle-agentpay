@@ -133,8 +133,20 @@ class AgentPayApi:
     def add_merchant(self, merchant: str) -> list:
         return self._request("POST", "/merchants", {"merchant": merchant}).get("merchants", [])
 
-    def remove_merchant_alias(self, name: str) -> dict:
-        return self._request("DELETE", f"/merchants/{name}")
+    def remove_merchant(self, merchant: str) -> dict:
+        """Remove a merchant from the ON-CHAIN whitelist (admin key): the owner badge signs the
+        template's remove_merchant. `merchant` is a known friendly name or a component_… address.
+        Returns {"removed": {...}, "merchants": [...]} (+ "pending"/"txId" if not yet confirmed)."""
+        return self._request("DELETE", f"/merchants/{merchant}")
+
+    def remove_merchant_alias(self, name: str) -> dict:  # deprecated name; the endpoint removes ON CHAIN
+        return self.remove_merchant(name)
+
+    def set_limits(self, per_tx_cap: str, daily_cap: str) -> dict:
+        """Change both on-chain caps in one owner-badge call (admin key). Returns the updated budget."""
+        return self._request(
+            "POST", "/budget/limits", {"perTxCap": str(per_tx_cap), "dailyCap": str(daily_cap)}
+        ).get("budget")
 
     def audit(self, limit: int = 100) -> list:
         return self._request("GET", f"/audit?limit={int(limit)}").get("entries", [])

@@ -12,6 +12,8 @@
  *   • the token is single-use: the same (matching) token a second time → refused.
  *   • token minted for one op  cannot confirm a DIFFERENT op.
  *   • token for session "alpha" cannot confirm session "beta".
+ *   • token for caps (100, 300) cannot confirm caps (100, 900) or (900, 300) — setLimits binding.
+ *   • token to remove merchant A cannot remove merchant B — removeMerchant binding.
  *
  * Boots a REAL server with auth enabled and a DEAD walletd URL (so a request that passes the step-up
  * gate fails fast on the chain call rather than touching any live swarm). We only ever assert whether
@@ -183,7 +185,33 @@ async function main() {
     check("issueSession token for 'alpha' used with 'alpha' → passes step-up", !blockedAtStepUp(ok), `${ok.status} ${JSON.stringify(ok.json)}`);
   }
 
-  // 7. a tampered token → refused
+  // 7. cap binding: a setLimits token is bound to the exact (perTxCap, dailyCap) pair
+  {
+    const token = await mint({ op: "setLimits", perTxCap: "100", dailyCap: "300" });
+    check("minted a setLimits token", Boolean(token));
+    const badDaily = await request("POST", "/api/limits", { headers: H, body: { perTxCap: "100", dailyCap: "900", confirmToken: token } });
+    check("setLimits token for daily 300 used with daily 900 → refused", blockedAtStepUp(badDaily), `${badDaily.status} ${JSON.stringify(badDaily.json)}`);
+    const token2 = await mint({ op: "setLimits", perTxCap: "100", dailyCap: "300" });
+    const badPerTx = await request("POST", "/api/limits", { headers: H, body: { perTxCap: "900", dailyCap: "300", confirmToken: token2 } });
+    check("setLimits token for per-tx 100 used with per-tx 900 → refused", blockedAtStepUp(badPerTx), `${badPerTx.status} ${JSON.stringify(badPerTx.json)}`);
+    const token3 = await mint({ op: "setLimits", perTxCap: "100", dailyCap: "300" });
+    const ok = await request("POST", "/api/limits", { headers: H, body: { perTxCap: "100", dailyCap: "300", confirmToken: token3 } });
+    check("setLimits token for (100, 300) used with (100, 300) → passes step-up", !blockedAtStepUp(ok), `${ok.status} ${JSON.stringify(ok.json)}`);
+  }
+
+  // 8. merchant binding on removal: a token minted to remove A cannot remove B
+  {
+    const A = "component_" + "a".repeat(64);
+    const B = "component_" + "b".repeat(64);
+    const token = await mint({ op: "removeMerchant", merchant: A });
+    const bad = await request("POST", "/api/merchants/remove", { headers: H, body: { merchant: B, confirmToken: token } });
+    check("removeMerchant token for A used with B → refused", blockedAtStepUp(bad), `${bad.status} ${JSON.stringify(bad.json)}`);
+    const token2 = await mint({ op: "removeMerchant", merchant: A });
+    const ok = await request("POST", "/api/merchants/remove", { headers: H, body: { merchant: A, confirmToken: token2 } });
+    check("removeMerchant token for A used with A → passes step-up", !blockedAtStepUp(ok), `${ok.status} ${JSON.stringify(ok.json)}`);
+  }
+
+  // 9. a tampered token → refused
   {
     const token = await mint({ op: "withdraw", amount: "100" });
     const tampered = token.slice(0, -2) + (token.endsWith("a") ? "b" : "a");

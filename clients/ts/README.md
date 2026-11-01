@@ -130,6 +130,8 @@ const reason = await budget.wouldReject(shopAddr, 1_500); // e.g. "Amount exceed
 
 // Owner controls.
 await budget.addMerchant(otherAddr);
+await budget.removeMerchant(otherAddr); // on-chain remove_merchant (owner badge)
+await budget.setLimits(500, 2_000);     // on-chain set_limits(per-tx, daily)
 await budget.revoke();             // kill switch
 await budget.withdraw(8_600);      // reclaim remaining funds
 
@@ -142,7 +144,7 @@ console.log(budget.spent, budget.ledger);
 | `.accountAddress` / `.createAccount` / `.fund` / `.balance` | same | `fund` = localnet faucet (`create_free_test_coins`) |
 | `.dryRun` / `.run` | same | `run` submits for real and polls `get_result` |
 | `OnChainBudget(client, template, owner, {agentAccount?})` | `OnChainBudget` | agent defaults to owner (devnet) |
-| `.open` / `.pay` / `.payInvoice` / `.wouldReject` / `.revoke` / `.withdraw` / `.addMerchant` | same | all `async` |
+| `.open` / `.pay` / `.payInvoice` / `.wouldReject` / `.revoke` / `.withdraw` / `.addMerchant` / `.removeMerchant` / `.setLimits` | same | all `async` |
 | `.open({ …, resource? })` / `.topUp` | `open(resource=…)` / `top_up` | the budget's resource: `"XTR"` (default) or a `resource_…` address, reused by `topUp` |
 | `.issueAgentBadge` / `.revokeSession` / `.setWindow` | `issue_agent_badge` / `revoke_session` / `set_window` | multi-session badges + the rolling window |
 | `.readWindow()` | — (TS-only helper) | reads the live rolling-window status from chain |

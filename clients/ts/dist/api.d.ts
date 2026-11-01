@@ -112,11 +112,35 @@ export declare class AgentPayApiClient {
     }): Promise<Budget>;
     /** Add a merchant to the whitelist (admin key). Returns the updated whitelist. */
     addMerchant(merchant: string): Promise<Merchant[]>;
-    /** Remove a local merchant alias (admin key). See docs/api.md for the on-chain caveat. */
-    removeMerchantAlias(name: string): Promise<{
-        removedAlias: boolean;
-        notice: string;
+    /**
+     * Remove a merchant from the ON-CHAIN whitelist (admin key): the owner badge signs the template's
+     * `remove_merchant`, so the address stops being payable once the tx finalizes. `merchant` is a
+     * friendly name the service already knows, or a `component_…` address. Returns the updated
+     * whitelist; `pending: true` + `txId` when the chain has not confirmed yet (poll `getBudget`).
+     */
+    removeMerchant(merchant: string): Promise<{
+        removed: {
+            name: string | null;
+            address: string;
+        } | null;
+        merchants: Merchant[];
+        pending?: boolean;
+        txId?: string | null;
+        notice?: string;
     }>;
+    /** @deprecated Renamed `removeMerchant` — the endpoint now removes the merchant ON CHAIN. */
+    removeMerchantAlias(name: string): Promise<{
+        removed: {
+            name: string | null;
+            address: string;
+        } | null;
+        merchants: Merchant[];
+    }>;
+    /**
+     * Change both on-chain caps in one owner-badge call (admin key; template `set_limits`). The new
+     * per-transaction cap binds on the very next payment. Returns the updated (chain-read) budget.
+     */
+    setLimits(perTxCap: string | number | bigint, dailyCap: string | number | bigint): Promise<Budget>;
     /** Recent audit entries (admin key). */
     getAudit(limit?: number): Promise<any[]>;
 }
