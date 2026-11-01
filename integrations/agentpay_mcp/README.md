@@ -79,7 +79,7 @@ overridable by a CLI flag. **Defaults target a local swarm, so a dev usually set
 | `AGENTPAY_COMPONENT` | `--component` | *(unset)* | **attach mode:** an already-open budget component |
 | `AGENTPAY_AGENT_BADGE` | `--agent-badge` | *(unset)* | **attach mode:** the agent badge resource |
 | `AGENTPAY_AGENT_ACCOUNT` | `--agent-account` | *(unset)* | **attach mode:** the agent's account |
-| `AGENTPAY_AUTO_PROVISION` | `--provision` | `false` | open a budget automatically when none is given (default OFF = attach/non-custodial; set `true` for local demos) |
+| `AGENTPAY_AUTO_PROVISION` | `--no-provision` (forces off) | `false` | open a budget automatically when none is given. Default **off** (attach / non-custodial); set `true` for local demos |
 
 **esmeralda preset:** walletd `http://127.0.0.1:5100/json_rpc`, template
 `template_299d49bc…` (the published `agent_budget`), owner `dev`. See
@@ -87,14 +87,17 @@ overridable by a CLI flag. **Defaults target a local swarm, so a dev usually set
 
 ### Two modes (chosen automatically)
 
-* **Provision** (default — near-zero config). No `AGENTPAY_COMPONENT` given → the server opens a
-  fresh on-chain budget from the owner account on first tool call, using the caps / whitelist /
-  fund above. Great for demos and dev. The agent still only gets the three spending tools.
-  (An empty whitelist means the agent can pay *nobody* until merchants are whitelisted by the
-  owner — set `AGENTPAY_WHITELIST` to a merchant account to make payments possible.)
-* **Attach** (production-shaped). Set `AGENTPAY_COMPONENT` + `AGENTPAY_AGENT_BADGE` +
+* **Attach** (the default, production-shaped). Set `AGENTPAY_COMPONENT` + `AGENTPAY_AGENT_BADGE` +
   `AGENTPAY_AGENT_ACCOUNT` → the server attaches to a budget the owner opened out of band,
   holding **only the agent badge**. It can pay but can never raise its caps or revoke itself.
+  With no component configured and provisioning off, every tool returns a structured
+  `not_configured` error telling you what to set.
+* **Provision** (opt-in: `AGENTPAY_AUTO_PROVISION=true`; local demos only). No `AGENTPAY_COMPONENT`
+  given → the server opens a fresh on-chain budget from the owner account on first tool call, using
+  the caps / whitelist / fund above. Convenient, but the agent process then runs with the **owner
+  key** (it holds both badges), which is exactly the custodial shape the attach mode avoids — so it
+  is off by default. (An empty whitelist means the agent can pay *nobody* until merchants are
+  whitelisted — set `AGENTPAY_WHITELIST` to a merchant account to make payments possible.)
 
 ## Prerequisites
 
@@ -114,8 +117,8 @@ Edit `claude_desktop_config.json` (macOS:
 `~/Library/Application Support/Claude/claude_desktop_config.json`; Windows:
 `%APPDATA%\Claude\claude_desktop_config.json`), add an `mcpServers` entry, and restart Claude.
 
-**Zero-config, local swarm** (provision mode — opens a budget for you; set a whitelist so the
-agent can actually pay a merchant):
+**Local demo, provision mode** (opt-in: the server opens a budget for you with the owner key; set a
+whitelist so the agent can actually pay a merchant):
 
 ```json
 {
@@ -124,6 +127,7 @@ agent can actually pay a merchant):
       "command": "agentpay-mcp",
       "env": {
         "AGENTPAY_NETWORK": "local",
+        "AGENTPAY_AUTO_PROVISION": "true",
         "AGENTPAY_WHITELIST": "component_...your merchant account..."
       }
     }
@@ -131,7 +135,7 @@ agent can actually pay a merchant):
 }
 ```
 
-**esmeralda** (public testnet):
+**esmeralda** (public testnet, provision mode for a quick demo):
 
 ```json
 {
@@ -141,6 +145,7 @@ agent can actually pay a merchant):
       "env": {
         "AGENTPAY_NETWORK": "esmeralda",
         "AGENTPAY_OWNER_ACCOUNT": "dev",
+        "AGENTPAY_AUTO_PROVISION": "true",
         "AGENTPAY_WHITELIST": "component_...your merchant account..."
       }
     }
@@ -148,7 +153,8 @@ agent can actually pay a merchant):
 }
 ```
 
-**Attach to an existing budget** (production-shaped — the agent holds only the agent badge):
+**Attach to an existing budget** (the default mode, production-shaped — the agent holds only the
+agent badge; no `AGENTPAY_AUTO_PROVISION` needed):
 
 ```json
 {
@@ -186,14 +192,18 @@ Same shape as above:
       "command": "agentpay-mcp",
       "env": {
         "AGENTPAY_NETWORK": "local",
-        "AGENTPAY_WHITELIST": "component_...your merchant account..."
+        "AGENTPAY_COMPONENT": "component_...the open budget...",
+        "AGENTPAY_AGENT_BADGE": "resource_...the agent badge...",
+        "AGENTPAY_AGENT_ACCOUNT": "component_...the agent account...",
+        "AGENTPAY_WHITELIST": "component_...shop..."
       }
     }
   }
 }
 ```
 
-Then enable **agentpay** in Cursor's Settings → MCP. The model can now call `pay_merchant` /
+(Add `"AGENTPAY_AUTO_PROVISION": "true"` instead of the component/badge/account trio for a
+throw-away local demo.) Then enable **agentpay** in Cursor's Settings → MCP. The model can now call `pay_merchant` /
 `get_budget_status` / `list_merchants` / `get_server_info` and hit the exact same on-chain wall.
 
 ## Error handling (agent-friendly)

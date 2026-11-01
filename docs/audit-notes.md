@@ -50,8 +50,8 @@ proof of that resource, checked *inside* the method (`authorize_session`).
 |----|--------------|-----------|------------|-------|-------|
 | `new` | anyone (becomes owner) | — | locks `funds` into vault | — | mints owner + first agent ("default") badge; caps must be ≥0, window >0 |
 | `pay` | holder of a non-revoked agent-badge session (proof) | not globally revoked | vault → merchant, `amount` | `pay` | `amount>0`, `≤per_tx_cap`, merchant whitelisted, `spent+amount≤daily_cap`; **counter incremented before withdraw** (CEI) |
-| `pay_via_escrow` | same as `pay` | same + escrow configured | vault → new Escrow, `amount` | `pay_via_escrow` | **same four checks + same daily counter** as `pay`; opens an Escrow with payer = tx signer (agent), refund target = owner, payee = merchant |
-| `configure_escrow` | owner badge | — | none | `configure_escrow` | `fee_bps≤10000` |
+| `pay_via_escrow` | same as `pay` | same + escrow configured | vault → new Escrow, `amount` | `pay_via_escrow` | **same four checks + same daily counter** as `pay`; opens an Escrow with payer = the **owner's pubkey** (fifth review #1; was the agent signer), refund target = owner, payee = merchant, `timeout_epochs ≤ max_escrow_timeout` |
+| `configure_escrow` | owner badge | — | none | `configure_escrow` | `fee_bps≤10000`, `max_escrow_timeout>0`; records `owner_pubkey` as the escrow payer |
 | `set_limits` | owner badge | — | none | `set_limits` | caps ≥0 |
 | `add_merchant` / `remove_merchant` | owner badge | — | none | resp. | idempotent add |
 | `issue_agent_badge` | owner badge | — | none (mints a badge NFT) | `issue_agent_badge` | re-issuing a label clears its revoked flag; label uniqueness enforced by mint |
@@ -98,16 +98,17 @@ proof of that resource, checked *inside* the method (`authorize_session`).
 
 ## 2. Escrow (`templates/escrow/src/lib.rs`)
 
-Identity recorded at `new`: `payer` = tx signer, plus `payee`, optional `arbiter`, and the
-`payer_account` / `payee_account` / `treasury_account`. Access rules are `allow_all`; every method
-enforces identity internally.
+Identity recorded at `new`: an **explicit** `payer` argument (the funder names who may
+release/dispute — since the fifth review #1; it used to be the tx signer), plus `payee`, optional
+`arbiter`, and the `payer_account` / `payee_account` / `treasury_account`. Access rules are
+`allow_all`; every method enforces identity internally.
 
 | fn | legal caller | pre-state | funds move | event | notes |
 |----|--------------|-----------|------------|-------|-------|
-| `new` | anyone (becomes payer) | — | locks `funds` | — | `funds>0`, `timeout>0`, `fee_bps≤10000` |
-| `release` | payer, **or** anyone with the hashlock preimage | Open | fee → treasury, remainder → payee | `released` | preimage is a crypto condition, **not** a payment receipt (see trust note) |
-| `refund` | payer only | Open, `epoch≥deadline` | all → payer_account | `refunded` | no fee on refund |
-| `dispute` | payer or payee | Open | none | `disputed` | freezes to Disputed |
+| `new` | anyone (names the `payer`) | — | locks `funds` | — | `funds>0`, `0<timeout≤MAX_TIMEOUT_EPOCHS`, `fee_bps≤10000` |
+| `release` | payer, **or** anyone with the hashlock preimage | Open | fee → treasury, remainder → payee | `released` | preimage is a crypto condition, **not** a payment receipt (see trust note); state set before the external deposits (CEI) |
+| `refund` | **anyone** (destination is the fixed `payer_account`) | Open & `epoch≥deadline`, or Disputed & `epoch≥dispute_deadline` | all → payer_account | `refunded` | no fee on refund (fund-safety #3/#4 below) |
+| `dispute` | payer or payee | Open, **arbiter configured** | none | `disputed` | freezes to Disputed; sets `dispute_deadline` (fund-safety #3) |
 | `resolve` | the recorded arbiter only | **Disputed** | split: payee_net + fee + payer | `resolved` | `0≤to_payee≤balance`; fee on payee share only |
 | `get_state` / `get_info` | anyone (read) | — | none | — | read-only |
 

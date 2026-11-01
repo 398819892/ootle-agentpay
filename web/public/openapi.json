@@ -16,6 +16,7 @@
     { "name": "budget", "description": "Budget status (chain-derived)" },
     { "name": "merchants", "description": "The on-chain merchant whitelist" },
     { "name": "audit", "description": "Operator audit trail (admin)" },
+    { "name": "keys", "description": "API-key management: list + runtime revoke (admin)" },
     { "name": "meta", "description": "Discovery" }
   ],
   "paths": {
@@ -31,14 +32,14 @@
       "post": {
         "tags": ["payments"],
         "summary": "Make a capped payment",
-        "description": "Submits a payment to a whitelisted merchant. The on-chain AgentBudget enforces the per-tx cap, daily cap, whitelist and revoke; a violation comes back as a receipt with status `rejected`. Provide an `Idempotency-Key` header to make retries safe: a repeat with the same key never submits twice and returns the original receipt. Requires an agent or admin key.",
+        "description": "Submits a payment to a whitelisted merchant. The on-chain AgentBudget enforces the per-tx cap, daily cap, whitelist and revoke; a violation comes back as a receipt with status `rejected`. The `Idempotency-Key` header is REQUIRED (400 without it): a repeat with the same key never submits twice and returns the original receipt; the same key with different parameters is a 409 `idempotencyConflict`. Requires an agent or admin key.",
         "parameters": [
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": { "type": "string", "maxLength": 128 },
-            "description": "Client-chosen key that makes this payment idempotent. Strongly recommended."
+            "description": "Client-chosen key that makes this payment idempotent and becomes the payment id. Required — without it a retried request would pay twice."
           }
         ],
         "requestBody": {
@@ -54,9 +55,9 @@
           "201": { "description": "Confirmed on chain", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentResponse" } } } },
           "202": { "description": "Submitted, not yet confirmed (poll GET /payments/{id})", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentResponse" } } } },
           "402": { "description": "Rejected on chain (over a cap, not whitelisted, revoked, …) — still a receipt", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaymentResponse" } } } },
-          "400": { "description": "Bad request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "400": { "description": "Bad request (incl. a missing Idempotency-Key)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
           "401": { "description": "Missing/invalid API key", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-          "409": { "description": "No budget is open", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "No budget is open, or the Idempotency-Key was reused with different parameters (`idempotencyConflict: true`)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
           "423": { "description": "Dashboard frozen (kill switch)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
           "429": { "description": "Rate limited", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
         }
@@ -135,7 +136,7 @@
       "delete": {
         "tags": ["merchants"],
         "summary": "Remove a local merchant alias (admin)",
-        "description": "Removes the friendly name→address mapping. NOTE: this template has no on-chain whitelist-remove, so the address stays spendable on chain until the agent is revoked or a new budget is opened. See docs/api.md.",
+        "description": "Removes the friendly name→address mapping ONLY. The AgentBudget template does have an owner-badge `remove_merchant`, but this API/client do not expose it yet, so the address stays spendable on chain until `remove_merchant` is called directly, the agent is revoked, or a new budget is opened. See docs/api.md.",
         "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }],
         "responses": {
           "200": { "description": "Alias removed (with a note about on-chain scope)", "content": { "application/json": { "schema": { "type": "object" } } } },
@@ -151,6 +152,30 @@
         "responses": {
           "200": { "description": "Entries", "content": { "application/json": { "schema": { "type": "object", "properties": { "entries": { "type": "array", "items": { "type": "object" } } } } } } },
           "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/keys": {
+      "get": {
+        "tags": ["keys"],
+        "summary": "List API keys (admin)",
+        "description": "Secret-free metadata for every configured key: id, role and whether it has been revoked. Keys themselves are provisioned via the AGENTPAY_API_KEYS environment variable.",
+        "responses": {
+          "200": { "description": "Keys", "content": { "application/json": { "schema": { "type": "object", "properties": { "keys": { "type": "array", "items": { "$ref": "#/components/schemas/ApiKeyInfo" } } } } } } },
+          "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/keys/{id}/revoke": {
+      "post": {
+        "tags": ["keys"],
+        "summary": "Revoke an API key at runtime (admin)",
+        "description": "Flips the persisted revocation flag for the key id, so a leaked key is rejected immediately without an env edit + restart. The entry stays in AGENTPAY_API_KEYS; remove it there too on the next restart.",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Revoked", "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "string" }, "revoked": { "type": "boolean" }, "keys": { "type": "array", "items": { "$ref": "#/components/schemas/ApiKeyInfo" } } } } } } },
+          "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "No API key with that id", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
         }
       }
     }
@@ -229,12 +254,19 @@
         "type": "object",
         "properties": { "address": { "type": "string" }, "name": { "type": "string", "nullable": true } }
       },
+      "ApiKeyInfo": {
+        "type": "object",
+        "properties": { "id": { "type": "string" }, "role": { "type": "string", "enum": ["agent", "admin"] }, "revoked": { "type": "boolean" } }
+      },
       "Error": {
         "type": "object",
         "properties": {
           "error": { "type": "string" },
           "frozen": { "type": "boolean" },
-          "rateLimited": { "type": "boolean" }
+          "rateLimited": { "type": "boolean" },
+          "idempotencyConflict": { "type": "boolean" },
+          "confirmRequired": { "type": "boolean" },
+          "auditUnavailable": { "type": "boolean" }
         }
       }
     }

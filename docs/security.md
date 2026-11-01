@@ -21,9 +21,10 @@ Enforced **on chain** (a compromised client cannot bypass):
   settlement authorises against the recorded seller/buyer/arbiter identities. An optional
   **arbiter stake** (set by the owner via `set_arbiter_stake`) is required before an arbiter may
   `resolve`, and the owner can `slash_arbiter` a misbehaving arbiter's stake to the treasury. The
-  stake is **locked while a dispute names that arbiter**: `unstake_arbiter` is rejected if the caller
-  is the arbiter on any listing in `Disputed`, so an arbiter cannot dodge a slash by withdrawing
-  their collateral the moment a dispute lands (tested).
+  stake is **locked per deal from `take` onwards** (while a listing naming that arbiter is `Taken`
+  or `Disputed`): `unstake_arbiter` only returns the free portion, so an arbiter cannot dodge a slash
+  by withdrawing collateral before or during a dispute, and a stalled dispute **burns** that deal's
+  locked portion (tested). OtcBoard itself is **frozen** — see `docs/audit-notes.md`.
 
 **Fund-conservation invariant (all three templates).** Each template has a dedicated
 `tests/conservation.rs` that drives the real contract in the sandbox and asserts, over a deterministic
@@ -249,8 +250,8 @@ are tracked in **[`custody.md`](custody.md)**.
 ## Audit-prep checklist
 
 - [ ] Freeze template versions and record their published addresses + metadata hashes.
-- [ ] Run `cargo test` for all three templates (49 tests — Escrow 17, AgentBudget 14, OtcBoard 18)
-      and the SDK (`pytest`) in CI. Note the SDK suite does **not** cover the experimental
+- [x] Run `cargo test` for all three templates (99 tests — Escrow 26, AgentBudget 28, OtcBoard 45)
+      and the SDK (`pytest`) in CI (GitHub Actions, see `docs/ci.md`). Note the SDK suite does **not** cover the experimental
       `ootle_chain.OotlePyChain` adapter (unverified against a live indexer; has `NotImplementedError`
       stubs) — see `sdk/README.md`.
 - [ ] Run `examples/stress_devnet.py` with a high round count against a soak swarm.

@@ -75,6 +75,7 @@ AGENTPAY_API_KEYS="agent:bot1:sk_agent_<32+hex>, admin:ops:sk_admin_<32+hex>"
 | `POST /budgets` (open/fund a budget) | — | ✅ |
 | `POST /merchants`, `DELETE /merchants/:name` | — | ✅ |
 | `GET /audit` | — | ✅ |
+| `GET /keys`, `POST /keys/:id/revoke` | — | ✅ |
 
 An agent key hitting an admin endpoint gets **HTTP 403** (and the denial is audited). High-risk
 admin operations (open budget, register merchant) are still subject to the backend's custody
@@ -85,10 +86,12 @@ itself the strong, out-of-band credential** that authorizes them — see
 
 ### Revoking a key
 
-Add the key's `id` to `store.apiKeys.revoked` (persisted in the state file) — e.g. remove the key
-from `AGENTPAY_API_KEYS` and restart, or revoke at runtime via the backend's `apiKeys.revoke(id)`.
-A revoked key is rejected even though it is still syntactically valid. (A convenience admin endpoint
-for revocation is a planned follow-up — see [Out of scope](#out-of-scope-todo).)
+At runtime, with an admin key: `POST /api/v1/keys/<id>/revoke` (and `GET /api/v1/keys` to list
+`{ id, role, revoked }` for every configured key — never the secrets). The revocation is persisted
+in the state file (`store.apiKeys.revoked`), so it survives a restart; a revoked key is rejected even
+though it is still syntactically valid. Removing the key from `AGENTPAY_API_KEYS` and restarting
+also works. Issuing or rotating keys over HTTP is still out of scope (below) — the key list lives in
+the environment.
 
 ---
 
@@ -96,11 +99,13 @@ for revocation is a planned follow-up — see [Out of scope](#out-of-scope-todo)
 
 - **Amounts** are base-unit integers passed as **decimal strings** (BigInt-safe): `"250"`, not `250`.
   Values can exceed 2^53, so always send and compare them as strings.
-- **Payment id** = the **idempotency key**. Send an `Idempotency-Key` header (recommended) and that
-  becomes the id; otherwise the server derives a stable id from the invoice. Re-sending the same key
-  **never submits a second chain transaction** — you get the original receipt back with
-  `"replayed": true`. This is the failure-recovery contract: if your request times out, just retry
-  with the same key.
+- **Payment id** = the **idempotency key**. `POST /payments` **requires** an `Idempotency-Key`
+  header (HTTP 400 without one): it becomes the payment id, and re-sending the same key **never
+  submits a second chain transaction** — you get the original receipt back with `"replayed": true`.
+  This is the failure-recovery contract: if your request times out, just retry with the same key.
+  (Without the header a retried request would get a fresh server-generated invoice id and pay
+  twice, which is why it is mandatory.) The same key with **different** parameters is a hard
+  `409 idempotencyConflict`, never a silent replay.
 - **`invoiceId`** (optional) must match `^[a-z0-9]{8,32}$`; the server generates one if omitted.
 
 ---
@@ -115,7 +120,7 @@ Lists the endpoints, whether the API is enabled, and the spec URL.
 ### `GET /api/v1/openapi.json` — OpenAPI 3.0 spec (no auth)
 
 ### `POST /api/v1/payments` — make a capped payment  *(agent)*
-Headers: `Idempotency-Key` (recommended). Body:
+Headers: `Idempotency-Key` (**required**). Body:
 
 ```json
 { "merchant": "shop", "amount": "250", "memo": "order #4821", "invoiceId": "optional", "agentTag": "optional" }
@@ -141,8 +146,9 @@ Response — a **receipt**, with an HTTP status that reflects the chain verdict:
 }
 ```
 
-Other statuses: `400` bad request · `401` missing/invalid key · `409` no budget open · `423` frozen
-(kill switch) · `429` rate limited.
+Other statuses: `400` bad request (incl. a missing `Idempotency-Key`) · `401` missing/invalid key ·
+`409` no budget open, or the same `Idempotency-Key` reused with different parameters
+(`idempotencyConflict`) · `423` frozen (kill switch) · `429` rate limited.
 
 ### `GET /api/v1/payments` — list receipts  *(agent)*
 `{ "payments": [ Receipt, … ] }`.
@@ -180,6 +186,13 @@ revoke the agent or open a new budget. The response says so explicitly.
 ### `GET /api/v1/audit?limit=100` — audit trail  *(admin)*
 Recent append-only audit entries (secrets redacted). Every state-changing API call, and every denial
 (bad key, insufficient role, frozen, rate-limited), is recorded with the acting key's `id`.
+
+### `GET /api/v1/keys` — list API keys  *(admin)*
+`{ "keys": [ { "id", "role", "revoked" } ] }` — metadata only, never a secret.
+
+### `POST /api/v1/keys/:id/revoke` — revoke a key at runtime  *(admin)*
+Flips the persisted revocation flag for `id` (404 if no such key is configured). Returns the updated
+key list. The entry stays in `AGENTPAY_API_KEYS`; remove it there too when you next restart.
 
 ---
 
@@ -226,11 +239,14 @@ chain's as truth.
 
 ## Known limitations
 
-- **No on-chain whitelist removal.** The current AgentBudget template exposes `add_whitelist` but no
-  remove. `DELETE /merchants/:name` therefore only drops the local friendly-name alias; to actually
-  stop payments to an address, `revoke` the agent or open a new budget. (Tracked for the template.)
-- **No cap change in place.** Changing `perTxCap`/`dailyCap` means opening a new budget; there is no
-  update-caps endpoint because the template has no such method.
+- **No on-chain whitelist removal through this API.** The AgentBudget template does have an
+  owner-badge `remove_merchant` method, but neither the TS client nor this API exposes it yet, so
+  `DELETE /merchants/:name` only drops the local friendly-name alias — the address stays spendable on
+  chain. To actually stop payments to an address today: call `remove_merchant` directly with the
+  owner badge, `revoke` the agent, or open a new budget. (Exposing `remove_merchant` is a client +
+  API follow-up, not a template change.)
+- **No cap change through this API.** The template has an owner-badge `set_limits`, but the client /
+  API do not expose it yet; changing `perTxCap`/`dailyCap` currently means opening a new budget.
 - **Keep the client and the deployed template in step.** `pay` is driven by a transaction manifest,
   so the client (SDK / TS / web) must match the AgentBudget template deployed on the swarm. A real
   confirmed payment on the current multi-session template **is** exercised end-to-end — `POST
@@ -250,9 +266,13 @@ Deliberately not in this round; the surface is versioned so these can land witho
 - **Per-key rate limits & quotas** (today the backend throttles per actor globally; there is no
   per-key spend quota beyond the on-chain caps).
 - **Webhooks / callbacks** on payment settlement (today clients poll `GET /payments/:id`).
-- **Key rotation & a self-serve key-management API** (issue/rotate/revoke keys over HTTP, key
-  expiry). Revocation today is via the persisted revocation set.
+- **Key rotation & a self-serve key-management API** (issue/rotate keys over HTTP, key expiry).
+  Listing and **revoking** keys over HTTP exists (`GET /keys`, `POST /keys/:id/revoke`); issuing new
+  ones still means editing `AGENTPAY_API_KEYS` and restarting.
 - **Fine-grained scopes** beyond `agent`/`admin` (e.g. per-merchant or per-amount keys).
 - **Cursor pagination** on `GET /payments` and `GET /audit` (today both return a bounded recent set).
 - **A separate signing microservice** so the web box holds no keys at all (see
   [docs/custody.md](custody.md) — the target custody architecture).
+- **API key → on-chain session mapping.** Every agent key pays through the budget's `"default"`
+  session badge today, so a single key cannot be cut off on chain with `revoke_session` — use the
+  runtime key revoke above (server-side) or the budget's global `revoke`.

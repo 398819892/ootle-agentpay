@@ -200,6 +200,13 @@ export class OnChainBudget {
   component: string | null = null;
   ownerBadge: string | null = null;
   agentBadge: string | null = null;
+  /**
+   * The resource the budget is denominated in. `"XTR"` (the native test token) by default so the
+   * devnet flow is unchanged; a non-XTR budget passes a `resource_…` address to `open` (the template
+   * itself is resource-agnostic — it locks whatever it is funded with). `topUp` reuses it. Mirrors
+   * the Python SDK's `OnChainBudget.resource`.
+   */
+  resource: string = XTR;
   // Caps and running spend are base-unit integers held as decimal strings (exact beyond 2^53).
   perTxCap = "0";
   dailyCap = "0";
@@ -225,20 +232,32 @@ export class OnChainBudget {
   }
 
   // -- owner -----------------------------------------------------------------------
+  /**
+   * Manifest expression for the budget's resource: the `XTR` keyword for the native token, else a
+   * strictly-validated `address!("resource_…")` — so the resource never reaches the manifest as a raw
+   * string splice (same injection guard as every other spliced value).
+   */
+  private resourceArg(): string {
+    return this.resource === XTR ? "XTR" : `address!("${checkResource(this.resource)}")`;
+  }
+
   async open(params: {
     fund: AmountInput;
     perTxCap: AmountInput;
     dailyCap: AmountInput;
     epochsPerWindow: number;
     whitelist: string[];
+    /** Resource to fund the budget with: `"XTR"` (default) or a `resource_…` address. */
+    resource?: string;
   }): Promise<this> {
     const { fund, perTxCap, dailyCap, epochsPerWindow, whitelist } = params;
+    this.resource = params.resource ?? XTR;
     const wl = whitelist.map((m) => `address!("${checkComponent(m)}")`).join(", ");
     const manifest =
       `use ${checkTemplate(this.budgetTemplate)} as AgentBudget;\n` +
       "fn main() {\n" +
       '    let mut owner = var!["owner"];\n' +
-      `    let funds = owner.withdraw(XTR, amount!(${amt(fund)}));\n` +
+      `    let funds = owner.withdraw(${this.resourceArg()}, amount!(${amt(fund)}));\n` +
       `    let (comp, owner_badge, agent_badge) = AgentBudget::new(` +
       `funds, amount!(${amt(perTxCap)}), amount!(${amt(dailyCap)}), ${Math.floor(epochsPerWindow)}u64, [${wl}]);\n` +
       "    owner.deposit(owner_badge);\n" +
@@ -373,7 +392,7 @@ export class OnChainBudget {
     const manifest =
       "fn main() {\n" +
       '    let mut funder = var!["funder"];\n' +
-      `    let funds = funder.withdraw(XTR, amount!(${amt(amount)}));\n` +
+      `    let funds = funder.withdraw(${this.resourceArg()}, amount!(${amt(amount)}));\n` +
       '    let mut budget = var!["budget"];\n' +
       "    budget.top_up(funds);\n" +
       "}\n";

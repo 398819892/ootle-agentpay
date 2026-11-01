@@ -16,12 +16,12 @@ State: `Open → Released | Refunded | Disputed → Resolved`. Works with any re
 |---|---|---|
 | `new(funds, payer, payer_account, payee_account, payee, arbiter?, treasury_account, hashlock?, timeout_epochs, fee_bps) -> Component` | funder | Lock `funds`; record `payer` **explicitly** (who may release/dispute), not the signer — lets a cross-template caller set the owner as payer. `timeout_epochs ≤ MAX_TIMEOUT_EPOCHS`. |
 | `release(preimage?)` | payer **or** valid preimage holder | Pay payee `amount − fee`; `fee` → treasury. → Released |
-| `refund()` | payer, at/after deadline | Return all funds to payer_account. → Refunded |
-| `dispute()` | payer or payee | Freeze. → Disputed |
+| `refund()` | **anyone**, from `Open` at/after `deadline_epoch`, or from `Disputed` at/after `dispute_deadline` | Return all funds to the fixed `payer_account` (key-loss recovery; a caller can never redirect it). → Refunded |
+| `dispute()` | payer or payee; **only if an arbiter is configured** | Freeze; sets `dispute_deadline = now + timeout_epochs`. → Disputed |
 | `resolve(to_payee_amount)` | arbiter | Split: payee gets `to_payee_amount − fee`, payer the rest. → Resolved |
-| `get_state() / get_info()` | anyone | Read state / `(state, balance, deadline, fee_bps)`. |
+| `get_state() / get_info() / get_parties()` | anyone | Read state / `(state, balance, deadline, fee_bps)` / `(payer, payee, arbiter, payee_account, payer_account)` — a payee should check `get_parties` before delivering. |
 
-Fee = `amount * fee_bps / 10000` (0..=10000), charged on the payee's payout.
+Fee = `amount * fee_bps / 10000` (0..=10000, computed overflow-safely), charged on the payee's payout.
 
 ---
 

@@ -60,7 +60,7 @@ All via environment variables.
 | `AGENTPAY_BUDGET_TEMPLATE` | yes | esmeralda AgentBudget template (below). |
 | `AGENTPAY_OWNER_ACCOUNT` | yes | Funded owner account name (`dev` on esmeralda). |
 | `AGENTPAY_STATE_FILE` | no | Path to the runtime state file (mount a volume for persistence). |
-| `PORT` / `HOST` | no | Default `8787` / `0.0.0.0`. |
+| `PORT` / `HOST` | no | Default `8787` / `127.0.0.1` (loopback). The Docker image sets `HOST=0.0.0.0`; any non-loopback bind requires `DASHBOARD_PASSWORD` and a distinct `AGENTPAY_ADMIN_PASSWORD`, otherwise the server refuses to start. |
 | `SESSION_TTL_HOURS` | no | Session lifetime (default 12). |
 | `LOGIN_MAX_FAILS` / `LOGIN_LOCK_MINUTES` | no | Login throttle (default 8 fails → 10 min lock, per IP). |
 

@@ -1,7 +1,7 @@
 # Ootle AgentPay — 项目交接 (HANDOFF)
 
 > 目的：换一台电脑、开一个新会话，也能独立把这个项目接着往下做。
-> 写于 2026-11-01，对应 `master @ eac1c6c`。看完这份 + `README.md` + `docs/` 就够上手。
+> 写于 2026-11-01，对应 `master @ eac1c6c`；2026-11-01 晚在新机器（`Y:\公用1\oolte`）续写，见 §6。看完这份 + `README.md` + `docs/` 就够上手。
 
 ---
 
@@ -132,6 +132,10 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
   对应 `.js` 一起提交，否则跑的还是旧逻辑（web CI 的 server 也加载committed dist）。
 - **`wsl bash -lc '...'` 里 for 循环变量 `$f` 不展开**：别用循环，显式逐条命令。
 - CRLF 警告是换行规范化，无害。
+- **仓库放在网络盘（WebDAV/RaiDrive 的 `Y:`）时**：git 要先 `git config --global --add safe.directory <路径>`（UNC 和盘符两种都加）；
+  WSL 翻译不了 `Y:` 路径，进不去这个仓库；**不要在网络盘上 `npm install`/`tsc`**（和 /mnt 9p 一样会把 `node_modules`
+  读花，tsc 报 undici-types 语法错误）——把 `clients/ts/src` + `package.json` + `tsconfig.json` 拷到本地盘（如临时目录）
+  构建，再把 `dist/*.js` + `*.d.ts`（排除 `*.test.*`）拷回。Python/Node 测试在 Windows 原生直接跑没问题。
 
 ---
 
@@ -153,9 +157,24 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
 
 ## 6. 待办 + 评审历史
 
-**仍未做（第 7 轮评审唯一剩项）**：
-- **#8 / phase-1**：把 SDK 里 `BudgetManager` / `AgentWallet` / `OotlePyChain` 标记为实验性
-  （从 `__all__` 移除 + 加说明）。纯接口整洁，低风险。
+**第 7 轮评审的所有项已完成。** 2026-11-01（新机器）这一批做了：
+- **#8 / phase-1 ✅**：`BudgetManager` / `AgentWallet`（及 `OpenResult`/`PaymentProof`/`SweepResult`）从 SDK `__all__` 移除，
+  `agentpay.EXPERIMENTAL` 列出实验性名字，`budget.py` / `ootle_chain.py` 顶部加 EXPERIMENTAL 说明，`sdk/README.md` 重写
+  （改掉 "Private stablecoin" 定位、`>=3.13` 安装要求、不存在的 `tools.py`）；新增 `sdk/tests/test_public_api.py`。
+- **TS 客户端资源参数化**（与 Python 对齐）：`open({ resource })` / `topUp` 用 `XTR` 或校验过的 `address!("resource_…")`；
+  新增 `budget.resource.test.ts`；dist 已重建。
+- **文档对齐代码**：README/ci.md 的"尚未激活 GitHub Actions"改为已在跑 + 测试计数更新；api.md/openapi.json 补上
+  `Idempotency-Key` 必填、`/api/v1/keys` 列表与撤销端点、白名单移除的真实限制（模板有 `remove_merchant`，是客户端/API 没暴露）；
+  web README/DEPLOYMENT 的 HOST 默认改为 `127.0.0.1`；MCP README 的默认模式改为 attach（provision 需 `AGENTPAY_AUTO_PROVISION=true`）；
+  interfaces.md 的 Escrow `refund`/`dispute` 行、custody.md 的 badge 顺序、security.md 测试数、audit-notes §1/§2 表格的过时格子。
+- TS 客户端 README 许可证 MIT → BSD-3-Clause。
+
+**仍待办（需要人拍板/链环境）**：
+- 三个模板 `lib.rs` 的版权头仍是 `Copyright 2026 The Tari Project`（上游模板遗留）——要换成项目所有者的名字，**需你提供**。
+- `remove_merchant` / `set_limits` 模板已有，但 TS 客户端、仪表盘、`/api/v1` 都没暴露（api.md 已如实写明）；
+  API key → 链上会话映射（每 key 一个 session badge）也未做。
+- esmeralda 上重发当前 `agent_budget`（公网 indexer 拥堵阻塞，见 §3.3）。
+- 新机器的 WSL 是空的（没有 `/root/ootle`、cargo、tari、swarm），模板 `cargo test` / `make ci` 要先按 §2 重搭，或信 GitHub CI。
 
 **已完成**：7 轮外部评审的真实 bug 已逐条修复并带攻击场景回归测试（合约授权/资金、提交模糊性、
 幂等、部署加固、OTC 冻结、非托管部署、许可证统一 BSD-3、仪表盘链为权威、集成 API、稳定性 harness、

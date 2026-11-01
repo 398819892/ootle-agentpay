@@ -197,8 +197,11 @@ On every `/api/state`, the displayed figures are derived from chain, not accumul
 | **window / reset ETA** | component epochs + current epoch (`windowStatus`) |
 
 The AgentBudget component state is a positional array
-`[vault, agentBadgeRes, ownerBadgeRes, perTxCap, dailyCap, spentInWindow, windowStartEpoch,
-epochsPerWindow, [whitelist…], revoked, …]`; the vault is a child substate read for its balance.
+`[vault, ownerBadgeRes, agentBadgeRes, perTxCap, dailyCap, spentInWindow, windowStartEpoch,
+epochsPerWindow, [whitelist…], revoked, revokedSessions, escrow…]` (struct order; the two badge
+resources are read by position — owner first, then agent — never by address sort order); the vault
+is a child substate read for its balance. The parse is position-pinned and type-checked in
+`web/server/substate.js` and throws on layout drift instead of returning wrong numbers.
 Each response carries a `budget.source` map stating whether each figure came from `chain` or a
 `cache` fallback, so a reviewer (and the UI) can see what is authoritative. Only the **historical**
 `funded` / `withdrawn` totals and the **payment ledger** come from the journal — because the chain

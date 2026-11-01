@@ -3,9 +3,9 @@
 This repo ships two layers of CI that run the **same** suites:
 
 1. **Local one-command CI** — `make ci` (or `make test`), usable right now.
-2. **GitHub Actions** — [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), **prepared but not yet
-   activated** (there is no GitHub remote yet). It will run automatically on the first push once a
-   remote is added. It has never run on GitHub, so it is *correct-by-construction*, not *CI-verified*.
+2. **GitHub Actions** — [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), **active** on
+   [github.com/398819892/ootle-agentpay](https://github.com/398819892/ootle-agentpay): six jobs
+   (templates ×3 / sdk / web / ts-client) run on every push and pull request.
 
 Everything must run on **Linux / WSL Ubuntu**: the Tari engine's template test tooling pins
 wasmer's cranelift backend, which does not build on Windows or macOS (see
@@ -17,12 +17,12 @@ wasmer's cranelift backend, which does not build on Windows or macOS (see
 
 | Suite | Command | What it checks | Tests |
 |---|---|---|---|
-| `templates/escrow` | `cargo test` | Escrow lock/release/refund/dispute/resolve + fee, adversarial/boundary cases | **17** |
-| `templates/agent_budget` | `cargo test` | AgentBudget per-tx / daily caps, whitelist, revoke, multi-session badges, top-up, set-window | **14** |
-| `templates/otc_board` | `cargo test` | OTC list→take→confirm, arbiter stake/slash, the unstake-during-dispute guard | **18** |
-| `sdk` | `pytest` | Business logic + the stdlib JSON-RPC adapter (`agentpay.onchain`): policy, invoices, manifests, event decoding, badge resolution from component state | **~47** |
-| `web` | `node server/security.test.js` | The dashboard's web-security boundary end-to-end (auth, CSRF, CORS, headers, session, IP lockout) | **22** |
-| `clients/ts` | `tsc` build | A clean type-checked compile of the zero-dependency TS client (it has no unit tests) | build |
+| `templates/escrow` | `cargo test` | Escrow lock/release/refund/dispute/resolve + fee, authz, conservation fuzz, adversarial/boundary cases | **26** |
+| `templates/agent_budget` | `cargo test` | AgentBudget per-tx / daily caps, whitelist, revoke, multi-session badges, top-up, set-window, the escrow-route bypass suite, conservation fuzz | **28** |
+| `templates/otc_board` (frozen) | `cargo test` | OTC list→take→confirm, authz/state-machine, arbiter stake lock/burn, fee snapshot, conservation fuzz | **45** |
+| `sdk` | `pytest` | The stdlib JSON-RPC adapter (`agentpay.onchain`): manifests, injection guard, event decoding, badge resolution, non-custodial auth, resource parametrization; plus the chain-agnostic helpers and the public-API surface | **69** (+5 in `test_keys.py` with `ootle-py`) |
+| `web` | `node server/*.test.js` | security boundary (22) · audit durability (9) · step-up token binding (10) · strict substate parse (15) · reads not blocked by writes (3) · reconcile of an ambiguous open (7) | **66** |
+| `clients/ts` | `tsc` build + `node --test dist/*.test.js` | A clean type-checked compile of the zero-dependency TS client, then its manifest-injection, event-topic and resource-parametrization suites | build + **13** |
 | `e2e (real chain)` | `make e2e` / `RUN_E2E=1` | **Integration, opt-in:** opens a budget and makes a *confirmed* payment against a **live swarm**, asserting funds moved (vault down, merchant up). Guards "unit-green but real pay rejected". | 1 |
 
 Template unit tests run the compiled template **in wasmer in-process** — no chain, no swarm. The web
@@ -57,15 +57,22 @@ It runs every suite, prints progress, and ends with a single summary + counts:
 ```
 ──────────────────────────── SUMMARY ────────────────────────────
   SUITE                          STATUS   TESTS
-  templates/escrow               PASS     17
-  templates/agent_budget         PASS     14
-  templates/otc_board            PASS     18
-  sdk (pytest)                   PASS     46
-  web (node security test)       PASS     22
+  templates/escrow               PASS     26
+  templates/agent_budget         PASS     28
+  templates/otc_board            PASS     45
+  sdk (pytest)                   PASS     69
+  web (security)                 PASS     22
+  web (audit)                    PASS     9
+  web (stepup)                   PASS     10
+  web (substate)                 PASS     15
+  web (concurrency)              PASS     3
+  web (reconcile)                PASS     7
   clients/ts (tsc build)         PASS     build ok
+  e2e (real chain)               SKIP     set RUN_E2E=1 to run (needs a local swarm)
   ----------------------------------------------------------------
-  6/6 suites green · 117 tests passed
+  11/11 suites green · 234 tests passed
 ```
+(Counts as of 2026-11-01; the script prints whatever the suites report, so treat these as indicative.)
 
 The script exits non-zero if any suite fails, so it drops straight into a git hook or a terminal `&&`
 chain.
@@ -111,7 +118,7 @@ make test-ts          # tsc build
 
 ---
 
-## 2. GitHub Actions (prepared, awaiting a remote)
+## 2. GitHub Actions
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) defines four parallel jobs on
 `ubuntu-latest`, triggered on every `push`, every `pull_request`, and manually
@@ -122,20 +129,10 @@ make test-ts          # tsc build
   `cargo test`.
 - **sdk** — Python 3.13, `pip install -e sdk[dev]` (pulls `ootle-py` so `test_keys.py` runs too), then
   `pytest`. Pip cache enabled.
-- **web** — Node 20, `node server/security.test.js` (zero install).
-- **ts-client** — Node 20, `npm install` + `npm run build`, then asserts `dist/index.js` exists.
+- **web** — Node 20, all six `web/server/*.test.js` suites (zero install).
+- **ts-client** — Node 20, `npm install` + `npm run build`, asserts `dist/index.js` exists, then
+  `node --test dist/*.test.js`.
 
-**It has not run on GitHub.** There is no remote yet, so this is correct-by-construction and will
-first execute on the initial push. Do not read a green badge into it until that push happens.
-
-### Activating it
-
-```bash
-git remote add origin <your-github-remote>
-git push -u origin main
-```
-
-Actions picks up `.github/workflows/ci.yml` automatically — no extra configuration. If `ootle-py`
-cannot be resolved on the runner, drop the `[dev]`/install step for the `sdk` job and run pytest with
-`--continue-on-collection-errors` (exactly what the local CI does on Python 3.12), as noted in the
-workflow's inline comments.
+The remote is `origin = https://github.com/398819892/ootle-agentpay.git`; the workflow has run green
+there. The `sdk` job already skips `tests/test_keys.py` (it needs `ootle-py`), as the workflow's inline
+comments explain.

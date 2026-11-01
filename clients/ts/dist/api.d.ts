@@ -10,7 +10,6 @@
  *
  * Node 18+ (global fetch) or any modern browser. Zero runtime dependencies.
  */
-/// <reference types="node" />
 export type ApiRole = "agent" | "admin";
 export interface Receipt {
     id: string;

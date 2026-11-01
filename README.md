@@ -51,7 +51,9 @@ addresses and the deployment method are in [`docs/esmeralda.md`](docs/esmeralda.
 The existing `ootle-agentpay` SDK gains `agentpay.onchain` (`OnChainBudget` / `WalletdClient`): a
 stdlib-only adapter that drives the `AgentBudget` template through a wallet daemon's JSON-RPC
 (transaction manifests). The invoice/memo codec is unchanged (rides along as the on-chain memo);
-a watcher rebuilds the local ledger from the chain's `pay` events.
+a watcher rebuilds the local ledger from the chain's `pay` events. The older phase-1 client-side
+model (`agentpay.budget`) and the `ootle-py` adapter (`agentpay.ootle_chain`) are **experimental**
+and excluded from the package's `__all__` — see [`sdk/README.md`](sdk/README.md).
 
 ### Quick start
 
@@ -94,9 +96,9 @@ make ci        # or: make test   (same thing).  From Windows: wsl -d Ubuntu-24.0
 
 It builds in native-ext4 warm dirs (first run is a cold build; later runs are seconds) and **touches
 no running swarm**. A GitHub Actions workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml))
-mirrors these suites on `ubuntu-latest`; it is **prepared but not yet activated** — there is no GitHub
-remote yet, so it is correct-by-construction and will run on the first push. Full details, per-suite
-coverage, and the warm-dir mechanics are in [`docs/ci.md`](docs/ci.md).
+mirrors these suites on `ubuntu-latest` — six jobs (templates ×3 / sdk / web / ts-client) run on every
+push to [github.com/398819892/ootle-agentpay](https://github.com/398819892/ootle-agentpay). Full details,
+per-suite coverage, and the warm-dir mechanics are in [`docs/ci.md`](docs/ci.md).
 
 ### Status & verification
 
@@ -160,7 +162,8 @@ Escrow 与 AgentBudget 都已部署到本地链**以及公共测试网 esmeralda
 
 现有的 `ootle-agentpay` SDK 新增了 `agentpay.onchain`（`OnChainBudget` / `WalletdClient`）：纯标准库
 适配器，通过钱包守护进程的 JSON-RPC（交易 manifest）驱动 `AgentBudget` 模板。发票/备注编解码不变
-（原样作为链上 memo）；监听器从链上 `pay` 事件重建本地账本。
+（原样作为链上 memo）；监听器从链上 `pay` 事件重建本地账本。旧的 phase-1 客户端侧模型（`agentpay.budget`）
+和 `ootle-py` 适配器（`agentpay.ootle_chain`）为**实验性**，已从包的 `__all__` 中移除——见 [`sdk/README.md`](sdk/README.md)。
 
 ### 快速开始
 
@@ -197,8 +200,8 @@ make ci        # 或 make test（等价）。Windows 上：wsl -d Ubuntu-24.04 -
 ```
 
 脚本在原生 ext4 的「热目录」里构建（首次冷编译较慢，之后几秒），且**不碰正在运行的 swarm**。
-GitHub Actions 工作流（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）在 `ubuntu-latest` 上镜像这些套件，
-**已就绪但尚未激活**——目前还没配 GitHub 远程，所以它是 correct-by-construction，连上远程后首次 push 自动生效。
+GitHub Actions 工作流（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）在 `ubuntu-latest` 上镜像这些套件：
+六个 job（templates ×3 / sdk / web / ts-client），每次 push 到 [github.com/398819892/ootle-agentpay](https://github.com/398819892/ootle-agentpay) 自动运行。
 完整说明、各套件覆盖范围与热目录机制见 [`docs/ci.md`](docs/ci.md)。
 
 ### 直观上手（推荐先玩这两个）

@@ -1,4 +1,4 @@
-"""Real ChainPort backed by ootle-py.
+"""Real ChainPort backed by ootle-py — EXPERIMENTAL / UNVERIFIED (NOT the supported path).
 
 STATUS: written against ootle-py 0.2.0's public API (verified by reading its source
 and README — see docs/00-api-notes.md) but NOT exercised against a live indexer. The

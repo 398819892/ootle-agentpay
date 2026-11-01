@@ -1,4 +1,10 @@
-"""Private session budgets.
+"""Private session budgets — EXPERIMENTAL phase-1 model (NOT the supported path).
+
+STATUS: this module is the original client-side-policy design and is kept only for the offline
+demo (`examples/demo_offline.py`) and its FakeChain tests. It is NOT exported from the package
+`__all__`, has never been run against a live chain, and its per-tx cap / allowlist / expiry are
+enforced by this SDK only — a compromised agent process can ignore them. The supported path is
+`agentpay.onchain.OnChainBudget`, where every limit is enforced on chain by the AgentBudget template.
 
 Model (phase 1, works with ootle-py today, no on-chain conditions needed):
 

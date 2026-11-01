@@ -19,3 +19,4 @@
 - [合约安全审计 pass](contract-audit-pass.md) — 三模板逐函数授权/资金审计(无新漏洞)+ pay_via_escrow 不能绕过预算限额的跨产品测试 + docs/audit-notes.md
 - [Manifest 注入修复](manifest-injection-fix.md) — #7：manifest builder 底层强制校验(memo 拒危险字符非转义/地址严格正则)+注入被拒测试;#9 memo 注释改正
 - [事件 topic 命名空间](event-topic-namespacing.md) — 引擎把 topic 改成 "AgentBudget.pay";裸 "pay" 过滤会丢掉所有付款→账本空(commit eac1c6c,含 reconcile backfill)
+- [本机环境 (Y 盘 WebDAV)](machine-y-drive-env.md) — 2026-11-01 起项目在 Y:\公用1\oolte（RaiDrive WebDAV 挂载），git 要加 safe.directory；网络盘上 npm install 会损坏 node_modules，TS 在本地盘构建；本机 WSL 是空的，没有 /root/ootle 私链环境

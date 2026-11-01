@@ -15,7 +15,9 @@
  * are estimates, not guarantees.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.windowStatus = exports.formatEta = exports.EPOCH_MINUTES = void 0;
+exports.EPOCH_MINUTES = void 0;
+exports.formatEta = formatEta;
+exports.windowStatus = windowStatus;
 /** Approximate wall-clock length of one Ootle epoch. Used ONLY for the "≈" estimate below. */
 exports.EPOCH_MINUTES = 30;
 /** Format an approximate duration in minutes as an honest "≈…" string. */
@@ -29,7 +31,6 @@ function formatEta(minutes) {
     const rem = m % 60;
     return rem === 0 ? `≈${h}h` : `≈${h}h ${rem}m`;
 }
-exports.formatEta = formatEta;
 /**
  * Turn raw on-chain window state into friendly, honest numbers. Pure; never throws for ordinary
  * inputs (negative/zero values are clamped defensively).
@@ -60,4 +61,3 @@ function windowStatus(info) {
         epochMinutes: exports.EPOCH_MINUTES,
     };
 }
-exports.windowStatus = windowStatus;

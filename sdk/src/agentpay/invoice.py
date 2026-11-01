@@ -8,7 +8,7 @@ into the event payload as-is, so never put a secret in it (see docs/security.md:
 metadata, not a secret."). Ootle Message memos are UTF-8 up to 253 bytes.
 
 The challenge is OUR OWN format ("ootle-invoice-v1"), not standard x402: standard x402
-clients only understand EVM/Solana settlement. A thin adapter is provided in tools.py.
+clients only understand EVM/Solana settlement, so an integrator needs a small adapter of their own.
 (The scheme is deliberately NOT named "stealth" — this memo/flow is public plaintext, see above.)
 """
 from __future__ import annotations

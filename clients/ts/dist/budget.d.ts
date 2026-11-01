@@ -28,6 +28,13 @@ export declare class OnChainBudget {
     component: string | null;
     ownerBadge: string | null;
     agentBadge: string | null;
+    /**
+     * The resource the budget is denominated in. `"XTR"` (the native test token) by default so the
+     * devnet flow is unchanged; a non-XTR budget passes a `resource_…` address to `open` (the template
+     * itself is resource-agnostic — it locks whatever it is funded with). `topUp` reuses it. Mirrors
+     * the Python SDK's `OnChainBudget.resource`.
+     */
+    resource: string;
     perTxCap: string;
     dailyCap: string;
     whitelist: string[];
@@ -37,12 +44,20 @@ export declare class OnChainBudget {
     sessions: string[];
     revokedSessions: string[];
     constructor(client: WalletdClient, budgetTemplate: string, ownerAccount: string, opts?: OnChainBudgetOptions);
+    /**
+     * Manifest expression for the budget's resource: the `XTR` keyword for the native token, else a
+     * strictly-validated `address!("resource_…")` — so the resource never reaches the manifest as a raw
+     * string splice (same injection guard as every other spliced value).
+     */
+    private resourceArg;
     open(params: {
         fund: AmountInput;
         perTxCap: AmountInput;
         dailyCap: AmountInput;
         epochsPerWindow: number;
         whitelist: string[];
+        /** Resource to fund the budget with: `"XTR"` (default) or a `resource_…` address. */
+        resource?: string;
     }): Promise<this>;
     /**
      * Recover the budget this instance opened from a CONFIRMED open-tx result, when the open itself

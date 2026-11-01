@@ -143,6 +143,8 @@ console.log(budget.spent, budget.ledger);
 | `.dryRun` / `.run` | same | `run` submits for real and polls `get_result` |
 | `OnChainBudget(client, template, owner, {agentAccount?})` | `OnChainBudget` | agent defaults to owner (devnet) |
 | `.open` / `.pay` / `.payInvoice` / `.wouldReject` / `.revoke` / `.withdraw` / `.addMerchant` | same | all `async` |
+| `.open({ …, resource? })` / `.topUp` | `open(resource=…)` / `top_up` | the budget's resource: `"XTR"` (default) or a `resource_…` address, reused by `topUp` |
+| `.issueAgentBadge` / `.revokeSession` / `.setWindow` | `issue_agent_badge` / `revoke_session` / `set_window` | multi-session badges + the rolling window |
 | `.readWindow()` | — (TS-only helper) | reads the live rolling-window status from chain |
 | `WalletdClient.currentEpoch()` | — (TS-only helper) | current chain epoch (via `settings.get`) |
 | `WalletdClient.getSubstate(id)` | — (TS-only helper) | read a component/resource substate (read-only) |
@@ -185,4 +187,4 @@ first). `EPOCH_MINUTES` (30) is exported so callers can show the assumption.
 
 ## License
 
-MIT.
+BSD-3-Clause (the whole repository uses one licence).

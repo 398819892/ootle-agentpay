@@ -46,8 +46,8 @@ Then open **http://localhost:8787**.
 > wsl bash /mnt/f/oolte/web/run.sh
 > ```
 >
-> The server binds `0.0.0.0`, so the Windows browser reaches it at `http://localhost:8787` via
-> WSL2's localhost forwarding. (Unlike `clients/ts`, this app installs nothing, so the known
+> The server binds `127.0.0.1` by default; WSL2's localhost forwarding still reaches a
+> loopback-bound WSL server, so the Windows browser opens `http://localhost:8787` unchanged. (Unlike `clients/ts`, this app installs nothing, so the known
 > "`npm install` corrupts `node_modules` over `/mnt`" problem never arises here.)
 
 You can also run the server module directly: `node server/server.js`.
@@ -59,7 +59,7 @@ All optional; defaults target the local swarm.
 | Env var | Meaning | Default |
 |---|---|---|
 | `PORT` | HTTP port for the dashboard | `8787` |
-| `HOST` | bind address | `0.0.0.0` |
+| `HOST` | bind address — loopback by default; set `0.0.0.0` only behind TLS **and** with `DASHBOARD_PASSWORD` + `AGENTPAY_ADMIN_PASSWORD` set, or the server refuses to start | `127.0.0.1` |
 | `AGENTPAY_WALLETD_URL` | wallet daemon JSON-RPC URL | `http://127.0.0.1:12010/json_rpc` |
 | `AGENTPAY_BUDGET_TEMPLATE` | AgentBudget template address | localnet `template_758d0c58…` |
 | `AGENTPAY_OWNER_ACCOUNT` | funded owner account name | `default` |
