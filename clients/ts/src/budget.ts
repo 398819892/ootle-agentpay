@@ -263,6 +263,26 @@ export class OnChainBudget {
     return this;
   }
 
+  /**
+   * Recover the budget this instance opened from a CONFIRMED open-tx result, when the open itself
+   * came back ambiguous ("unknown") and the caller never learned the component. Locate the new
+   * component in the finalized result and resolve its badges from chain, exactly as `open()` does,
+   * then populate this instance. `exclude` lists component addresses that are NOT the new budget
+   * (the owner and agent accounts are always excluded; pass known merchant/whitelist addresses too,
+   * so a whitelisted merchant mentioned in the result is never mistaken for the budget). Returns the
+   * component address, or null if the result created no new component (so the caller can leave the
+   * record open rather than mount the wrong thing).
+   */
+  async attachFromOpenResult(result: unknown, exclude: string[] = []): Promise<string | null> {
+    const blob = JSON.stringify(result ?? null);
+    const skip = new Set([this.ownerAccount, this.agentAccount, ...exclude]);
+    const comps = components(blob, skip);
+    if (comps.length === 0) return null;
+    this.component = comps[0];
+    [this.ownerBadge, this.agentBadge] = await this.readBadges();
+    return this.component;
+  }
+
   /** Read `[ownerBadge, agentBadge]` authoritatively from the component's on-chain state. */
   private async readBadges(): Promise<[string, string]> {
     const state = findComponentState(await this.client.getSubstate(this.component!));

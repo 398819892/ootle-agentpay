@@ -774,6 +774,35 @@ async function reconcileRecord(rec) {
   const got = await c.getResult(rec.txId);
   if (got.status === "accept") {
     const event = rec.op === "pay" ? firstPayEvent(got.result) || rec.event : rec.event;
+    // An open budget that came back "unknown" ACTUALLY LANDED: the chain accepted it and created a
+    // component the dashboard never recorded. Recover it from the confirmed result and mount it, so
+    // the dashboard attaches to the on-chain budget instead of pretending none exists — which would
+    // also let a retry fund a SECOND budget (#3). Skip if a budget is already mounted (a later open
+    // won) or the record already carries its component.
+    if (rec.op === "createBudget" && !store.budget && !rec.component) {
+      const budget = new OnChainBudget(c, BUDGET_TEMPLATE, ownerAddr);
+      if (rec.params && rec.params.epochsPerWindow) budget.epochsPerWindow = Number(rec.params.epochsPerWindow);
+      let comp;
+      try {
+        comp = await budget.attachFromOpenResult(got.result, Object.values(store.merchants));
+      } catch (e) {
+        // The tx is confirmed but the component/badges could not be read yet (e.g. indexer lag).
+        // Leave the record OPEN so a later reconcile retries the mount, rather than settling it
+        // confirmed-but-unmounted and losing the recovery trigger.
+        console.error(`reconcile: createBudget ${rec.key} confirmed but mount failed, will retry:`, e.message);
+        return rec;
+      }
+      if (!comp) {
+        console.error(`reconcile: createBudget ${rec.key} confirmed but no new component in result; settling without mount`);
+        return txlog.settle(rec.key, { status: "confirmed", event });
+      }
+      if (rec.params) {
+        budget.perTxCap = String(rec.params.perTxCap ?? "0");
+        budget.dailyCap = String(rec.params.dailyCap ?? "0");
+      }
+      snapshotBudget(budget); // mount the recovered budget (chain stays authoritative in dashboardState)
+      return txlog.settle(rec.key, { status: "confirmed", component: comp, event });
+    }
     return txlog.settle(rec.key, { status: "confirmed", event });
   }
   if (got.status === "reject") {
@@ -1082,6 +1111,15 @@ const OPS = {
     highRisk: true,
     async run(body, ctx) {
       if (store.budget) throw httpError(409, "A budget is already open. Reset it to create a new one.");
+      // #3: an earlier open that came back "unknown" may have landed on chain even though no budget is
+      // mounted yet. Refuse to open another while that record is unresolved — otherwise a retry funds a
+      // SECOND budget. Reconcile (startup + periodic) settles the record and mounts the real one.
+      const inflight = txlog.pendingOrUnknown().filter((r) => r.op === "createBudget");
+      if (inflight.length) {
+        throw httpError(409,
+          "A previous budget creation is still unresolved (tx " + (inflight[0].txId || "pending") +
+          "). It may already have opened a budget on chain — wait for it to reconcile before opening another.");
+      }
       const fund = toAmount(body.fund, "fund");
       const perTxCap = toAmount(body.perTxCap, "per-transaction cap");
       const dailyCap = toAmount(body.dailyCap, "daily cap");
