@@ -17,7 +17,8 @@ FAUCET = "component_568f84a0cc7ccfe49116ee86d072f02b99e246a4750e680a8cbfcd2b7862
 PUBKEY = "2c049e88b8271733616f429dc51cfc34cc53c04cd6c300fbfb7a8f154f2df06f"
 NETWORK = 38  # esmeralda
 ESME_FUND = "/root/esme-fund/target/debug/esme-fund"
-SEAL_SIGNER = {"Derived": {"index": 0, "key_branch": "account"}}  # dev account owner key
+SEAL_SIGNER = {"Derived": {"index": 0, "key_branch": "account"}}
+FEE = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--fee=")), "20000")  # µT split off for PayFeeFromBucket
 
 def call(method, params, token=None):
     headers = {"Content-Type": "application/json"}
@@ -44,7 +45,7 @@ def main():
         print("could not read current_epoch"); sys.exit(1)
     max_epoch = cur + 3
     print(f"current_epoch={cur} max_epoch={max_epoch}")
-    out = subprocess.run([ESME_FUND, FAUCET, PUBKEY, str(NETWORK), str(max_epoch)],
+    out = subprocess.run([ESME_FUND, FAUCET, PUBKEY, str(NETWORK), str(max_epoch), FEE],
                          capture_output=True, text=True)
     if out.returncode != 0:
         print("esme-fund failed:", out.stderr); sys.exit(1)
