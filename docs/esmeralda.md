@@ -125,3 +125,42 @@ integrations/agentpay_mcp/.venv/Scripts/python integrations/agentpay_mcp/demo_ag
 - 公网 indexer 30s submit 超时对**小交易(付款/开预算)也偶发**。给 SDK 的 `WalletdClient` 提交加了
   **只针对网络瞬时错误**的重试(`sdk/src/agentpay/onchain.py` 的 `_submit_manifest`;本地 swarm 不触发,
   行为不变),demo 才能一轮跑完不中途崩。商户建账转账也带同样重试。
+
+---
+
+## Web 仪表盘 @ esmeralda(2026-10-30)
+
+把 `web/` 仪表盘(浏览器 → Node 后端 → walletd → 链)**指向 esmeralda**,去掉对本地 swarm 的依赖。
+纯 env 切换,**没改 web 源码**:
+```
+PORT=8787 HOST=127.0.0.1 \
+AGENTPAY_WALLETD_URL=http://127.0.0.1:5100/json_rpc \
+AGENTPAY_BUDGET_TEMPLATE=<esmeralda agent_budget> \
+AGENTPAY_OWNER_ACCOUNT=dev \
+AGENTPAY_STATE_FILE=web/server/state.esmeralda.json \
+node server/server.js
+```
+
+**已验证(连 esmeralda 真链):**
+- `connected: true`,owner 解析为 esmeralda 上的 `dev` = `component_bfb548…`(证明读的是 esmeralda 链)。
+- **Windows `localhost` 可达**(WSL2 loopback 转发;后端绑 127.0.0.1)。
+- 在 esmeralda 上**开预算成功上链**(如 `component_a92e535c…`,funded 10000,链上确认),浏览/查询/治理读路径全通。
+
+**确认付款(pay)此刻受阻——两个原因,都如实记下:**
+1. **模板版本错位**:esmeralda 现有的 `template_299d49bc…` 是 **10-24 发布的 baseline 版**,其 `pay` 是 3 显参
+   `(merchant, amount, memo)`;而 commit `5a4a974`(10-26,multi-session badges)给 `pay` 加了 `agent_proof`,
+   当前 clients/ts 发 4 显参(含 proof)。链上报 `Function 'pay' expected 4 arguments, but got 5`(引擎把隐式
+   self 也计入)。→ 需把**当前** agent_budget(4 显参版)重发到 esmeralda,仪表盘指向新地址即可修好。
+2. **重发被公网拥堵卡住**:agent_budget WASM ~278 KiB,`tari -n esmeralda publish` 的 submit 连续 40 次都
+   `Indexer did not respond within 30s`(一次 tx id 都没拿到),和当初发三模板时同样的公网 indexer 拥堵。
+   需等网络空闲窗口重试(工具:`scratchpad/publish-one.sh agent_budget`,或 `scripts/esme_publish_retry.sh`)。
+   重发成功后,把仪表盘的 `AGENTPAY_BUDGET_TEMPLATE` 换成新地址,`pay` 即可链上确认。
+   - **2026-10-30 两轮有界重试(40 次 + 15 次)均失败**:submit 连续 `Indexer did not respond within 30s`,
+     一个 tx id 都没拿到——esmeralda 公网 indexer 当前对这个 278 KiB 的大发布仍严重拥堵。按"别死耗"停下。
+     浏览/查询/开预算在 esmeralda 上已跑通;**确认付款待公网空闲时重发 agent_budget**(小交易如开预算能过,
+     只有大发布过不去)。
+
+**用户现在只需开着一个进程:esmeralda walletd(:5100)**(`docs/esmeralda.md` 顶部配方;`indexer_trust=trust`
+已在 config)。esmeralda 仪表盘现运行在 **`http://localhost:8787`**(连 :5100,owner=dev),Windows loopback 可达。
+本地 swarm(:12010)**未改动**(留着,但仪表盘已不依赖它)。启动方式:`scratchpad/start-esme-dash-8787.sh`
+(setsid 常驻 `node server/server.js` + 上面那套 esmeralda env)。

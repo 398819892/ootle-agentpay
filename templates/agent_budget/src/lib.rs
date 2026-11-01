@@ -383,7 +383,14 @@ mod agent_budget {
         /// Hand the returned badge to another agent (or another session of the same agent): it is a
         /// token of the same agent-badge resource `pay` honours, so the new holder can pay within the
         /// very same on-chain caps/whitelist — and the owner can later `revoke_session(session)` to cut
-        /// off just that one. If `session` had been revoked before, issuing it again clears that flag.
+        /// off just that one.
+        ///
+        /// Re-issuing a previously-revoked label *does* clear its revoke flag — but ONLY if the old
+        /// badge no longer exists (the NFT id must be free). If the revoked holder still has their
+        /// badge, the mint below panics ("labels must be unique"), and the owner cannot force-burn a
+        /// badge an agent holds — so a revoked agent that keeps its badge permanently occupies that
+        /// label. Use a fresh label (or have the agent burn the old badge, which is burnable); the
+        /// global `revoke` remains the real, holder-independent kill switch (audit #10).
         ///
         /// # Panics
         /// - if a badge with this `session` label already exists (labels must be unique)

@@ -39,7 +39,7 @@ class Invoice:
     description: str = ""
 
     def __post_init__(self) -> None:
-        if not _ID_RE.match(self.invoice_id):
+        if not _ID_RE.fullmatch(self.invoice_id):
             raise InvoiceError("invoice_id must match [a-z0-9]{8,32}")
         if self.amount <= 0:
             raise InvoiceError("amount must be positive")
@@ -59,9 +59,9 @@ def new_invoice_id() -> str:
 
 
 def encode_memo(invoice_id: str, agent_tag: str = "") -> dict[str, Any]:
-    if not _ID_RE.match(invoice_id):
+    if not _ID_RE.fullmatch(invoice_id):
         raise InvoiceError("bad invoice_id")
-    if not _TAG_RE.match(agent_tag):
+    if not _TAG_RE.fullmatch(agent_tag):
         raise InvoiceError("agent_tag must match [A-Za-z0-9_.-]{0,32}")
     text = f"{MEMO_PREFIX}|{invoice_id}|{agent_tag}"
     if len(text.encode()) > MAX_MEMO_BYTES:
@@ -88,7 +88,7 @@ def decode_memo(memo: dict[str, Any] | bytes | str | None) -> ParsedMemo | None:
     parts = memo["Message"].split("|")
     if len(parts) != 3 or parts[0] != MEMO_PREFIX:
         return None
-    if not _ID_RE.match(parts[1]) or not _TAG_RE.match(parts[2]):
+    if not _ID_RE.fullmatch(parts[1]) or not _TAG_RE.fullmatch(parts[2]):
         return None
     return ParsedMemo(parts[1], parts[2])
 

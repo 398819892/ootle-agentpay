@@ -16,6 +16,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/*.test.js",
     "demo": "node dist/demo.js",
     "demo:ts": "ts-node src/demo.ts"
   },

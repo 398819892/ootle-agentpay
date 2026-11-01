@@ -28,13 +28,27 @@ services:
       # --- auth (REQUIRED in production) ---
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?set DASHBOARD_PASSWORD in web/.env}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in web/.env}
+      # The container binds 0.0.0.0 (see Dockerfile HOST), so the server treats itself as
+      # network-exposed and REFUSES to start unless a step-up secret DISTINCT from
+      # DASHBOARD_PASSWORD is set. This is required, not optional, for this topology.
+      AGENTPAY_ADMIN_PASSWORD: ${AGENTPAY_ADMIN_PASSWORD:?set AGENTPAY_ADMIN_PASSWORD (distinct from DASHBOARD_PASSWORD) in web/.env}
       COOKIE_SECURE: "true"     # the proxy terminates HTTPS, so cookies must be Secure
+      # --- persistence: journal, audit log and idempotency claims MUST live on the volume ---
+      # Their defaults are paths inside the image; left there they vanish on restart, which also
+      # drops the cross-process claim markers that close the multi-instance double-spend (B-6).
+      AGENTPAY_STATE_FILE: "/data/state.json"
+      AGENTPAY_TXLOG_FILE: "/data/txlog.json"
+      AGENTPAY_AUDIT_FILE: "/data/audit.log"
+      AGENTPAY_CLAIMS_DIR: "/data/claims"
       # --- chain target: esmeralda public testnet ---
       AGENTPAY_WALLETD_URL: "http://walletd:5100/json_rpc"
-      AGENTPAY_BUDGET_TEMPLATE: "template_299d49bcace827cb86a8cdd9e6b1880783ae40a8a29ab28ba94b6b3ded6123a8"
-      AGENTPAY_OWNER_ACCOUNT: "dev"
+      # No default: the esmeralda template must be (re)published from THIS repo's agent_budget and
+      # its address set in web/.env. Do not hardcode a stale address — an old build with a different
+      # `pay` signature makes every payment fail with an arg-count mismatch.
+      AGENTPAY_BUDGET_TEMPLATE: ${AGENTPAY_BUDGET_TEMPLATE:?set AGENTPAY_BUDGET_TEMPLATE (your published agent_budget address) in web/.env}
+      AGENTPAY_OWNER_ACCOUNT: ${AGENTPAY_OWNER_ACCOUNT:-dev}
     volumes:
-      - dashboard-state:/data   # persist the open budget across restarts
+      - dashboard-state:/data   # persist budget state, journal, audit log and claim markers
     networks:
       - agentpay
     depends_on:

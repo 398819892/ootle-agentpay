@@ -49,8 +49,10 @@ All via environment variables.
 |---|---|---|
 | `DASHBOARD_PASSWORD` | **yes (prod)** | Password users type to sign in. Long & random. Enables auth. |
 | `SESSION_SECRET` | **yes (prod)** | Signs session cookies. `openssl rand -hex 32`. Keep stable across restarts/replicas. |
-| `AGENTPAY_ADMIN_PASSWORD` | recommended | Step-up secret for high-risk actions. Keep **different** from `DASHBOARD_PASSWORD`; falls back to it if unset. |
-| `AGENTPAY_AUDIT_FILE` | recommended | Append-only audit log path (mount a volume; ship off-box in prod). Default `web/server/audit.log`. |
+| `AGENTPAY_ADMIN_PASSWORD` | **yes when exposed** | Step-up secret for high-risk actions, **distinct** from `DASHBOARD_PASSWORD`. On loopback-only dev it may be unset (step-up reuses `DASHBOARD_PASSWORD`); on any network-exposed bind (incl. the Docker image's `HOST=0.0.0.0`) the server **refuses to start** without it. |
+| `AGENTPAY_AUDIT_FILE` | **mount on volume** | Append-only audit log path. Default `web/server/audit.log` lives **inside** the process dir — set it under a mounted volume (`/data/audit.log`) or it is lost on restart; ship off-box in prod. |
+| `AGENTPAY_TXLOG_FILE` | **mount on volume** | Operation journal path (idempotency + pending/confirmed/unknown lifecycle). Default is inside the process dir — set it under the volume (`/data/txlog.json`). |
+| `AGENTPAY_CLAIMS_DIR` | **mount on volume** | Cross-process idempotency claim markers; defaults next to the journal, so pointing the journal at `/data` already covers it. Must share the journal's persistent volume or the multi-instance double-spend guard loses state on restart. |
 | `COOKIE_SECURE` | recommended | `true` behind HTTPS (forces the `Secure` cookie flag). Otherwise inferred from `X-Forwarded-Proto`. |
 | `TRUSTED_PROXY` | **behind a proxy** | How to read the real client IP for the throttles. Default ignores `X-Forwarded-For` (uses the socket peer, so a forged XFF can't dodge the lockout). Set `true` (single hop) or a proxy IP list. See [`../docs/security.md`](../docs/security.md). |
 | `ALLOWED_ORIGINS` | no | Extra browser-facing origins for the CSRF origin check (the request Host is always allowed). Only for split-origin proxy setups. |
@@ -68,9 +70,15 @@ From [`../docs/esmeralda.md`](../docs/esmeralda.md):
 
 ```
 AGENTPAY_WALLETD_URL=http://walletd:5100/json_rpc     # walletd runs privately; see §4
-AGENTPAY_BUDGET_TEMPLATE=template_299d49bcace827cb86a8cdd9e6b1880783ae40a8a29ab28ba94b6b3ded6123a8
+AGENTPAY_BUDGET_TEMPLATE=template_...                 # publish from THIS repo's agent_budget (below)
 AGENTPAY_OWNER_ACCOUNT=dev
 ```
+
+> **Do not reuse an old template address.** The `agent_budget` `pay` signature has changed over time
+> (the merchant-whitelist `proof` argument was added). Pointing the dashboard at a stale build makes
+> every payment fail with a "wrong number of arguments" error. Publish the template from the current
+> `templates/agent_budget` source and paste the fresh address here — see
+> [`../docs/esmeralda.md`](../docs/esmeralda.md) for the publish steps.
 
 > **Local development is unchanged.** With `DASHBOARD_PASSWORD` **unset** the app runs in open dev
 > mode against the local swarm (`http://127.0.0.1:12010/json_rpc`), exactly as before. Auth turns

@@ -80,8 +80,10 @@ class ServerConfig:
     agent_badge: str | None = None
     agent_account: str | None = None
 
-    # provision mode (server opens a fresh budget) + declared policy (display + whitelist)
-    auto_provision: bool = True
+    # provision mode (server opens a fresh budget) + declared policy (display + whitelist).
+    # Default FALSE = ATTACH (non-custodial: the agent holds only the agent badge); provision is
+    # opt-in for local demos. Must agree with the env default in from_env() (audit #9 / #15).
+    auto_provision: bool = False
     per_tx_cap: int = 1_000
     daily_cap: int = 1_500
     fund: int = 10_000

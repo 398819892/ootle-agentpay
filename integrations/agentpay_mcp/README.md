@@ -79,7 +79,7 @@ overridable by a CLI flag. **Defaults target a local swarm, so a dev usually set
 | `AGENTPAY_COMPONENT` | `--component` | *(unset)* | **attach mode:** an already-open budget component |
 | `AGENTPAY_AGENT_BADGE` | `--agent-badge` | *(unset)* | **attach mode:** the agent badge resource |
 | `AGENTPAY_AGENT_ACCOUNT` | `--agent-account` | *(unset)* | **attach mode:** the agent's account |
-| `AGENTPAY_AUTO_PROVISION` | `--no-provision` | `true` | open a budget automatically when none is given |
+| `AGENTPAY_AUTO_PROVISION` | `--provision` | `false` | open a budget automatically when none is given (default OFF = attach/non-custodial; set `true` for local demos) |
 
 **esmeralda preset:** walletd `http://127.0.0.1:5100/json_rpc`, template
 `template_299d49bc…` (the published `agent_budget`), owner `dev`. See

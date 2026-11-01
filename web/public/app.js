@@ -811,6 +811,35 @@ async function api(path, body) {
   return payload;
 }
 
+/* ---- idempotency keys for no-token money ops ------------------------------
+ * A money op that is NOT behind a single-use step-up token (pay, top-up) must carry a STABLE
+ * idempotency key so a manual retry after an AMBIGUOUS failure (timeout, dropped connection, a
+ * journaled "unknown") reuses the key and the server dedups it — instead of spending twice. The key
+ * is bound to the op + its exact parameters and rotates only once an attempt FINISHES one way or the
+ * other: an identical retry reuses it (dedup), while a deliberate identical repeat after success — or
+ * the same op with edited inputs — gets a fresh key. Token-gated ops (open budget, withdraw, revoke,
+ * add merchant, issue/revoke session, reset) don't need this; their single-use token blocks replay. */
+const _idemSlots = Object.create(null);
+function _rid() {
+  return (window.crypto && crypto.randomUUID && crypto.randomUUID()) ||
+    Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+}
+async function idemPost(path, body, op, sig) {
+  const slot = op + "|" + sig;
+  if (!_idemSlots[slot]) _idemSlots[slot] = op + ":" + _rid();
+  try {
+    const r = await api(path, { ...body, idempotencyKey: _idemSlots[slot] });
+    delete _idemSlots[slot]; // success → a later identical submit is a genuinely new op
+    return r;
+  } catch (err) {
+    // Definitive "it did not happen" statuses let the key rotate, so the user can fix the input and
+    // resubmit without a stale-key conflict. A network throw or a 5xx is AMBIGUOUS — keep the key so
+    // the retry carries it and the server collapses a duplicate.
+    if (err && [400, 401, 403, 404, 409, 422].includes(err.status)) delete _idemSlots[slot];
+    throw err;
+  }
+}
+
 /* ---- toasts --------------------------------------------------------------- */
 function toast(type, title, msg) {
   const host = el("toasts");
@@ -2017,7 +2046,12 @@ function wirePay() {
     slot.innerHTML = "";
     await withPending(el("p-pay"), t("p_submitting"), async () => {
       try {
-        const r = await api("/api/pay", { merchant: vals.merchant, amount: vals.amount, memo: vals.memo || undefined });
+        const r = await idemPost(
+          "/api/pay",
+          { merchant: vals.merchant, amount: vals.amount, memo: vals.memo || undefined },
+          "pay",
+          vals.merchant + "|" + vals.amount + "|" + (vals.memo || ""),
+        );
         S.data = r;
         toast("success", t("t_payment_sent"), t("t_payment_sent_msg", { amount: fmt(vals.amount), unit: UNIT, merchant: esc(vals.merchant) }));
         render();
@@ -2068,7 +2102,7 @@ function wireGovernance() {
       if (!ok) return;
       await withPending(el("g-topup-btn"), t("p_topping"), async () => {
         try {
-          S.data = await api("/api/top-up", { amount });
+          S.data = await idemPost("/api/top-up", { amount }, "topUp", String(amount));
           render();
           toast("success", t("t_topped_up"), t("t_topped_up_msg", { amount: fmt(amount), unit: UNIT }));
         } catch (err) {

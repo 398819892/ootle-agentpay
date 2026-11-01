@@ -236,7 +236,19 @@ class WalletdClient {
             }
             return last;
         }
-        const resp = await this.rpc("transactions.submit_manifest", params);
+        let resp;
+        try {
+            resp = await this.rpc("transactions.submit_manifest", params);
+        }
+        catch (e) {
+            // A THROWN error (network drop, 120s abort, ECONNRESET) on a REAL submit is ALSO ambiguous —
+            // the request may already have reached the node and created a transaction. Surface it as
+            // `pending` (unknown) too, so the caller reconciles rather than recording a hard `rejected`
+            // for a tx that may have landed (#2 — the fetch-layer gap in the H5 guard).
+            const err = new errors_1.ChainError(`submit may or may not have landed (request failed, not resubmitted): ${e?.message ?? e}`);
+            err.pending = true;
+            throw err;
+        }
         if (resp.error && isTransient(resp.error.message ?? "")) {
             const err = new errors_1.ChainError(`submit may or may not have landed (transient error, not resubmitted): ${resp.error.message}`);
             err.pending = true; // unknown: reconcile, never auto-resubmit (H5)

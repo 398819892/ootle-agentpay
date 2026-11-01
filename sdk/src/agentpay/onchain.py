@@ -185,7 +185,7 @@ class WalletdClient:
     def account_address(self, name: str) -> str:
         for a in self._rpc("accounts.list", {"offset": 0, "limit": 50})["result"]["accounts"]:
             if a["account"]["name"] == name:
-                return a["address"] if False else a["account"]["component_address"]
+                return a["account"]["component_address"]
         raise ChainError(f"account {name!r} not found")
 
     def create_account(self, name: str) -> str:
@@ -200,10 +200,12 @@ class WalletdClient:
         self._rpc("accounts.create_free_test_coins",
                   {"account": {"Name": name}, "amount": amount, "max_fee": max_fee, "key_id": None})
 
-    def balance(self, name: str) -> int:
+    def balance(self, name: str, token_symbol: str = "tTARI") -> int:
+        """Balance of `name` in `token_symbol` (default ``tTARI``, the native XTR test token). Pass the
+        symbol of a non-XTR budget's resource to read it instead of always returning 0 (audit #11)."""
         r = self._rpc("accounts.get_balances", {"account": {"Name": name}, "refresh": True})
         for b in r["result"].get("balances", []):
-            if b["token_symbol"] == "tTARI":
+            if b["token_symbol"] == token_symbol:
                 return int(b["balance"])
         return 0
 
@@ -590,7 +592,13 @@ class OnChainBudget:
         res = self.client.run(self._pay_manifest(merchant, amount, memo),
                               {"agent": self.agent_account, "budget": self.component})
         for ev in self.pay_events(res):      # ledger follows the chain's events
-            self.spent += int(ev.get("amount", amount))
+            # Track spend from the chain's OWN running total (`spent_in_window`), not by accumulating
+            # locally. The on-chain window resets lazily, so a local accumulator keeps growing past a
+            # window roll and makes `_precheck` wrongly reject payments the chain would accept — which,
+            # via MCP, even surfaces as a misleading infra error (audit #1). Fall back to accumulation
+            # only if an event somehow lacks the field.
+            siw = ev.get("spent_in_window")
+            self.spent = int(siw) if siw is not None else self.spent + int(ev.get("amount", amount))
             self.ledger.append(LedgerEntry(ev.get("merchant", merchant),
                                            int(ev.get("amount", amount)), ev.get("memo", memo), "pay"))
         return res
