@@ -1,0 +1,21 @@
+# Memory Index
+
+- [Tari dev needs Linux](tari-dev-needs-linux.md) — 模板测试和 CLI 在 Windows 跑不了，用 WSL/Ubuntu
+- [Local swarm devnet](local-swarm-devnet.md) — 本地私链已跑通真实 tari publish 上链的可复现配方
+- [Escrow template Phase 1](escrow-template-phase1.md) — Escrow 模板完成(13/13 测试) + 模板写作踩坑
+- [AgentBudget Phase 2](agent-budget-phase2.md) — AgentBudget 核心完成(9/9) + badge 访问控制 + tari_crypto 固定 0.24.0
+- [agentpay Phase 3](agentpay-phase3.md) — ootle-agentpay 接入链上 AgentBudget，demo_devnet 活链跑通(46 测试过)
+- [OtcBoard Phase 4](otc-board-phase4.md) — P2P 场外托管模板(12 测试)，已上链 + OTC 流程链上演示
+- [Phase 5 launch prep](phase5-launch-prep.md) — 压测(0 mismatch) + 中英 README + 接口/安全/devnet 文档
+- [esmeralda deploy](esmeralda-deploy-blocked.md) — ✅ 已完成：账户充值上链 + 三模板全部上链(escrow 7de6/agent_budget 299d/otc_board bafb)；附充值绕 manifest、trust 模式、发布踩坑
+- [AgentPay MCP 集成](agentpay-mcp-integration.md) — 真 MCP server 包 AgentPay + 一键演示"付款被链限额拦住"(本地 swarm 跑通)
+- [TS/JS 客户端 Phase 6](ts-client-phase6.md) — clients/ts 镜像 Python onchain.py,零运行时依赖,本地 swarm 真实跑通(含 WSL 挂载盘构建踩坑)
+- [网页仪表盘 Phase 7](web-dashboard-phase7.md) — web/ 产品级托管仪表盘,零依赖无构建(Node+手写SPA),链上强制可感知,本地 swarm 跑通(walletd 变量要用地址非账户名)
+- [安全/正确性修复 pass](security-correctness-pass.md) — 金额 BigInt 化 + reset/resolveMerchant 收紧 + OTC 信任文档 + OtcBoard 质押漏洞修复(18/18绿)；附 swarm 模板地址漂移坑
+- [仪表盘链为权威](web-chain-authority.md) — Issue 4：链读权威+tx 生命周期/幂等/启动对账/原子持久化(20/20绿)；swarm 上只有 createBudget 会 ACCEPT
+- [集成 API B-5](integration-api-b5.md) — /api/v1 M2M REST + API key 分级鉴权(agent/admin)+ 薄客户端/示例/OpenAPI，复用授权器/txlog/审计/链读，六条证据齐(commit 9cbacda)
+- [稳定性验证 B-6](stability-b6.md) — mock walletd 驱动真后端的确定性 harness(不碰真 swarm);单实例健壮,多实例同键双花=上线前最高优先(commit 7408c90)
+- [付款 badge 证明修复](payment-badge-proof-fix.md) — 确认付款曾被链拒:badge 要从组件链上状态读不能排序猜;已加真实链上 e2e(commit 8f7ead7)
+- [合约安全审计 pass](contract-audit-pass.md) — 三模板逐函数授权/资金审计(无新漏洞)+ pay_via_escrow 不能绕过预算限额的跨产品测试 + docs/audit-notes.md
+- [Manifest 注入修复](manifest-injection-fix.md) — #7：manifest builder 底层强制校验(memo 拒危险字符非转义/地址严格正则)+注入被拒测试;#9 memo 注释改正
+- [事件 topic 命名空间](event-topic-namespacing.md) — 引擎把 topic 改成 "AgentBudget.pay";裸 "pay" 过滤会丢掉所有付款→账本空(commit eac1c6c,含 reconcile backfill)

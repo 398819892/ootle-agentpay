@@ -109,9 +109,10 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
    - **重搭**：按 §2.A/§2.B 从零装（二进制用 `fetch-binaries.sh` 重下）。干净但要踩一遍上面的坑。
    - **整盘搬**（最快保留账户+已发布模板）：旧机器 `wsl --export Ubuntu-24.04 ootle.tar`，新机器
      `wsl --import`。连带把资金、链状态、CLI 都带过去。
-2. **`~/.claude` 内存笔记**（见 §6）：在 `C:\Users\cam\.claude\projects\F--oolte\memory\`，**不在仓库**。
-   想让新机器的 Claude 也有这些踩坑记忆，把整个 `memory/` 文件夹拷到新机器对应的
-   `%USERPROFILE%\.claude\projects\<项目>\memory\`。关键几条我已折进本文件 §5。
+2. **内存笔记**：已复制进仓库 **`docs/memory/`**（随 git 走，clone 就带着）。想让新机器的 Claude
+   会话「活」地召回这些记忆，把 `docs/memory/*.md` 拷到 Claude 内存目录
+   `%USERPROFILE%\.claude\projects\<项目>\memory\`（本机原位置 `C:\Users\cam\.claude\projects\F--oolte\memory\`）。
+   详见 `docs/memory/README.md`。关键几条也已折进本文件 §5。
 3. **esmeralda 相关**（如果还要上公共测试网）：见 `docs/esmeralda.md` 和内存 `esmeralda-deploy-blocked` /
    `esmeralda-deploy`。注意：公共 indexer 对 ~278KiB 的大模板发布**长期拥堵**（submit 30s 超时），
    三模板曾分别上链成功（escrow 7de6 / agent_budget 299d / otc_board bafb），但 299d 是旧 `pay` 签名的 baseline，
@@ -165,9 +166,9 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
 
 ---
 
-## 7. 内存笔记清单（machine-local，想带就拷 `memory/` 文件夹）
+## 7. 内存笔记清单（已入库 `docs/memory/`）
 
-当前这台机器 `~/.claude/.../memory/` 有以下笔记（按阶段/主题），新机器默认没有：
+以下笔记已复制进仓库 `docs/memory/`（随 clone 带走；想让 Claude 活用见 §3.2 和 `docs/memory/README.md`）：
 
 | 文件 | 主题 |
 |---|---|
@@ -184,7 +185,7 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
 | `esmeralda-deploy` / `esmeralda-deploy-blocked` | 公共测试网上链（含拥堵阻塞） |
 | `phase5-launch-prep` | 压测 + 中英 README + 文档 |
 
-关键几条已折进 §2–§5，即使不拷 `memory/` 也能干活。
+关键几条已折进 §2–§5，即使不碰 `docs/memory/` 也能干活。
 
 ---
 
