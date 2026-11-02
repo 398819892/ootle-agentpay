@@ -7,3 +7,4 @@ server/claims/
 *.log
 .env
 walletd/
+server/txlog.*.json

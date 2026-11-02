@@ -182,7 +182,7 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
   测试：TS 注入/形状、Python、`stepup.test.js` 的 setLimits/removeMerchant 参数绑定用例；api.md / openapi.json / web README 已同步。
 
 **仍待办（需要人拍板/链环境）**：
-- 三个模板 `lib.rs` 的版权头仍是 `Copyright 2026 The Tari Project`（上游模板遗留）——要换成项目所有者的名字，**需你提供**。
+- ~~三个模板 `lib.rs` 的版权头仍是 `Copyright 2026 The Tari Project`~~ ✅ 2026-11-02 统一为 `Copyright 2026 The AgentPay Authors`（三模板源码+测试、`Cargo.toml` authors、新增根 `LICENSE`、`sdk/LICENSE`）。
 - API key → 链上会话映射（每 key 一个 session badge）未做。
 - ~~`remove_merchant` / `set_limits` 还没在本地 swarm 上真实跑过~~ ✅ 2026-11-02 `scripts/e2e_onchain_admin.py`
   在本地 swarm 真链通过：移除后 pay 被验证节点拒（`Merchant is not whitelisted`）、加回后可付、`set_limits` 后超 1 单位被拒、

@@ -268,4 +268,4 @@ wasm-template/    官方模板仓库克隆（参考，纯源码，无构建产�
 Templates not bound to a single token: each works with any plaintext countable resource
 (confidential amounts can't be range-checked inside a template — see `docs/spike.md`).
 
-License: BSD-3-Clause.
+License: BSD-3-Clause — Copyright 2026 The AgentPay Authors (see [`LICENSE`](LICENSE)).

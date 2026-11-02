@@ -1,4 +1,4 @@
-//   Copyright 2026 The Tari Project
+//   Copyright 2026 The AgentPay Authors
 //   SPDX-License-Identifier: BSD-3-Clause
 
 //! Integration tests for the `Escrow` template, run in the wasmer sandbox via

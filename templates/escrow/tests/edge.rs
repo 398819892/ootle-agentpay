@@ -1,4 +1,4 @@
-//   Copyright 2026 The Tari Project
+//   Copyright 2026 The AgentPay Authors
 //   SPDX-License-Identifier: BSD-3-Clause
 
 //! Adversarial / boundary tests for the Escrow template (reviewer feedback #6 fund safety, #8 edge

@@ -1,4 +1,4 @@
-//   Copyright 2026 The Tari Project
+//   Copyright 2026 The AgentPay Authors
 //   SPDX-License-Identifier: BSD-3-Clause
 
 //! Authorization / state-machine gap tests for Escrow (audit pass): a stranger cannot `release` when

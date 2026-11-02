@@ -4,6 +4,7 @@ name = "agent_budget"
 version = "0.1.0"
 edition = "2024"
 license = "BSD-3-Clause"
+authors = ["The AgentPay Authors"]
 description = "An on-chain spending budget for an AI agent: owner funds it, agent spends within chain-enforced limits"
 
 [package.metadata.tari-template]

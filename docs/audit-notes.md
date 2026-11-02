@@ -549,9 +549,14 @@ Followed up on the fifth review's deferred server items.
 - **Licence unified to BSD-3-Clause (done).** The TS client was MIT; it is now BSD-3-Clause, matching
   the SDK and templates. All three templates' `Cargo.toml` now also declare `license = "BSD-3-Clause"`
   explicitly (not just the SPDX header).
-- **Copyright holder (still pending the owner's name).** The template `lib.rs` SPDX headers say
-  `Copyright 2026 The Tari Project` (inherited from the upstream template). The owner's original code
-  should carry the owner's own name/entity — left unchanged until they supply it (not guessed).
+- **Copyright holder (done, 2026-11-02).** The owner chose the collective form **`The AgentPay Authors`**
+  (the Kubernetes/Go convention). All template sources and tests now carry
+  `Copyright 2026 The AgentPay Authors` + `SPDX-License-Identifier: BSD-3-Clause`, the three
+  `Cargo.toml` declare `authors = ["The AgentPay Authors"]`, and a root `LICENSE` (BSD-3-Clause, same
+  holder) was added — the repo previously claimed BSD-3 without a top-level licence file. `sdk/LICENSE`
+  had a 2023 "Tari Developer Community" notice inherited from upstream boilerplate; it is this project's
+  own code, so it now names the same holder. Vendored upstream code under `wasm-template/` keeps its
+  original Tari Project notices untouched.
 
 ## Decision: OtcBoard frozen (2026-10-31)
 

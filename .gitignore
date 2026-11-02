@@ -69,3 +69,6 @@ clients/ts/dist/*.test.d.ts
 *.docx
 *.doc
 *.pdf
+
+# Claude desktop app preview launcher (machine-specific)
+.claude/launch.json
