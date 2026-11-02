@@ -16,6 +16,8 @@ metadata:
 
 **2026-11-02 的两个新坑**：(a) 发行版会整体被停掉（cargo test + swarm 同时跑时 WSL 自己 Stopped 了一次，原因不明，可能是后台 wsl.exe 任务被结束连带），stop 后 swarm/walletd/保活全死，要三个一起重起；(b) swarm 的锁文件在 `run/data/swarm/tari_swarm.pid`（不是 run 目录下），`swarm-init-start.sh -k` 已改为两处都清。模板源码改动后用 `sync-and-test-templates.sh`（I:\wsl\sync	emplates → /root/ootle/<tpl>，cargo test）。
 
+**2026-11-02 晚：WSL 反复整体停机的真正原因**——不是谁下了命令，是 WSL 3.0.1.0 自己崩：事件日志里 wsl.exe 与 wslservice.exe 以 0xc00000fd（栈溢出）崩溃，随后"WSL Service 意外停止"带走整个 VM（18:45、19:55、20:00、20:04 共四次，正值三个会话并发调用 wsl.exe）。唯一可见的异常是从 Y 盘目录调用 wsl.exe 时的 `Failed to translate 'Y:\公用1\oolte'`。**规矩：所有 wsl.exe 调用先把 cwd 切到本地盘**（PowerShell `Set-Location C:\; wsl.exe -d ootle-dev …`），切到 C:\ 后那行警告消失；避免多会话并发 wsl.exe；长命令走 run_in_background。若仍崩，下一步是 `wsl --update`（会中断所有 WSL 进程，要先协调）。排查命令：`Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000}` 看 wslservice/wsl.exe 的 1000 事件，`LogName='System'; Id=7034` 看 WSL Service 意外停止。
+
 **从 Windows 驱动 WSL 的三个坑（都踩过）**：
 1. Git Bash 调 `wsl.exe ... bash -lc '...'`：`$变量`/for 循环变量不展开，`/mnt/i/...` 还会被 MSYS 路径转换成 `D:/Program Files/Git/mnt/...`。
 2. PowerShell 调 `wsl.exe ... bash -c '... | grep ...'`：引号里的管道被 PowerShell 拆开当独立命令。
