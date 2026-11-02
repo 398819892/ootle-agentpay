@@ -47,8 +47,10 @@ test-ts: ## tsc type-check build of the clients/ts client
 	cd clients/ts && npm install --no-audit --no-fund && npm run build
 
 .PHONY: e2e
-e2e: ## Real on-chain e2e: open a budget + make a CONFIRMED payment vs a local swarm (needs WALLETD_URL)
+e2e: ## Real on-chain e2e vs a local swarm: confirmed pay, remove_merchant/set_limits, pay_via_escrow (needs WALLETD_URL)
 	RUN_E2E=1 WALLETD_URL=$(WALLETD_URL) $(PYTHON) scripts/e2e_onchain_pay.py
+	RUN_E2E=1 WALLETD_URL=$(WALLETD_URL) $(PYTHON) scripts/e2e_onchain_admin.py
+	RUN_E2E=1 WALLETD_URL=$(WALLETD_URL) $(PYTHON) scripts/e2e_onchain_escrow.py
 
 # ---------------------------------------------------------------- stability / reliability (B-6)
 # Drives the UNMODIFIED dashboard backend against a controllable MOCK walletd (scripts/stability/),

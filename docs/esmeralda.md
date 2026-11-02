@@ -203,3 +203,22 @@ WSL（`I:\wsl\`，Tari 0.47.0 二进制 + Rust + `tari-ootle-cli` 0.33.0）并�
 esmeralda walletd（`:5100`，`auth=none`，`indexer_trust=trust`）现在跑在 `ootle-dev` 里（启动脚本
 `I:\wsl\setup\start-esme-walletd.sh`）；仪表盘/SDK/MCP 用 `AGENTPAY_OWNER_ACCOUNT=STBZ` +
 `AGENTPAY_BUDGET_TEMPLATE=template_88b11261…` 即可。原 `dev` 账户仍在链上有币，但其密钥只在旧机器。
+
+---
+
+## 2026-11-02：`pay_via_escrow` 在 esmeralda 真链跑通
+
+用 `scripts/e2e_onchain_escrow.py`（`WALLETD_URL=…:5100`，`AGENT_TEMPLATE=template_88b11261…`，
+`ESCROW_TEMPLATE=template_11dc03f7…`，`OWNER=E2E_MERCHANT=STBZ`，因为公网水龙头开不了第二个账户）：
+
+| 步骤 | 结果 |
+|---|---|
+| 开预算（fund 5000 / per-tx 1000 / daily 1500） | `component_2a785e3f013932241985132190b2932a830c4cd13d6751d90a39ed16d1a768ba` |
+| `configure_escrow(template_11dc03f7…, owner, treasury=owner, None, 500 bps, owner_pk, 1000)` | Accepted（manifest 里模板地址直接写 `address!("template_…")` 即可） |
+| `pay_via_escrow` 1001（超单笔上限） | 验证节点拒：`Amount exceeds the per-transaction cap` —— 预算限额在 escrow 路径同样生效 |
+| `pay_via_escrow` 400 | Accepted；`AgentBudget.pay_via_escrow` 事件指向新 escrow `component_5cb0a1c315a210c11ac15127e56fbab37fc932604587b4de2679658c51036d48`，金库 5000 → 4600（从 tx diff 读） |
+| owner `release(None)` | Accepted；`released` 事件 `payee_amount=380, fee=20` |
+
+同一脚本先在本地 swarm 跑通（商户是独立账户，余额 +380 可核对）。当天公网 `ootle-indexer-b` 又出现间歇性
+30s 超时（3 次提交里 2 次），SDK 对真实提交**不自动重发**（H5）；核对 `transactions.get_all` 没有新 tx、余额未动后
+整条重跑一次即通过。

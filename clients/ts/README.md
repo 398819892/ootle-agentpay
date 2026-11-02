@@ -86,7 +86,7 @@ target the local swarm.
 | Env var | Meaning | Default |
 |---|---|---|
 | `AGENTPAY_WALLETD_URL` | wallet daemon JSON-RPC URL | `http://127.0.0.1:12010/json_rpc` |
-| `AGENTPAY_BUDGET_TEMPLATE` | AgentBudget template address | `template_758d0c58…dec5b97` (localnet) |
+| `AGENTPAY_BUDGET_TEMPLATE` | AgentBudget template address | `template_978113ef…0e453f` (localnet) |
 | `AGENTPAY_OWNER_ACCOUNT` | funded owner account name | `default` |
 
 The demo also accepts the template address as its first CLI arg: `node dist/demo.js template_…`.

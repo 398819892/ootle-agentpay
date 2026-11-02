@@ -15,7 +15,7 @@ const index_1 = require("./index");
 const WALLETD_URL = process.env.AGENTPAY_WALLETD_URL || index_1.DEFAULT_WALLETD_URL;
 const BUDGET_TEMPLATE = process.argv[2] ||
     process.env.AGENTPAY_BUDGET_TEMPLATE ||
-    "template_758d0c587624cab9634692a9b13424e2da89e7389e0e8e2272c6dc7bdeec5b97";
+    "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f";
 const OWNER = process.env.AGENTPAY_OWNER_ACCOUNT || "default";
 async function ensureAccount(c, name) {
     try {

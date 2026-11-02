@@ -70,7 +70,7 @@ overridable by a CLI flag. **Defaults target a local swarm, so a dev usually set
 |---|---|---|---|
 | `AGENTPAY_NETWORK` | `--network` | `local` | `local` or `esmeralda` — picks the defaults below |
 | `AGENTPAY_WALLETD_URL` | `--walletd-url` | `http://127.0.0.1:12010/json_rpc` | wallet daemon JSON-RPC |
-| `AGENTPAY_BUDGET_TEMPLATE` | `--template` | `template_758d0c58…` | AgentBudget template address |
+| `AGENTPAY_BUDGET_TEMPLATE` | `--template` | `template_978113ef…` | AgentBudget template address |
 | `AGENTPAY_OWNER_ACCOUNT` | `--owner` | `default` | account that funds a provisioned budget |
 | `AGENTPAY_PER_TX_CAP` | `--per-tx-cap` | `1000` | per-transaction cap |
 | `AGENTPAY_DAILY_CAP` | `--daily-cap` | `1500` | rolling daily cap |

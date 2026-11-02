@@ -61,7 +61,7 @@ All optional; defaults target the local swarm.
 | `PORT` | HTTP port for the dashboard | `8787` |
 | `HOST` | bind address — loopback by default; set `0.0.0.0` only behind TLS **and** with `DASHBOARD_PASSWORD` + `AGENTPAY_ADMIN_PASSWORD` set, or the server refuses to start | `127.0.0.1` |
 | `AGENTPAY_WALLETD_URL` | wallet daemon JSON-RPC URL | `http://127.0.0.1:12010/json_rpc` |
-| `AGENTPAY_BUDGET_TEMPLATE` | AgentBudget template address | localnet `template_758d0c58…` |
+| `AGENTPAY_BUDGET_TEMPLATE` | AgentBudget template address | localnet `template_978113ef…` |
 | `AGENTPAY_OWNER_ACCOUNT` | funded owner account name | `default` |
 | `DASHBOARD_PASSWORD` | sign-in password — **setting it enables auth** | *(unset → open dev mode)* |
 | `SESSION_SECRET` | signs session cookies (`openssl rand -hex 32`) | *(ephemeral per process)* |

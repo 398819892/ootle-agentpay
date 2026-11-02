@@ -1,6 +1,6 @@
 ---
 name: ootle-dev-wsl-on-i-drive
-description: 2026-11-01 在新机器 I 盘重建的 WSL 发行版 ootle-dev（I:\wsl\ootle-dev）：Tari 0.47.0/esme 6.2.0-pre.2 二进制已装在 /root/ootle/swarm/bin，esmeralda walletd 跑在 :5100；以及从 Windows 驱动 WSL 的三个坑
+description: 新机器 I 盘的 WSL 发行版 ootle-dev（I:\wsl\ootle-dev）：Tari 0.47.0 二进制、本地 swarm（2026-11-02 已 init，三模板已发布，walletd :12010）、esmeralda walletd（:5100，账户 STBZ 已充值）；从 Windows 驱动 WSL 的坑与保活要求
 metadata:
   node_type: memory
   type: project
@@ -11,6 +11,8 @@ metadata:
 **布局（I 盘，954G 空闲）**：`I:\wsl\ootle-dev`（发行版 `ootle-dev`，由空的 `Ubuntu` 导出 `I:\wsl\wslubuntu-base.tar` 再 `wsl --import`，默认 root）；`I:\wsl\downloads\`（校验过 sha256 的 `tari_ootle-0.47.0-9dabb2a-linux-x86_64.zip`、`tari_suite-6.2.0-pre.2-esme-4d7f9eb-linux-x86_64.zip`，已解压到 `extracted/`）；`I:\wsl\repo\`（`git archive HEAD` 导出的仓库受控文件，WSL 里用 `/mnt/i/wsl/repo` 再 rsync 到 `/root/ootle/...`）；`I:\wsl\setup\*.sh`（所有在 WSL 里跑的脚本）。
 
 **WSL 内**：`/root/ootle/swarm/bin/` 七个二进制（walletd 已换成注入 `--override-keyring-password devswarm` 的 wrapper，真身 `tari_ootle_walletd.real`，0.47.0）。esmeralda walletd 启动脚本 `I:\wsl\setup\start-esme-walletd.sh`（`--network esmeralda --listen-on 127.0.0.1:5100 --authentication none -p ootle_wallet_daemon.indexer_trust=trust`，base `/root/.tari/ootle`，日志 `/root/logs/esme-walletd.out`），要用 harness 的 run_in_background 常驻；Windows 侧 `127.0.0.1:5100` 直接可达。这是**全新钱包**：account 分支 key index 0 公钥 `e6a9fae653e58619d70a2027f8865ef28c6be80e4864dd808d496c1d6d65211a`，尚无账户、无余额——旧的已充值 `dev`（2c049e88…）密钥在旧机器 WSL 里，这台机器没有（`C:\Users\39881\.tari\esmeralda` 是 3 月的旧钱包 STBZ，无关）。水龙头 `component_568f84a0…` 仍在，金库约 539000 tTARI，每次 claim 1e9 µT。**2026-11-01 已用修好的 `esme-fund`（commit 30fa227：claim→TakeFromBucket(fee)→PayFeeFromBucket→CreateAccount）充值成功**：tx `8f23a540…` Accepted，新账户名 **`STBZ`** = `component_63d78f7de802294cd9cb9b0bf67eb873abdafc982acebc62e0b6fcbeabdd8d46`，余额 999,980,000 µT；esmeralda 上 `tari publish -a STBZ` 用它。**已用它重发**：`agent_budget` = `template_88b112610740f457bcc04be70740edebc53c132885a3dda928b1c068d98db8f6`（真链确认付款验证过，验证预算 `component_dff2951f…`），`escrow` = `template_11dc03f70679e981afc5e2e48e261a74be54f87f71e35a6977313f34bbd49d09`；公网 indexer 这次不拥堵，发布各 ~30 秒。
+
+**本地 swarm（2026-11-02 已 init）**：`I:\wsl\setup\swarm-init-start.sh`（首次 init+start；重启后 `-k` 恢复）、`swarm-check.sh`（进程/账户/epoch）、`swarm-fund.sh [name]`（accounts.create + create_free_test_coins，amount 参数被忽略固定给 1e9 µT）、`publish-local.sh <tpl…>`（PTY 包装的 `tari publish -n localnet -a default`）。walletd :12010、webui :8080；`default` 账户 `component_14c236cf…`，e2e 商户 `e2e_merchant` `component_7ce2546e…`。本机 swarm 上的模板：agent_budget `template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f`、escrow `template_bb8d36d251730c7e6d5a725bddf51ce43acf99ca62e7e4977e635ea3305ee3c0`、otc_board `template_5c0cd27ed0ee5867f4b960a12e33baec848c970c8b3145faf063ae3c7b8f8f28`（仓库 localnet 默认值已指向它们）。**保活**：从 Windows 用 wsl.exe 起的 setsid 进程会随发行版退出而死——必须另起一个后台 `wsl.exe -d ootle-dev -u root -- bash -c "sleep infinity"`（或任何常驻会话）把发行版撑住；esmeralda walletd 同理用 run_in_background 常驻。Windows 侧 `127.0.0.1:12010` / `:5100` 直接可达，三条 e2e 脚本都是在 Windows 上用 Y 盘的 SDK 跑的。manifest 里 TemplateAddress 参数写 `address!("template_…")` 可用（configure_escrow 验证过）。
 
 **从 Windows 驱动 WSL 的三个坑（都踩过）**：
 1. Git Bash 调 `wsl.exe ... bash -lc '...'`：`$变量`/for 循环变量不展开，`/mnt/i/...` 还会被 MSYS 路径转换成 `D:/Program Files/Git/mnt/...`。

@@ -53,7 +53,7 @@ except ImportError as exc:  # pragma: no cover - friendly message when the SDK c
 WALLETD_URL = os.environ.get("AGENTPAY_WALLETD_URL", "http://127.0.0.1:12010/json_rpc")
 DEFAULT_TEMPLATE = os.environ.get(
     "AGENTPAY_BUDGET_TEMPLATE",
-    "template_758d0c587624cab9634692a9b13424e2da89e7389e0e8e2272c6dc7bdeec5b97",
+    "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
 )
 
 

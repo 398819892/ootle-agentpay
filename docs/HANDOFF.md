@@ -73,6 +73,12 @@ make swarm-up                     # 起本地 swarm（挖矿产币、自动注�
 make publish-local                # 发布 escrow + agent_budget + otc_board 到本地 swarm
 make swarm-down                   # 停
 ```
+**这台机器（I 盘 `ootle-dev` WSL）的本地 swarm 已于 2026-11-02 init 并跑通**：`default` 账户已领币，三模板已发布 ——
+agent_budget `template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f`、
+escrow `template_bb8d36d251730c7e6d5a725bddf51ce43acf99ca62e7e4977e635ea3305ee3c0`、
+otc_board `template_5c0cd27ed0ee5867f4b960a12e33baec848c970c8b3145faf063ae3c7b8f8f28`（仓库里的 localnet 默认地址已改成这三个）。
+重启后用 `I:\wsl\setup\swarm-init-start.sh -k` 恢复；从 Windows 驱动时要另开一个 `sleep infinity` 的 wsl 会话保活，
+否则发行版退出会把 swarm 一起带走。三条真链 e2e（`make e2e`）在它上面全部通过。
 **本地私链的命脉坑（都已解决，换机器重搭会再遇到）**：
 - **L1/L2 版本必须匹配**：L2 tari-ootle v0.47.0 pin 的 L1 是 minotari **6.2.0-pre.2**（不是 README 的 5.2.0-pre.5），
   且 L1 要 **esme 版**不是 mainnet 版，否则 VN 注册签名失败 / 拒绝 localnet。
@@ -178,20 +184,23 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
 **仍待办（需要人拍板/链环境）**：
 - 三个模板 `lib.rs` 的版权头仍是 `Copyright 2026 The Tari Project`（上游模板遗留）——要换成项目所有者的名字，**需你提供**。
 - API key → 链上会话映射（每 key 一个 session badge）未做。
-- `remove_merchant` / `set_limits` 已在三层接通，但只跑过 mock/dead-walletd 测试；**还没在本地 swarm 上真实跑过一次**
-  （移除后 pay 被链拒、改限额后新上限生效），接链时补一条 e2e。
+- ~~`remove_merchant` / `set_limits` 还没在本地 swarm 上真实跑过~~ ✅ 2026-11-02 `scripts/e2e_onchain_admin.py`
+  在本地 swarm 真链通过：移除后 pay 被验证节点拒（`Merchant is not whitelisted`）、加回后可付、`set_limits` 后超 1 单位被拒、
+  恰好等于新上限通过、日上限压到已花额之上触发 `daily cap`。已并入 `make e2e` / `ci-local.sh`（仍是 `RUN_E2E=1` 门控）。
 - ~~esmeralda 上重发当前 `agent_budget`~~ ✅ 2026-11-01 完成（`template_88b11261…`，真链确认付款通过）；
   escrow 也重发为 `template_11dc03f7…`（第一次被 `Insufficient fees paid` 拒，`--max-fee 1600000` 后成功）。
-  `pay_via_escrow` 在 esmeralda 上尚未实跑（需要先 `configure_escrow` 指向新 escrow）。
-- ~~新机器的 WSL 是空的~~ ✅ 已在 I 盘建好 `ootle-dev`（二进制、Rust、tari CLI、模板 ext4 副本、esmeralda walletd；
-  本地 swarm 还没 init）。细节见 `docs/memory/ootle-dev-wsl-on-i-drive.md`。
+  ~~`pay_via_escrow` 在 esmeralda 上尚未实跑~~ ✅ 2026-11-02 `scripts/e2e_onchain_escrow.py` 在 esmeralda 通过
+  （预算 `component_2a785e3f…`，escrow `component_5cb0a1c3…`，`released` 事件 payee 380 / fee 20）；公网 indexer-b 当天
+  仍偶发 30s 超时，SDK 按设计不重发，确认钱包没记录该 tx 后整条重跑即可。
+- ~~新机器的 WSL 是空的~~ ✅ 已在 I 盘建好 `ootle-dev`（二进制、Rust、tari CLI、模板 ext4 副本、esmeralda walletd，
+  本地 swarm 已 init 并发布三模板，见 §3.B）。细节见 `docs/memory/ootle-dev-wsl-on-i-drive.md`。
 
 **已完成**：7 轮外部评审的真实 bug 已逐条修复并带攻击场景回归测试（合约授权/资金、提交模糊性、
 幂等、部署加固、OTC 冻结、非托管部署、许可证统一 BSD-3、仪表盘链为权威、集成 API、稳定性 harness、
 付款 badge 证明、manifest 注入、开预算 unknown 恢复、付款事件 topic）。细节见各 commit 和
 `docs/audit-notes.md`；评审往来文档在仓库根的几个中文 `.md`（未入库）。
 
-**esmeralda 上链**：被公共 indexer 拥堵阻塞，见 §3.3。
+**esmeralda 上链**：三模板当前版本都已上链并真链验证（含 `pay_via_escrow`），见 `docs/esmeralda.md`。
 
 ---
 

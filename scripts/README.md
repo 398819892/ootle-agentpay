@@ -15,6 +15,18 @@ wallet daemon themselves — nothing here stores a credential.
 
 ---
 
+## Real on-chain e2e (integration; opt-in)
+
+| Script | What it proves (against a live walletd — exit 3 = unreachable, so CI can SKIP) |
+|---|---|
+| `e2e_onchain_pay.py` | Opens a budget through the real SDK, makes a **confirmed** `pay`, reads the vault from the tx diff and the merchant balance, and shows the validator rejects an over-cap pay with the cap reason (not a badge error). |
+| `e2e_onchain_admin.py` | `remove_merchant` → the same pay is rejected as *not whitelisted*; `add_merchant` → payable again; `set_limits` → one over the new per-tx cap rejected, exactly-at-cap confirmed, daily cap lowered below headroom hits the *daily cap*. |
+| `e2e_onchain_escrow.py` | `configure_escrow` + `pay_via_escrow`: the budget caps bind on the escrow route, the escrow component is created and the vault drops, the owner `release`s and the merchant receives amount − fee. Also runs on esmeralda (`WALLETD_URL`, `AGENT_TEMPLATE`, `ESCROW_TEMPLATE`, `OWNER`, `E2E_MERCHANT`). |
+
+`make e2e` runs all three (`RUN_E2E=1`, `WALLETD_URL` default `127.0.0.1:12010`). Defaults point at the
+templates published on the current local swarm — re-publishing changes the addresses, so pass
+`AGENT_TEMPLATE` / `ESCROW_TEMPLATE` after a `make publish-local`.
+
 ## Demos & interactive console
 
 | Script | What it does |

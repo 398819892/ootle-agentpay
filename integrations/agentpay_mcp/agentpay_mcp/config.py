@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 PRESETS: dict[str, dict[str, str]] = {
     "local": {
         "walletd_url": "http://127.0.0.1:12010/json_rpc",
-        "budget_template": "template_758d0c587624cab9634692a9b13424e2da89e7389e0e8e2272c6dc7bdeec5b97",
+        "budget_template": "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
         "owner_account": "default",
     },
     "esmeralda": {

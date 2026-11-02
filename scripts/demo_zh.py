@@ -38,7 +38,7 @@ OTC = "--otc" in sys.argv
 # 已发布到本地链的模板地址(发布一次就常驻链上)
 BUDGET_TEMPLATE = os.environ.get(
     "BUDGET_TEMPLATE",
-    "template_758d0c587624cab9634692a9b13424e2da89e7389e0e8e2272c6dc7bdeec5b97",
+    "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
 )
 
 

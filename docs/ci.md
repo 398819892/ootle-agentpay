@@ -23,7 +23,7 @@ wasmer's cranelift backend, which does not build on Windows or macOS (see
 | `sdk` | `pytest` | The stdlib JSON-RPC adapter (`agentpay.onchain`): manifests, injection guard, event decoding, badge resolution, non-custodial auth, resource parametrization; plus the chain-agnostic helpers and the public-API surface | **69** (+5 in `test_keys.py` with `ootle-py`) |
 | `web` | `node server/*.test.js` | security boundary (22) · audit durability (9) · step-up token binding (10) · strict substate parse (15) · reads not blocked by writes (3) · reconcile of an ambiguous open (7) | **66** |
 | `clients/ts` | `tsc` build + `node --test dist/*.test.js` | A clean type-checked compile of the zero-dependency TS client, then its manifest-injection, event-topic and resource-parametrization suites | build + **13** |
-| `e2e (real chain)` | `make e2e` / `RUN_E2E=1` | **Integration, opt-in:** opens a budget and makes a *confirmed* payment against a **live swarm**, asserting funds moved (vault down, merchant up). Guards "unit-green but real pay rejected". | 1 |
+| `e2e (real chain)` | `make e2e` / `RUN_E2E=1` | **Integration, opt-in**, three scripts against a **live swarm**: `e2e_onchain_pay.py` (confirmed payment, funds moved, over-cap rejected by the validator), `e2e_onchain_admin.py` (`remove_merchant` → pay rejected as not whitelisted, `set_limits` → new per-tx/daily caps enforced), `e2e_onchain_escrow.py` (`configure_escrow` + `pay_via_escrow` → escrow opened, owner `release` pays the merchant minus the fee). Guards "unit-green but real call rejected". | 3 |
 
 Template unit tests run the compiled template **in wasmer in-process** — no chain, no swarm. The web
 suite boots a **throwaway** server on a random port against temp state — no walletd. So **none of the

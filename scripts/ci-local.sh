@@ -207,26 +207,29 @@ run_ts() {
 # Gated: only runs with RUN_E2E=1 AND a reachable walletd. Otherwise SKIP (never FAIL) — so the
 # swarm-free GitHub runner stays honest instead of fake-green. Exit 3 from the script = unreachable.
 run_e2e() {
-  step "Real on-chain e2e — confirmed payment (integration; needs a local swarm)"
-  local script="$REPO_ROOT/scripts/e2e_onchain_pay.py"
+  step "Real on-chain e2e — confirmed pay · remove_merchant/set_limits · pay_via_escrow (integration; needs a local swarm)"
   if [ -z "${RUN_E2E:-}" ]; then
     record "e2e (real chain)" SKIP "" "set RUN_E2E=1 to run (needs a local swarm)"
     return
   fi
-  if [ ! -f "$script" ]; then record "e2e (real chain)" FAIL "" "missing $script"; return; fi
   if ! command -v "$PYTHON" >/dev/null 2>&1; then record "e2e (real chain)" FAIL "" "$PYTHON not found"; return; fi
-  local log="$LOGDIR/e2e.log"
-  "$PYTHON" "$script" >"$log" 2>&1
-  local rc=$?
-  if [ $rc -eq 0 ]; then
-    record "e2e (real chain)" PASS "1" "confirmed payment verified on chain"
-    TOTAL_TESTS=$((TOTAL_TESTS + 1))
-  elif [ $rc -eq 3 ]; then
-    record "e2e (real chain)" SKIP "" "walletd unreachable (RUN_E2E set but no swarm)"
-  else
-    record "e2e (real chain)" FAIL "" "on-chain payment NOT confirmed — see tail below"
-    tail -n 25 "$log" | sed 's/^/        /'
-  fi
+  local name script log rc
+  for name in pay admin escrow; do
+    script="$REPO_ROOT/scripts/e2e_onchain_$name.py"
+    if [ ! -f "$script" ]; then record "e2e $name (real chain)" FAIL "" "missing $script"; continue; fi
+    log="$LOGDIR/e2e_$name.log"
+    "$PYTHON" "$script" >"$log" 2>&1
+    rc=$?
+    if [ $rc -eq 0 ]; then
+      record "e2e $name (real chain)" PASS "1" "chain-enforced outcome verified"
+      TOTAL_TESTS=$((TOTAL_TESTS + 1))
+    elif [ $rc -eq 3 ]; then
+      record "e2e $name (real chain)" SKIP "" "walletd unreachable (RUN_E2E set but no swarm)"
+    else
+      record "e2e $name (real chain)" FAIL "" "on-chain outcome NOT verified — see tail below"
+      tail -n 25 "$log" | sed 's/^/        /'
+    fi
+  done
 }
 
 # ================================================================ main
