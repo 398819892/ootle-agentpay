@@ -112,7 +112,7 @@ def test_pay_builds_manifest_with_proof_and_memo():
     b = _budget()
     b.pay(SHOP, 500, memo="ap1|inv1|tag")
     manifest, variables = b.client.runs[-1]
-    assert f'create_proof_for_resource(address!("{AGENT_BADGE}"))' in manifest
+    assert f'create_proof_by_non_fungible_ids(address!("{AGENT_BADGE}"), [non_fungible_id!("default")])' in manifest
     # `pay` takes the session-badge proof as its first arg (so it can identify / refuse a revoked session)
     assert f'budget.pay(proof, address!("{SHOP}"), amount!(500), "ap1|inv1|tag")' in manifest
     assert "drop_all_proofs!();" in manifest
@@ -191,7 +191,7 @@ def test_open_resolves_badges_from_state_not_sort():
     assert b.agent_badge == agent_badge
     # and the pay proof must target the real agent badge (what the template asserts)
     manifest = b._pay_manifest(SHOP, 100, "m")
-    assert f'create_proof_for_resource(address!("{agent_badge}"))' in manifest
+    assert f'create_proof_by_non_fungible_ids(address!("{agent_badge}"), [non_fungible_id!("default")])' in manifest
 
 
 # -- would_reject surfaces the validator's reason -------------------------------------
@@ -388,3 +388,27 @@ def test_resource_parametrization_rejects_bad_resource():
     with pytest.raises(ChainError):
         b.top_up(500)                       # bad resource address is rejected at manifest-build time
     assert b.client.runs == []
+
+
+# -- session selection: the pay proof carries exactly ONE badge, chosen by id ---------------
+
+def test_pay_session_override_and_client_field():
+    b = _budget()
+    b.pay(SHOP, 100, memo="m", session="key-bot1")
+    manifest, _ = b.client.runs[-1]
+    assert f'create_proof_by_non_fungible_ids(address!("{AGENT_BADGE}"), [non_fungible_id!("key-bot1")])' in manifest
+    assert "create_proof_for_resource" not in manifest
+    b.session = "agent-2"
+    b.pay(SHOP, 100, memo="m")
+    assert 'non_fungible_id!("agent-2")' in b.client.runs[-1][0]
+    b.pay_invoice(merchant=SHOP, invoice_id="deadbeef", amount=50, session="key-x")
+    assert 'non_fungible_id!("key-x")' in b.client.runs[-1][0]
+
+
+def test_pay_rejects_injected_session_label_before_any_rpc():
+    b = _budget()
+    n = len(b.client.runs)
+    for bad in ['x") ; owner.withdraw(XTR, amount!(1)); //', "with space", "", "a" * 65, "é"]:
+        with pytest.raises(ChainError):
+            b.pay(SHOP, 100, memo="m", session=bad)
+    assert len(b.client.runs) == n

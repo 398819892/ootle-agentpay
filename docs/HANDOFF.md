@@ -184,7 +184,11 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
 
 **仍待办（需要人拍板/链环境）**：
 - ~~三个模板 `lib.rs` 的版权头仍是 `Copyright 2026 The Tari Project`~~ ✅ 2026-11-02 统一为 `Copyright 2026 The AgentPay Authors`（三模板源码+测试、`Cargo.toml` authors、新增根 `LICENSE`、`sdk/LICENSE`）。
-- API key → 链上会话映射（每 key 一个 session badge）未做。
+- ~~API key → 链上会话映射~~ ✅ 2026-11-02：每个 `/api/v1` key 固定映射到会话 `key-<id>`；
+  `POST /api/v1/keys/:id/session` 发 badge，之后该 key 的付款只证明这一枚 badge（`create_proof_by_non_fungible_ids`），
+  `POST /api/v1/keys/:id/session/revoke` 链上 `revoke_session` 让验证节点拒该 key；`AGENTPAY_REQUIRE_KEY_SESSIONS=true`
+  禁止回退 `default`；链上撤销过的 badge 不能重铸（NFT 已存在），重新启用 key 会铸下一代 `key-<id>.2`。顺带修了一个潜伏 bug：同一账户持有 ≥2 枚会话 badge 时旧的 `create_proof_for_resource` 付款必被拒
+  （"Present exactly one agent session badge"），TS/Python 客户端现在都按 id 证明单枚 badge。
 - ~~`remove_merchant` / `set_limits` 还没在本地 swarm 上真实跑过~~ ✅ 2026-11-02 `scripts/e2e_onchain_admin.py`
   在本地 swarm 真链通过：移除后 pay 被验证节点拒（`Merchant is not whitelisted`）、加回后可付、`set_limits` 后超 1 单位被拒、
   恰好等于新上限通过、日上限压到已花额之上触发 `daily cap`。已并入 `make e2e` / `ci-local.sh`（仍是 `RUN_E2E=1` 门控）。

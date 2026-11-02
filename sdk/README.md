@@ -27,7 +27,10 @@ and the kill switch are enforced **on chain by the validator** — not by the cl
 policy check is a friendly early error only; `OnChainBudget.would_reject()` asks the *validator*
 (a dry run) and returns its reason, e.g. `Amount exceeds the per-transaction cap`. The invoice/memo
 codec rides along as the (public, plaintext) on-chain memo, and a watcher rebuilds the local ledger
-from the chain's `pay` events (`OnChainBudget.pay_events`).
+from the chain's `pay` events (`OnChainBudget.pay_events`). A budget can carry several agent
+session badges (`issue_agent_badge`); the pay proof names **one** of them by id
+(`OnChainBudget.session`, or `pay(..., session=...)`), which is what lets the owner
+`revoke_session` a single agent/API key while the others keep paying.
 
 Every value spliced into a transaction manifest (addresses, amounts, memo, session labels) is
 strictly validated inside the manifest builders, so a crafted memo cannot inject manifest

@@ -63,6 +63,7 @@ All optional; defaults target the local swarm.
 | `AGENTPAY_WALLETD_URL` | wallet daemon JSON-RPC URL | `http://127.0.0.1:12010/json_rpc` |
 | `AGENTPAY_BUDGET_TEMPLATE` | AgentBudget template address | localnet `template_978113ef…` |
 | `AGENTPAY_OWNER_ACCOUNT` | funded owner account name | `default` |
+| `AGENTPAY_REQUIRE_KEY_SESSIONS` | `true` → an `/api/v1` key may pay **only** through its own on-chain session badge (`key-<id>`, issued with `POST /api/v1/keys/:id/session`); otherwise a key without one pays via the `default` session | *(unset → fallback allowed)* |
 | `DASHBOARD_PASSWORD` | sign-in password — **setting it enables auth** | *(unset → open dev mode)* |
 | `SESSION_SECRET` | signs session cookies (`openssl rand -hex 32`) | *(ephemeral per process)* |
 | `COOKIE_SECURE` | force the `Secure` cookie flag behind HTTPS | *(inferred from `X-Forwarded-Proto`)* |
@@ -116,6 +117,10 @@ curl -s -X POST localhost:8787/api/v1/payments -H "Authorization: Bearer sk_agen
   -H 'Content-Type: application/json' -H 'Idempotency-Key: order-42' \
   -d '{"merchant":"shop","amount":"250"}'
 ```
+
+Each key can get **its own on-chain agent session badge** (`POST /api/v1/keys/:id/session`, label
+`key-<id>`): its payments then prove that badge, so `POST /api/v1/keys/:id/session/revoke` makes the
+*validators* refuse that key — independent of the server-side key revoke.
 
 Full reference + integration guide: **[docs/api.md](../docs/api.md)**. Machine spec:
 `GET /api/v1/openapi.json`. Copy-paste examples (curl / Node / Python): **[examples/](../examples/)**.

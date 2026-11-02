@@ -93,6 +93,34 @@ though it is still syntactically valid. Removing the key from `AGENTPAY_API_KEYS
 also works. Issuing or rotating keys over HTTP is still out of scope (below) — the key list lives in
 the environment.
 
+### Per-key on-chain sessions (API key → agent session badge)
+
+A server-side revoke stops the *server* honouring a key. To make the **chain** refuse a key, give it
+its own agent session badge: every key maps deterministically to the session label **`key-<id>`**
+(no mapping table to keep in sync — whether that badge exists / is revoked is read from the budget's
+session list, which follows confirmed chain transactions).
+
+| Step | Call | On chain |
+| --- | --- | --- |
+| issue | `POST /api/v1/keys/<id>/session` *(admin)* | `issue_agent_badge("key-<id>")` via the owner badge (high-risk op: step-up + durable audit, like the dashboard's *issue session*) |
+| pay | `POST /api/v1/payments` with that key | the pay proof carries **exactly** the `key-<id>` badge (`create_proof_by_non_fungible_ids`), so the `pay` event's `session` names the key |
+| revoke | `POST /api/v1/keys/<id>/session/revoke` *(admin)* | `revoke_session("key-<id>")` — the validators reject every further pay from this key; other keys/sessions keep working |
+| re-enable | `POST /api/v1/keys/<id>/session` again | mints the **next generation** `key-<id>.2`, `.3`, … — a revoked badge stays revoked for good (its non-fungible id cannot be minted twice: `revoke_session` marks it, it does not burn it); the key's current label is the highest generation in the budget's session list |
+
+Which session signs a payment is decided by **who is calling** (the key id), never by the request
+body — a client cannot pay as another key's session. A key whose badge has not been issued pays
+through the budget's `"default"` session (backwards compatible); set
+`AGENTPAY_REQUIRE_KEY_SESSIONS=true` to refuse such keys with `403` instead. A key whose session was
+revoked on chain gets a `403` before any transaction is submitted (no fee spent on a certain reject).
+Receipts carry the paying `session`, and `GET /api/v1/keys` shows each key's
+`session: { label, issued, revoked }`.
+
+> The dashboard's own session list shows `key-…` sessions like any other, and its *revoke session*
+> button does the same on-chain revoke. Note that **all** clients now prove one specific badge by id:
+> with several session badges in one account, a proof over the whole resource carries all of them and
+> the template rejects it (`Present exactly one agent session badge`) — proving by id is what makes
+> per-key sessions in a single agent account possible.
+
 ---
 
 ## Amounts, ids and idempotency
@@ -140,13 +168,18 @@ Response — a **receipt**, with an HTTP status that reflects the chain verdict:
     "id": "order-4821", "status": "confirmed", "txId": "...",
     "amount": "250", "merchant": "component_...", "merchantName": "shop",
     "memo": "order #4821", "invoiceId": "a1b2c3d4e5f6a7b8",
+    "session": "key-bot1",
     "reason": null, "createdAt": "...", "updatedAt": "..."
   },
   "replayed": false
 }
 ```
 
+`session` is the agent session badge that signed the payment: the key's own `key-<id>` once issued
+(see *Per-key on-chain sessions*), else `default`.
+
 Other statuses: `400` bad request (incl. a missing `Idempotency-Key`) · `401` missing/invalid key ·
+`403` the key's on-chain session is revoked, or (with `AGENTPAY_REQUIRE_KEY_SESSIONS`) not issued yet ·
 `409` no budget open, or the same `Idempotency-Key` reused with different parameters
 (`idempotencyConflict`) · `423` frozen (kill switch) · `429` rate limited.
 
@@ -200,11 +233,26 @@ Recent append-only audit entries (secrets redacted). Every state-changing API ca
 (bad key, insufficient role, frozen, rate-limited), is recorded with the acting key's `id`.
 
 ### `GET /api/v1/keys` — list API keys  *(admin)*
-`{ "keys": [ { "id", "role", "revoked" } ] }` — metadata only, never a secret.
+`{ "keys": [ { "id", "role", "revoked", "session": { "label", "issued", "revoked", "generation" } } ] }` —
+metadata only, never a secret. `session` is the key's **current** on-chain agent session (`key-<id>`,
+or `key-<id>.N` after N−1 re-enables) and whether it has been issued / revoked on chain.
 
 ### `POST /api/v1/keys/:id/revoke` — revoke a key at runtime  *(admin)*
-Flips the persisted revocation flag for `id` (404 if no such key is configured). Returns the updated
-key list. The entry stays in `AGENTPAY_API_KEYS`; remove it there too when you next restart.
+Flips the persisted **server-side** revocation flag for `id` (404 if no such key is configured).
+Returns the updated key list. The entry stays in `AGENTPAY_API_KEYS`; remove it there too when you
+next restart. This does not touch the chain — see the next two endpoints for that.
+
+### `POST /api/v1/keys/:id/session` — issue the key's on-chain session badge  *(admin)*
+Mints the agent session badge `key-<id>` (owner-badge transaction; high-risk: step-up + durable audit).
+`201 { id, session: { label, issued, revoked }, issued: true }` once confirmed, `202 … pending` if the
+tx is still finalizing, `200 … already: true` if it was already issued, `404` unknown key, `409` no
+budget open. After an on-chain revoke, issuing again mints the next generation (`key-<id>.2`, …) and
+the key pays with that one from then on; the response's `session.generation` says which.
+
+### `POST /api/v1/keys/:id/session/revoke` — revoke that session **on chain**  *(admin)*
+`revoke_session("key-<id>")`: from the next block the validators reject every payment this key
+signs, whatever the server does. `200 { id, session, revoked: true }` (or `already: true`),
+`202 … pending`, `404` unknown key / no session issued, `409` no budget open.
 
 ---
 
@@ -282,6 +330,3 @@ Deliberately not in this round; the surface is versioned so these can land witho
 - **Cursor pagination** on `GET /payments` and `GET /audit` (today both return a bounded recent set).
 - **A separate signing microservice** so the web box holds no keys at all (see
   [docs/custody.md](custody.md) — the target custody architecture).
-- **API key → on-chain session mapping.** Every agent key pays through the budget's `"default"`
-  session badge today, so a single key cannot be cut off on chain with `revoke_session` — use the
-  runtime key revoke above (server-side) or the budget's global `revoke`.

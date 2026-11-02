@@ -193,6 +193,15 @@ class OnChainBudget {
         // client-side for convenience; the chain is the source of truth for what each can do.
         this.sessions = ["default"];
         this.revokedSessions = [];
+        /**
+         * The agent session badge this client proves when it pays (label of one non-fungible of the
+         * agent-badge resource). `"default"` is the badge minted by `open`; set it to a label issued with
+         * `issueAgentBadge` to pay as that session, or pass `{ session }` per call. The proof is built with
+         * `create_proof_by_non_fungible_ids` so it carries EXACTLY this one token: the template rejects a
+         * proof with several session tokens ("Present exactly one agent session badge"), which is what a
+         * plain `create_proof_for_resource` produces once an account holds more than one session badge.
+         */
+        this.session = "default";
         this.client = client;
         this.budgetTemplate = budgetTemplate;
         this.ownerAccount = ownerAccount;
@@ -336,7 +345,10 @@ class OnChainBudget {
         });
         if (!this.sessions.includes(session))
             this.sessions.push(session);
-        this.revokedSessions = this.revokedSessions.filter((s) => s !== session); // re-issue clears revoke
+        // Mirrors the template, which drops the label from its revoked list on a successful mint. Note a
+        // REVOKED badge's label can only be re-minted after that badge was burned: the engine refuses to
+        // re-create an NFT that still exists — re-enable with a new label instead.
+        this.revokedSessions = this.revokedSessions.filter((s) => s !== session);
         return session;
     }
     /**
@@ -382,12 +394,13 @@ class OnChainBudget {
         await this.client.run(manifest, { owner: this.ownerAccount, budget: this.component });
     }
     // -- agent -----------------------------------------------------------------------
-    payManifest(merchant, amount, memo) {
-        // The agent presents a proof of its session badge; `pay` reads it to identify (and, if revoked,
-        // refuse) the session before moving funds.
+    payManifest(merchant, amount, memo, session = this.session) {
+        // The agent presents a proof of ONE session badge (selected by its non-fungible id — see the
+        // `session` field); `pay` reads it to identify (and, if revoked, refuse) the session before
+        // moving funds. The label is validated before it is spliced into the `non_fungible_id!("…")` literal.
         return ("fn main() {\n" +
             '    let mut agent = var!["agent"];\n' +
-            `    let proof = agent.create_proof_for_resource(address!("${checkResource(this.agentBadge)}"));\n` +
+            `    let proof = agent.create_proof_by_non_fungible_ids(address!("${checkResource(this.agentBadge)}"), [non_fungible_id!("${checkSession(session)}")]);\n` +
             '    let mut budget = var!["budget"];\n' +
             `    budget.pay(proof, address!("${checkComponent(merchant)}"), amount!(${amt(amount)}), "${checkMemo(memo)}");\n` +
             "    drop_all_proofs!();\n" +
@@ -401,7 +414,7 @@ class OnChainBudget {
     async pay(merchant, amount, opts = {}) {
         const memo = opts.memo ?? "";
         this.precheck(merchant, amount);
-        const res = await this.client.run(this.payManifest(merchant, amount, memo), {
+        const res = await this.client.run(this.payManifest(merchant, amount, memo, opts.session ?? this.session), {
             agent: this.agentAccount,
             budget: this.component,
         });
@@ -419,7 +432,7 @@ class OnChainBudget {
      */
     async wouldReject(merchant, amount, opts = {}) {
         const memo = opts.memo ?? "forced";
-        const r = await this.client.dryRun(this.payManifest(merchant, amount, memo), {
+        const r = await this.client.dryRun(this.payManifest(merchant, amount, memo, opts.session ?? this.session), {
             agent: this.agentAccount,
             budget: this.component,
         });
@@ -430,10 +443,11 @@ class OnChainBudget {
         const outcome = (0, walletd_1.finalizedOutcome)(r.result);
         return outcome && outcome[0] === "reject" ? outcome[1] : null;
     }
-    /** Pay an invoice: the invoice id + agent tag ride along as the on-chain memo. */
+    /** Pay an invoice: the invoice id + agent tag ride along as the on-chain memo. `session` selects
+     *  which issued session badge pays (defaults to this client's `session`). */
     async payInvoice(params) {
         const memo = (0, invoice_1.encodeMemo)(params.invoiceId, params.agentTag ?? "").Message;
-        return this.pay(params.merchant, params.amount, { memo });
+        return this.pay(params.merchant, params.amount, { memo, session: params.session });
     }
     precheck(merchant, amount) {
         const a = big(amount);

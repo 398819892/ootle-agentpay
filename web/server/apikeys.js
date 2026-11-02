@@ -28,6 +28,37 @@ const ROLES = Object.freeze({ AGENT: "agent", ADMIN: "admin" });
 const ID_RE = /^[A-Za-z0-9_.-]{1,48}$/;
 const MIN_SECRET = 16;
 
+/**
+ * API key -> on-chain agent session. Every key maps DETERMINISTICALLY to one session-badge label,
+ * `key-<id>`, so no extra mapping table has to be stored or kept in sync: whether that badge has
+ * been issued (and whether it is revoked) is read from the budget's session list, which follows
+ * confirmed chain transactions. A key id matches ID_RE (<= 48 of [A-Za-z0-9_.-]), so the label is
+ * always a valid session label (<= 64 of the same alphabet) and can be spliced into a manifest.
+ * The prefix keeps key sessions apart from labels operators pick by hand in the dashboard.
+ */
+const SESSION_PREFIX = "key-";
+/**
+ * Label of generation `gen` of a key's session: `key-<id>` for the first badge, `key-<id>.<gen>` after.
+ * Generations exist because a REVOKED badge can never be re-minted: `revoke_session` marks the
+ * non-fungible id as revoked but does not burn the token, and the engine refuses to create a
+ * substate (the NFT) that already exists. Re-enabling a key therefore issues the next generation;
+ * the current one is the highest generation present in the budget's session list.
+ */
+function sessionLabel(id, gen = 1) {
+  if (!ID_RE.test(String(id))) throw new Error(`bad API key id ${JSON.stringify(id)}`);
+  const g = Number(gen);
+  if (!Number.isInteger(g) || g < 1 || g > 9999) throw new Error(`bad session generation ${JSON.stringify(gen)}`);
+  return SESSION_PREFIX + id + (g === 1 ? "" : "." + g);
+}
+/** Generation number if `label` is one of key `id`'s session labels, else 0. */
+function sessionGeneration(label, id) {
+  const base = sessionLabel(id);
+  if (label === base) return 1;
+  if (typeof label !== "string" || !label.startsWith(base + ".")) return 0;
+  const g = label.slice(base.length + 1);
+  return /^[1-9][0-9]{0,3}$/.test(g) && Number(g) >= 2 ? Number(g) : 0;
+}
+
 function sha256(s) {
   return crypto.createHash("sha256").update(String(s)).digest();
 }
@@ -119,7 +150,12 @@ function createApiKeys({ raw, store, save, audit } = {}) {
     return keys.length > 0;
   }
 
-  return { verify, revoke, list, configured, ROLES };
+  /** True if a key with this id is configured (revoked or not). */
+  function has(id) {
+    return keys.some((k) => k.id === id);
+  }
+
+  return { verify, revoke, list, configured, has, sessionLabel, sessionGeneration, ROLES };
 }
 
-module.exports = { createApiKeys, parseKeys, ROLES };
+module.exports = { createApiKeys, parseKeys, sessionLabel, sessionGeneration, SESSION_PREFIX, ROLES };

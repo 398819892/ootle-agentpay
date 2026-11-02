@@ -43,6 +43,15 @@ export declare class OnChainBudget {
     ledger: LedgerEntry[];
     sessions: string[];
     revokedSessions: string[];
+    /**
+     * The agent session badge this client proves when it pays (label of one non-fungible of the
+     * agent-badge resource). `"default"` is the badge minted by `open`; set it to a label issued with
+     * `issueAgentBadge` to pay as that session, or pass `{ session }` per call. The proof is built with
+     * `create_proof_by_non_fungible_ids` so it carries EXACTLY this one token: the template rejects a
+     * proof with several session tokens ("Present exactly one agent session badge"), which is what a
+     * plain `create_proof_for_resource` produces once an account holds more than one session badge.
+     */
+    session: string;
     constructor(client: WalletdClient, budgetTemplate: string, ownerAccount: string, opts?: OnChainBudgetOptions);
     /**
      * Manifest expression for the budget's resource: the `XTR` keyword for the native token, else a
@@ -124,6 +133,7 @@ export declare class OnChainBudget {
      */
     pay(merchant: string, amount: AmountInput, opts?: {
         memo?: string;
+        session?: string;
     }): Promise<any>;
     /**
      * Ask the validator (via a dry run) whether this pay would be rejected, returning the on-chain
@@ -132,13 +142,16 @@ export declare class OnChainBudget {
      */
     wouldReject(merchant: string, amount: AmountInput, opts?: {
         memo?: string;
+        session?: string;
     }): Promise<string | null>;
-    /** Pay an invoice: the invoice id + agent tag ride along as the on-chain memo. */
+    /** Pay an invoice: the invoice id + agent tag ride along as the on-chain memo. `session` selects
+     *  which issued session badge pays (defaults to this client's `session`). */
     payInvoice(params: {
         merchant: string;
         invoiceId: string;
         amount: AmountInput;
         agentTag?: string;
+        session?: string;
     }): Promise<any>;
     private precheck;
     /**

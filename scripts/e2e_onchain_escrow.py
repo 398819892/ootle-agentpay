@@ -76,7 +76,7 @@ def escrow_manifest(b: OnChainBudget, merchant: str, merchant_pk: str, amount: i
     return (
         'fn main() {\n'
         '    let mut agent = var!["agent"];\n'
-        f'    let proof = agent.create_proof_for_resource(address!("{_check_resource(b.agent_badge)}"));\n'
+        f'    let proof = agent.create_proof_by_non_fungible_ids(address!("{_check_resource(b.agent_badge)}"), [non_fungible_id!("{b.session}")]);\n'
         '    let mut budget = var!["budget"];\n'
         f'    budget.pay_via_escrow(proof, address!("{_check_component(merchant)}"), public_key!("{merchant_pk}"), '
         f'amount!({amount}), {TIMEOUT}u64, "{memo}");\n'

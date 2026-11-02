@@ -418,6 +418,12 @@ class OnChainBudget:
     # devnet flow is unchanged; a non-XTR budget passes a `resource_…` address to `open` (the template
     # itself is resource-agnostic — it locks whatever it is funded with). `top_up` reuses this.
     resource: str = "XTR"
+    # The agent session badge this client proves when it pays: the label of ONE non-fungible of the
+    # agent-badge resource ("default" is minted by `open`; `issue_agent_badge` mints more). The pay
+    # proof is built with `create_proof_by_non_fungible_ids` so it carries exactly that token — the
+    # template rejects a proof with several session tokens ("Present exactly one agent session
+    # badge"), which is what `create_proof_for_resource` yields once an account holds 2+ badges.
+    session: str = "default"
     component: str | None = None
     owner_badge: str | None = None
     agent_badge: str | None = None
@@ -542,8 +548,9 @@ class OnChainBudget:
                                    "agent": target})
         if session not in self.sessions:
             self.sessions.append(session)
-        if session in self.revoked_sessions:          # re-issuing clears a prior revoke (mirrors chain)
-            self.revoked_sessions.remove(session)
+        if session in self.revoked_sessions:          # mirrors the template on a successful mint; note a
+            self.revoked_sessions.remove(session)     # revoked badge's label can only be re-minted after
+                                                      # that badge was burned (its NFT still exists)
         return session
 
     def revoke_session(self, session: str) -> None:
@@ -587,25 +594,28 @@ class OnChainBudget:
         self.client.run(manifest, {"owner": self.owner_account, "budget": self.component})
 
     # -- agent -----------------------------------------------------------------------
-    def _pay_manifest(self, merchant: str, amount: int, memo: str) -> str:
-        # The agent presents a proof of its session badge; `pay` reads it to identify (and, if
-        # revoked, refuse) the session before moving funds.
+    def _pay_manifest(self, merchant: str, amount: int, memo: str, session: str | None = None) -> str:
+        # The agent presents a proof of ONE session badge, selected by its non-fungible id; `pay`
+        # reads it to identify (and, if revoked, refuse) the session before moving funds. The label
+        # goes through `_check_session` before it is spliced into the `non_fungible_id!("…")` literal.
+        sess = _check_session(self.session if session is None else session)
         return (
             'fn main() {\n'
             '    let mut agent = var!["agent"];\n'
-            f'    let proof = agent.create_proof_for_resource(address!("{_check_resource(self.agent_badge)}"));\n'
+            f'    let proof = agent.create_proof_by_non_fungible_ids(address!("{_check_resource(self.agent_badge)}"), [non_fungible_id!("{sess}")]);\n'
             '    let mut budget = var!["budget"];\n'
             f'    budget.pay(proof, address!("{_check_component(merchant)}"), amount!({_check_amount(amount)}), "{_check_memo(memo)}");\n'
             '    drop_all_proofs!();\n'
             '}\n'
         )
 
-    def pay(self, merchant: str, amount: int, *, memo: str = "") -> dict:
+    def pay(self, merchant: str, amount: int, *, memo: str = "", session: str | None = None) -> dict:
         """The agent pays a whitelisted merchant. The client-side checks below are only an early,
         friendly error — the chain enforces the real limits regardless of what this client does.
-        The local ledger is updated from the on-chain ``pay`` event, not from the request."""
+        The local ledger is updated from the on-chain ``pay`` event, not from the request.
+        ``session`` selects which issued session badge pays (defaults to ``self.session``)."""
         self._precheck(merchant, amount)
-        res = self.client.run(self._pay_manifest(merchant, amount, memo),
+        res = self.client.run(self._pay_manifest(merchant, amount, memo, session),
                               {"agent": self.agent_account, "budget": self.component})
         for ev in self.pay_events(res):      # ledger follows the chain's events
             # Track spend from the chain's OWN running total (`spent_in_window`), not by accumulating
@@ -619,10 +629,11 @@ class OnChainBudget:
                                            int(ev.get("amount", amount)), ev.get("memo", memo), "pay"))
         return res
 
-    def would_reject(self, merchant: str, amount: int, *, memo: str = "forced") -> str | None:
+    def would_reject(self, merchant: str, amount: int, *, memo: str = "forced",
+                     session: str | None = None) -> str | None:
         """Ask the validator (via a dry run) whether this pay would be rejected, returning the
         on-chain reason — used to show that the *chain*, not the client, enforces the rules."""
-        r = self.client.dry_run(self._pay_manifest(merchant, amount, memo),
+        r = self.client.dry_run(self._pay_manifest(merchant, amount, memo, session),
                                 {"agent": self.agent_account, "budget": self.component})
         # walletd surfaces a dry-run rejection either as an RPC error (a plain message string — no
         # structured field is available there, so it is parsed in the one place _clean_reason lives)
@@ -634,11 +645,12 @@ class OnChainBudget:
             return outcome[1]
         return None
 
-    def pay_invoice(self, *, merchant: str, invoice_id: str, amount: int, agent_tag: str = "") -> dict:
+    def pay_invoice(self, *, merchant: str, invoice_id: str, amount: int, agent_tag: str = "",
+                    session: str | None = None) -> dict:
         """Pay an invoice: the invoice id + agent tag ride along as the on-chain memo, unchanged
         from the phase-1 codec (`agentpay.invoice.encode_memo`)."""
         memo = encode_memo(invoice_id, agent_tag)["Message"]
-        return self.pay(merchant, amount, memo=memo)
+        return self.pay(merchant, amount, memo=memo, session=session)
 
     def _precheck(self, merchant: str, amount: int) -> None:
         if self.revoked:

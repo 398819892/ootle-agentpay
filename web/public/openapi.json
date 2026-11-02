@@ -204,6 +204,37 @@
           "404": { "description": "No API key with that id", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
         }
       }
+    },
+    "/api/v1/keys/{id}/session": {
+      "post": {
+        "tags": ["keys"],
+        "summary": "Issue the key's own on-chain agent session badge (admin)",
+        "description": "Mints the agent session badge key-<id> via the owner badge (high-risk: step-up + durable audit). From then on this key's payments prove exactly that badge, so the pay event's session names the key and POST /keys/{id}/session/revoke can cut it off on chain. Idempotent. After an on-chain revoke it mints the next generation (key-<id>.2, …) since a revoked badge's non-fungible id cannot be re-created.",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "201": { "description": "Issued (confirmed)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KeySessionResponse" } } } },
+          "200": { "description": "Already issued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KeySessionResponse" } } } },
+          "202": { "description": "Submitted, not yet confirmed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KeySessionResponse" } } } },
+          "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "No API key with that id", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "No budget open", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/keys/{id}/session/revoke": {
+      "post": {
+        "tags": ["keys"],
+        "summary": "Revoke the key's session ON CHAIN (admin)",
+        "description": "revoke_session(key-<id>) through the owner badge: the validators reject every further payment signed by this key, independent of the server-side key revoke. Other keys and sessions keep working.",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Revoked on chain (or already revoked)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KeySessionResponse" } } } },
+          "202": { "description": "Submitted, not yet confirmed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KeySessionResponse" } } } },
+          "403": { "description": "Admin key required", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "No API key with that id, or no session issued for it", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "No budget open", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
     }
   },
   "components": {
@@ -234,6 +265,7 @@
           "merchantName": { "type": "string", "nullable": true },
           "memo": { "type": "string", "nullable": true },
           "invoiceId": { "type": "string", "nullable": true },
+          "session": { "type": "string", "nullable": true, "description": "The agent session badge that signed the payment: the key's own key-<id> once issued, else default" },
           "reason": { "type": "string", "nullable": true, "description": "Chain's reason when rejected" },
           "createdAt": { "type": "string", "nullable": true },
           "updatedAt": { "type": "string", "nullable": true }
@@ -282,7 +314,34 @@
       },
       "ApiKeyInfo": {
         "type": "object",
-        "properties": { "id": { "type": "string" }, "role": { "type": "string", "enum": ["agent", "admin"] }, "revoked": { "type": "boolean" } }
+        "properties": {
+          "id": { "type": "string" },
+          "role": { "type": "string", "enum": ["agent", "admin"] },
+          "revoked": { "type": "boolean", "description": "Server-side revocation flag" },
+          "session": { "$ref": "#/components/schemas/KeySession" }
+        }
+      },
+      "KeySession": {
+        "type": "object",
+        "description": "The key's on-chain agent session badge (label key-<id>) and its state, read from the budget's session list (follows confirmed chain transactions).",
+        "properties": {
+          "label": { "type": "string", "example": "key-bot1" },
+          "issued": { "type": "boolean" },
+          "revoked": { "type": "boolean", "description": "Revoked ON CHAIN (validators refuse the key's payments)" },
+          "generation": { "type": "integer", "description": "0 = never issued; 1 = key-<id>; N = key-<id>.N (each re-enable after an on-chain revoke mints the next generation, because a revoked badge's id cannot be minted again)" }
+        }
+      },
+      "KeySessionResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "session": { "$ref": "#/components/schemas/KeySession" },
+          "issued": { "type": "boolean" },
+          "revoked": { "type": "boolean" },
+          "already": { "type": "boolean", "description": "true when the requested state was already in effect (idempotent)" },
+          "pending": { "type": "boolean" },
+          "txId": { "type": "string", "nullable": true }
+        }
       },
       "Error": {
         "type": "object",

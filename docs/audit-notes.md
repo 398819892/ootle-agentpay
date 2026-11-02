@@ -543,7 +543,20 @@ Followed up on the fifth review's deferred server items.
   revenue comes from the operated service, not the template.
 
 ### Still deferred (need live-chain validation or the owner's input)
-- **#14 API-key → session mapping** (per-key on-chain session revoke; currently one "default" session).
+- ~~**#14 API-key → session mapping**~~ **done 2026-11-02.** Each `/api/v1` key maps deterministically
+  to the session label `key-<id>`; `POST /keys/:id/session` issues that badge, the key's payments then
+  prove exactly it, `POST /keys/:id/session/revoke` is an on-chain `revoke_session`. Which session
+  signs is derived from the caller's key id, never from the request body. Doing this surfaced a latent
+  client bug: `create_proof_for_resource` carries *every* token of the resource, so the moment a second
+  session badge sat in the agent account every `pay` hit the template's "exactly one session badge"
+  guard. Both clients now prove one badge by id (`create_proof_by_non_fungible_ids`), verified on the
+  local swarm (two badges in one account: whole-resource proof rejected, by-id proof accepted, revoked
+  id rejected, `pay` event `session` = the chosen label). A second finding from the same run: a
+  **revoked session label cannot be re-issued** — `revoke_session` marks the non-fungible id but does
+  not burn the token, and the engine refuses to create an NFT substate that already exists
+  (`Substate nft_…_str_key-bot1:0 already exists`). The template's "re-issue clears the revocation"
+  path therefore only applies after the old badge was burned. The API maps a re-enabled key to the
+  next generation label (`key-<id>.2`, …) instead; the dashboard keeps refusing a duplicate label.
 - **SDK `open()` component discovery** — still finds the new component by "first unknown address";
   the robust fix decodes the `new` return value, same live-walletd-shape validation as #16's typed read.
 - **Licence unified to BSD-3-Clause (done).** The TS client was MIT; it is now BSD-3-Clause, matching

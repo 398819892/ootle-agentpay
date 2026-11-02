@@ -83,6 +83,12 @@ const AUTO_CREATE_MERCHANTS =
     : process.env.AGENTPAY_AUTO_CREATE_MERCHANTS === "false"
       ? false
       : !AUTH_ON;
+// API key -> on-chain session. Each /api/v1 key maps to its own agent session badge (`key-<id>`,
+// see apikeys.js). Once an admin has issued that badge (POST /api/v1/keys/:id/session) the key's
+// payments prove it, so `revoke_session` on chain cuts off that one key. Until then a key pays
+// through the budget's "default" session — unless this is set, in which case a key without an
+// issued session is refused (403) instead of silently falling back.
+const REQUIRE_KEY_SESSIONS = process.env.AGENTPAY_REQUIRE_KEY_SESSIONS === "true";
 // Secret for signing the session cookie. Provide SESSION_SECRET in production so sessions survive
 // restarts and are stable across replicas; otherwise we mint an ephemeral one per process.
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
@@ -1210,6 +1216,9 @@ const OPS = {
       // Free-text memo is recorded in the journal/receipt for the caller's reference. (It is NOT the
       // on-chain memo — that public plaintext memo carries the encoded invoice id + agent tag; see invoice.ts.)
       const memo = body.memo != null ? String(body.memo).slice(0, 120) : undefined;
+      // Which session badge signs this payment is decided by WHO is calling (the API key), not by the
+      // request body — a client must never be able to pay as another key's session.
+      const session = ctx.apiKeyId ? keySession(b, ctx.apiKeyId) : "default";
       const key = idemKey(body, "pay:" + invoiceId);
       let r;
       try {
@@ -1217,8 +1226,8 @@ const OPS = {
           key,
           "pay",
           b.component,
-          { merchant, amount, invoiceId, memo },
-          () => b.payInvoice({ merchant, invoiceId, amount, agentTag }),
+          { merchant, amount, invoiceId, memo, session },
+          () => b.payInvoice({ merchant, invoiceId, amount, agentTag, session }),
           { merchant, amount, memo }, // fingerprint on what the money DOES, not the (often auto-generated) invoiceId
         );
       } catch (e) {
@@ -1227,7 +1236,7 @@ const OPS = {
         throw httpError(422, chainMessage(e));
       }
       ctx.meta.txId = (r.record && r.record.txId) || invoiceId;
-      ctx.meta.params = { merchant, amount, invoiceId, memo };
+      ctx.meta.params = { merchant, amount, invoiceId, memo, session };
       // No snapshotBudget: the ledger + spend are rebuilt from chain / the journal, not persisted here.
       if (r.outcome === "unknown") return await pendingResult(r.record, "Payment");
       return { ...(await dashboardState()), paid: { amount, merchant, invoiceId }, replayed: Boolean(r.replay) };
@@ -1396,6 +1405,8 @@ const OPS = {
       if (!/^[A-Za-z0-9_.\-]{1,64}$/.test(session)) {
         throw httpError(400, "Use letters, numbers, '.', '-' or '_' (no spaces, max 64).");
       }
+      // A label can be minted once: `revoke_session` does not burn the badge, so the engine refuses to
+      // re-create its NFT. Re-enabling means a NEW label (the API keys use generations, key-<id>.2 …).
       if ((b.sessions || []).includes(session)) throw httpError(400, "That session label already exists.");
       const key = idemKey(body, "issueSession:" + session);
       let r;
@@ -1733,6 +1744,39 @@ async function executeAsKey(opName, body, ctx) {
   return await authz.execute(opName, body, ctx);
 }
 /** Build a public payment receipt from a tx-journal record (status is chain-authoritative). */
+/**
+ * The on-chain session state of an API key's badge, read from the budget snapshot (which follows
+ * confirmed chain txs): `{ label, issued, revoked }`.
+ */
+function keySessionInfo(budget, keyId) {
+  const sessions = (budget && Array.isArray(budget.sessions) && budget.sessions) || [];
+  let generation = 0;
+  for (const s of sessions) generation = Math.max(generation, apiKeys.sessionGeneration(s, keyId));
+  const label = apiKeys.sessionLabel(keyId, generation || 1);
+  const issued = generation > 0;
+  const revoked = issued && Array.isArray(budget.revokedSessions) && budget.revokedSessions.includes(label);
+  return { label, issued, revoked, generation };
+}
+function keysWithSessions() {
+  return apiKeys.list().map((k) => ({ ...k, session: keySessionInfo(store.budget, k.id) }));
+}
+/**
+ * Which session badge an API key pays with. Its own badge once issued (a revoked one is refused here
+ * with a clear 403 rather than spending a fee on a certain on-chain reject); otherwise the budget's
+ * "default" session, or a 403 when AGENTPAY_REQUIRE_KEY_SESSIONS forbids the fallback.
+ */
+function keySession(b, keyId) {
+  const info = keySessionInfo(b, keyId);
+  if (info.issued && info.revoked) {
+    throw httpError(403, `The on-chain session of API key ${JSON.stringify(keyId)} has been revoked.`, { session: info.label });
+  }
+  if (info.issued) return info.label;
+  if (REQUIRE_KEY_SESSIONS) {
+    throw httpError(403, `API key ${JSON.stringify(keyId)} has no on-chain session badge yet; an admin must POST /api/v1/keys/${encodeURIComponent(keyId)}/session first.`, { session: null });
+  }
+  return "default";
+}
+
 function receiptOf(rec) {
   if (!rec) return null;
   const names = nameByAddr();
@@ -1748,6 +1792,7 @@ function receiptOf(rec) {
     merchantName: merchant ? names[merchant] || null : null,
     memo: (ev && ev.memo) || p.memo || null,
     invoiceId: p.invoiceId || null,
+    session: (ev && ev.session) || p.session || null, // which agent session badge paid (chain event first)
     reason: rec.reason || null,
     createdAt: rec.createdAt || null,
     updatedAt: rec.updatedAt || null,
@@ -1798,8 +1843,10 @@ async function handleApiV1(req, res, urlPath) {
         "POST   /api/v1/budgets         (admin) — open/fund a budget",
         "POST   /api/v1/budget/limits   (admin) — change the per-tx / daily caps on chain",
         "GET    /api/v1/audit           (admin) — recent audit entries",
-        "GET    /api/v1/keys            (admin) — list API keys (id/role/revoked)",
-        "POST   /api/v1/keys/:id/revoke (admin) — revoke an API key at runtime",
+        "GET    /api/v1/keys            (admin) — list API keys (id/role/revoked + on-chain session)",
+        "POST   /api/v1/keys/:id/revoke (admin) — revoke an API key at runtime (server-side)",
+        "POST   /api/v1/keys/:id/session        (admin) — issue the key's own on-chain session badge (key-<id>)",
+        "POST   /api/v1/keys/:id/session/revoke (admin) — revoke that session ON CHAIN (validators refuse the key's pays)",
       ],
       spec: "/api/v1/openapi.json",
       docs: "docs/api.md",
@@ -1987,14 +2034,56 @@ async function handleApiV1(req, res, urlPath) {
     // flips the persisted revocation flag (secret-free metadata is returned).
     if (sub === "/keys" && method === "GET") {
       if (denyIfNotAdmin("listApiKeys")) return;
-      return sendJson(res, 200, { keys: apiKeys.list() });
+      return sendJson(res, 200, { keys: keysWithSessions() });
+    }
+    // ---- API key -> on-chain session (one agent session badge per key) -------------------------
+    // Issue: mints the badge `key-<id>` into the agent account via the owner badge (same high-risk
+    // op + step-up/audit path as the dashboard's "issue session"); from then on that key's payments
+    // prove this badge. Revoke: `revoke_session` on chain — the validators themselves refuse every
+    // further pay from this key, independent of the server-side key revoke above. Both are idempotent.
+    if (sub.startsWith("/keys/") && sub.endsWith("/session") && method === "POST") {
+      if (denyIfNotAdmin("issueKeySession")) return;
+      const id = decodeURIComponent(sub.slice("/keys/".length, -"/session".length));
+      if (!apiKeys.has(id)) return sendJson(res, 404, { error: `No API key with id ${JSON.stringify(id)}.` });
+      const session = apiKeys.sessionLabel(id);
+      const before = keySessionInfo(store.budget, id);
+      if (!store.budget) return sendJson(res, 409, { error: "No budget is open." });
+      if (before.issued && !before.revoked) {
+        return sendJson(res, 200, { id, session: before, issued: true, already: true });
+      }
+      // first badge = key-<id>; after an on-chain revoke the next generation (key-<id>.2, …) is minted
+      const next = before.revoked ? apiKeys.sessionLabel(id, before.generation + 1) : session;
+      const r = await serialize(() => executeAsKey("issueSession", { session: next }, ctx));
+      return sendJson(res, r && r.pending ? 202 : 201, {
+        id,
+        session: keySessionInfo(store.budget, id),
+        issued: !(r && r.pending),
+        ...(r && r.pending ? { pending: true, txId: r.txId || null, notice: r.notice } : {}),
+      });
+    }
+    if (sub.startsWith("/keys/") && sub.endsWith("/session/revoke") && method === "POST") {
+      if (denyIfNotAdmin("revokeKeySession")) return;
+      const id = decodeURIComponent(sub.slice("/keys/".length, -"/session/revoke".length));
+      if (!apiKeys.has(id)) return sendJson(res, 404, { error: `No API key with id ${JSON.stringify(id)}.` });
+      const session = apiKeys.sessionLabel(id);
+      const before = keySessionInfo(store.budget, id);
+      if (!store.budget) return sendJson(res, 409, { error: "No budget is open." });
+      if (!before.issued) return sendJson(res, 404, { error: `API key ${JSON.stringify(id)} has no on-chain session to revoke.` });
+      if (before.revoked) return sendJson(res, 200, { id, session: before, revoked: true, already: true });
+      const r = await serialize(() => executeAsKey("revokeSession", { session }, ctx));
+      return sendJson(res, r && r.pending ? 202 : 200, {
+        id,
+        session: keySessionInfo(store.budget, id),
+        revoked: !(r && r.pending),
+        ...(r && r.pending ? { pending: true, txId: r.txId || null, notice: r.notice } : {}),
+      });
     }
     if (sub.startsWith("/keys/") && sub.endsWith("/revoke") && method === "POST") {
       if (denyIfNotAdmin("revokeApiKey")) return;
       const id = decodeURIComponent(sub.slice("/keys/".length, -"/revoke".length));
       const ok = apiKeys.revoke(id);
       if (!ok) return sendJson(res, 404, { error: `No API key with id ${JSON.stringify(id)}.` });
-      return sendJson(res, 200, { id, revoked: true, keys: apiKeys.list() });
+      return sendJson(res, 200, { id, revoked: true, keys: keysWithSessions() });
     }
 
     return sendJson(res, 404, { error: "Unknown API endpoint. GET /api/v1 lists the available ones." });
@@ -2239,6 +2328,15 @@ server.listen(PORT, HOST, () => {
         : "OFF — set AGENTPAY_API_KEYS to enable the machine-to-machine API"
     }`,
   );
+  if (apiKeys.configured()) {
+    console.log(
+      `  ├─ key sessions ${
+        REQUIRE_KEY_SESSIONS
+          ? "REQUIRED — a key pays only through its own on-chain session badge (key-<id>)"
+          : "optional — a key without an issued badge pays via the \"default\" session (AGENTPAY_REQUIRE_KEY_SESSIONS=true to forbid)"
+      }`,
+    );
+  }
   console.log(`  ├─ journal ${txlog.file}`);
   const openCount = txlog.pendingOrUnknown().length;
   console.log(`  └─ template ${BUDGET_TEMPLATE.slice(0, 24)}…\n`);

@@ -147,6 +147,7 @@ console.log(budget.spent, budget.ledger);
 | `.open` / `.pay` / `.payInvoice` / `.wouldReject` / `.revoke` / `.withdraw` / `.addMerchant` / `.removeMerchant` / `.setLimits` | same | all `async` |
 | `.open({ …, resource? })` / `.topUp` | `open(resource=…)` / `top_up` | the budget's resource: `"XTR"` (default) or a `resource_…` address, reused by `topUp` |
 | `.issueAgentBadge` / `.revokeSession` / `.setWindow` | `issue_agent_badge` / `revoke_session` / `set_window` | multi-session badges + the rolling window |
+| `.session` field / `pay(..., { session })` / `payInvoice({ ..., session })` | `session` | which issued session badge the pay proof carries (`"default"` unless set). The proof is built with `create_proof_by_non_fungible_ids`, i.e. exactly one badge — required once an account holds several session badges |
 | `.readWindow()` | — (TS-only helper) | reads the live rolling-window status from chain |
 | `WalletdClient.currentEpoch()` | — (TS-only helper) | current chain epoch (via `settings.get`) |
 | `WalletdClient.getSubstate(id)` | — (TS-only helper) | read a component/resource substate (read-only) |
