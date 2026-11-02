@@ -14,6 +14,8 @@ metadata:
 
 **本地 swarm（2026-11-02 已 init）**：`I:\wsl\setup\swarm-init-start.sh`（首次 init+start；重启后 `-k` 恢复）、`swarm-check.sh`（进程/账户/epoch）、`swarm-fund.sh [name]`（accounts.create + create_free_test_coins，amount 参数被忽略固定给 1e9 µT）、`publish-local.sh <tpl…>`（PTY 包装的 `tari publish -n localnet -a default`）。walletd :12010、webui :8080；`default` 账户 `component_14c236cf…`，e2e 商户 `e2e_merchant` `component_7ce2546e…`。本机 swarm 上的模板：agent_budget `template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f`、escrow `template_bb8d36d251730c7e6d5a725bddf51ce43acf99ca62e7e4977e635ea3305ee3c0`、otc_board `template_5c0cd27ed0ee5867f4b960a12e33baec848c970c8b3145faf063ae3c7b8f8f28`（仓库 localnet 默认值已指向它们）。**保活**：从 Windows 用 wsl.exe 起的 setsid 进程会随发行版退出而死——必须另起一个后台 `wsl.exe -d ootle-dev -u root -- bash -c "sleep infinity"`（或任何常驻会话）把发行版撑住；esmeralda walletd 同理用 run_in_background 常驻。Windows 侧 `127.0.0.1:12010` / `:5100` 直接可达，三条 e2e 脚本都是在 Windows 上用 Y 盘的 SDK 跑的。manifest 里 TemplateAddress 参数写 `address!("template_…")` 可用（configure_escrow 验证过）。
 
+**2026-11-02 的两个新坑**：(a) 发行版会整体被停掉（cargo test + swarm 同时跑时 WSL 自己 Stopped 了一次，原因不明，可能是后台 wsl.exe 任务被结束连带），stop 后 swarm/walletd/保活全死，要三个一起重起；(b) swarm 的锁文件在 `run/data/swarm/tari_swarm.pid`（不是 run 目录下），`swarm-init-start.sh -k` 已改为两处都清。模板源码改动后用 `sync-and-test-templates.sh`（I:\wsl\sync	emplates → /root/ootle/<tpl>，cargo test）。
+
 **从 Windows 驱动 WSL 的三个坑（都踩过）**：
 1. Git Bash 调 `wsl.exe ... bash -lc '...'`：`$变量`/for 循环变量不展开，`/mnt/i/...` 还会被 MSYS 路径转换成 `D:/Program Files/Git/mnt/...`。
 2. PowerShell 调 `wsl.exe ... bash -c '... | grep ...'`：引号里的管道被 PowerShell 拆开当独立命令。
