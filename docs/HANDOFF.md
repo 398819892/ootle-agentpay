@@ -7,6 +7,9 @@
 
 ## 0. 一句话 + 现状
 
+> **2026-11-02：Ootle L2 主网官宣 11-11 上线。** 9 天就绪计划、范围决定、阻塞项与 Day-0 手册见 `docs/mainnet-readiness.md`；
+> 0.49 兼容性核对与浏览器钱包 spike 两个会话正在同一目录进行（分别只碰 `templates/`+`scripts/esme-fund` 和 `web/spike/`）。
+
 **Ootle AgentPay** = 给 AI 代理用的「链上硬限额钱包」。核心是 Tari Ootle L2 上的 Rust→WASM 模板
 （`AgentBudget` 预算 + `Escrow` 托管；`OtcBoard` 场外托管**已冻结**），外面包了 Python SDK、
 零依赖 TS 客户端、MCP server、以及一个零依赖的 Web 托管仪表盘和 `/api/v1` M2M REST。
