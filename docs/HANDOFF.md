@@ -90,6 +90,7 @@ otc_board `template_5c0cd27ed0ee5867f4b960a12e33baec848c970c8b3145faf063ae3c7b8f
 - **publish 需 PTY**：`tari publish` 无 TTY 报 "not a terminal"，用 `script -qec "..." /dev/null` 包一层。
 
 ### C. 跑仪表盘（连本地 swarm）
+> 本地 swarm / esmeralda / 两个 walletd / 仪表盘之间是什么关系、为什么 state 文件要按链分开，见 `docs/environments.md`。
 ```bash
 make dashboard    # http://localhost:8787
 ```

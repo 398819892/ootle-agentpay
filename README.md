@@ -38,7 +38,8 @@ agents. A third template, **OtcBoard, is FROZEN** (experimental, not for product
 
 Escrow and AgentBudget are deployed to a local swarm **and to the public esmeralda testnet** and
 exercised with **real on-chain calls** (not just unit tests): see the demos below. Full esmeralda
-addresses and the deployment method are in [`docs/esmeralda.md`](docs/esmeralda.md).
+addresses and the deployment method are in [`docs/esmeralda.md`](docs/esmeralda.md); how the local
+swarm, esmeralda, their two wallet daemons and the dashboard relate is in [`docs/environments.md`](docs/environments.md).
 
 > **OtcBoard is frozen (2026-10-31).** Its custodial-arbiter, off-chain-settled design repeatedly
 > surfaced new trust/incentive risks across four review rounds, and it carries a P2P-fiat-matcher
@@ -152,7 +153,8 @@ Support level per component — read the ✅/❌ precisely:
 | **OtcBoard** *(已冻结)* | P2P 场外托管板 —— 仅作为参考/研究产物保留(仍可编译、测试通过) | 45 ✅ | `template_5c0cd27e…` | `template_bafbe76e…` |
 
 Escrow 与 AgentBudget 都已部署到本地链**以及公共测试网 esmeralda**,并用**真实链上调用**验证过
-（不只是单测）。esmeralda 完整地址与部署方法见 [`docs/esmeralda.md`](docs/esmeralda.md)。
+（不只是单测）。esmeralda 完整地址与部署方法见 [`docs/esmeralda.md`](docs/esmeralda.md)；本地 swarm、esmeralda、
+两个钱包与仪表盘之间的关系见 [`docs/environments.md`](docs/environments.md)。
 
 > **OtcBoard 已于 2026-10-31 冻结。** 其托管仲裁 + 链下结算的设计在四轮评审中反复冒出新的信任/激励风险,
 > 且带 P2P 法币撮合的合规属性。它仍可编译、45 个测试通过,但已知未决问题不再修复,不应在其上构建。冻结
@@ -259,7 +261,7 @@ Web 控制台里:开预算 → 正常付款(成功、余额减)→ 试试超额/
 templates/        escrow · agent_budget · otc_board — Rust→WASM 模板 + 测试
 sdk/              ootle-agentpay Python SDK —— onchain 链上适配器 + demos + tests
 site/             index.html —— 产品一页介绍网页（也发布为在线 Artifact）
-docs/             interfaces · security · audit-notes · deployment-noncustodial · esmeralda 等文档
+docs/             interfaces · security · audit-notes · deployment-noncustodial · esmeralda · environments(两链/两钱包/仪表盘关系) 等文档
 scripts/          发布 / 演示 / 辅助脚本（见 scripts/README.md：demo / publish / esmeralda / dev）
 node-binaries/    bins/ 预编译 Tari 节点二进制（跑本地 swarm 用；用 scripts/fetch-binaries.sh 下载）
 wasm-template/    官方模板仓库克隆（参考，纯源码，无构建产物）
