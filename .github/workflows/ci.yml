@@ -46,7 +46,7 @@ jobs:
       matrix:
         template: [escrow, agent_budget, otc_board]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain (+ wasm32 target)
         uses: dtolnay/rust-toolchain@stable
@@ -83,7 +83,7 @@ jobs:
     name: sdk (pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # ootle-py (a transitive dep of the SDK, used by tests/test_keys.py) requires Python >=3.13.
       - name: Set up Python 3.13
@@ -111,7 +111,7 @@ jobs:
     name: mcp (pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v5
@@ -134,10 +134,10 @@ jobs:
     name: web (node security tests)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Node 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
 
@@ -166,10 +166,10 @@ jobs:
     name: clients/ts (tsc build + tests)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Node 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
 
