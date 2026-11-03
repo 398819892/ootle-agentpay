@@ -15,6 +15,26 @@ const walletd_1 = require("./walletd");
 const window_1 = require("./window");
 /** Native Tari test token used as the (plaintext, countable) budget resource on a devnet. */
 exports.XTR = "XTR";
+// Manifest keyword for the native token. `XTR` was a deprecated alias that tari-ootle 0.48 removed
+// (#3076): a 0.48+ manifest parser resolves only `TARI`, while 0.47 accepts both — so every manifest
+// splices `TARI`. The `XTR` constant stays as the API-level name for "the native token".
+const NATIVE_KEYWORD = "TARI";
+const NATIVE_ALIASES = new Set(["XTR", "TARI"]);
+/**
+ * Whether owner-badge manifests open an explicit proof authorization window.
+ *
+ * tari-ootle 0.49 (#3206) changed the model: a proof left on the transaction workspace authorizes
+ * NOTHING until `authorize!(proof)` opens a window over it (closed by `drop_authorize!`), and a
+ * window is lent exactly one hop (the budget component). A 0.47 manifest parser does not know the
+ * two macros and rejects the manifest outright, so the dialect is a switch: default ON (the repo
+ * targets 0.49); set `AGENTPAY_PROOF_WINDOWS=0` (or `{ proofWindows: false }`) to keep the pre-0.49
+ * dialect for a 0.47 walletd. The agent's `pay` proof is only *shown* to the template (passed as an
+ * argument and read with `assert_resource`/`get_non_fungibles`), which needs no window on either.
+ */
+function proofWindowsDefault() {
+    const v = (typeof process !== "undefined" && process.env && process.env.AGENTPAY_PROOF_WINDOWS) || "";
+    return !["0", "false", "no", "off"].includes(v.trim().toLowerCase());
+}
 /** Normalise an amount to a plain decimal-integer string for a manifest `amount!(…)` literal. */
 function amt(x) {
     if (typeof x === "bigint") {
@@ -206,6 +226,7 @@ class OnChainBudget {
         this.budgetTemplate = budgetTemplate;
         this.ownerAccount = ownerAccount;
         this.agentAccount = opts.agentAccount ?? ownerAccount;
+        this.proofWindows = opts.proofWindows ?? proofWindowsDefault();
     }
     // -- owner -----------------------------------------------------------------------
     /**
@@ -214,7 +235,7 @@ class OnChainBudget {
      * string splice (same injection guard as every other spliced value).
      */
     resourceArg() {
-        return this.resource === exports.XTR ? "XTR" : `address!("${checkResource(this.resource)}")`;
+        return NATIVE_ALIASES.has(this.resource) ? NATIVE_KEYWORD : `address!("${checkResource(this.resource)}")`;
     }
     async open(params) {
         const { fund, perTxCap, dailyCap, epochsPerWindow, whitelist } = params;
@@ -285,11 +306,11 @@ class OnChainBudget {
     async withdraw(amount) {
         const manifest = "fn main() {\n" +
             '    let mut owner = var!["owner"];\n' +
-            `    let proof = owner.create_proof_for_resource(address!("${checkResource(this.ownerBadge)}"));\n` +
+            this.ownerProofOpen() +
             '    let mut budget = var!["budget"];\n' +
             `    let coins = budget.withdraw(amount!(${amt(amount)}));\n` +
             "    owner.deposit(coins);\n" +
-            "    drop_all_proofs!();\n" +
+            this.ownerProofClose() +
             "}\n";
         await this.client.run(manifest, { owner: this.ownerAccount, budget: this.component });
     }
@@ -331,12 +352,12 @@ class OnChainBudget {
         checkSession(session);
         const manifest = "fn main() {\n" +
             '    let mut owner = var!["owner"];\n' +
-            `    let proof = owner.create_proof_for_resource(address!("${checkResource(this.ownerBadge)}"));\n` +
+            this.ownerProofOpen() +
             '    let mut budget = var!["budget"];\n' +
             `    let badge = budget.issue_agent_badge("${session}");\n` +
             '    let mut agent = var!["agent"];\n' +
             "    agent.deposit(badge);\n" +
-            "    drop_all_proofs!();\n" +
+            this.ownerProofClose() +
             "}\n";
         await this.client.run(manifest, {
             owner: this.ownerAccount,
@@ -383,13 +404,25 @@ class OnChainBudget {
             "}\n";
         await this.client.run(manifest, { funder, budget: this.component });
     }
+    /**
+     * Manifest lines that prove the owner badge — and, in the 0.49 dialect, open the authorization
+     * window the budget's owner-gated methods are reached through.
+     */
+    ownerProofOpen() {
+        const line = `    let proof = owner.create_proof_for_resource(address!("${checkResource(this.ownerBadge)}"));\n`;
+        return line + (this.proofWindows ? "    authorize!(proof);\n" : "");
+    }
+    /** Closes the window opened by `ownerProofOpen` (0.49 dialect) and drops the proof. */
+    ownerProofClose() {
+        return (this.proofWindows ? "    drop_authorize!(proof);\n" : "") + "    drop_all_proofs!();\n";
+    }
     async ownerCall(call) {
         const manifest = "fn main() {\n" +
             '    let mut owner = var!["owner"];\n' +
-            `    let proof = owner.create_proof_for_resource(address!("${checkResource(this.ownerBadge)}"));\n` +
+            this.ownerProofOpen() +
             '    let mut budget = var!["budget"];\n' +
             `    budget.${call};\n` +
-            "    drop_all_proofs!();\n" +
+            this.ownerProofClose() +
             "}\n";
         await this.client.run(manifest, { owner: this.ownerAccount, budget: this.component });
     }

@@ -19,12 +19,16 @@ export interface LedgerEntry {
 export interface OnChainBudgetOptions {
     /** Defaults to `ownerAccount` (devnet: one account acts as both owner and agent). */
     agentAccount?: string;
+    /** Manifest dialect for owner-badge calls (see `proofWindowsDefault`). Default: env / `true`. */
+    proofWindows?: boolean;
 }
 export declare class OnChainBudget {
     readonly client: WalletdClient;
     readonly budgetTemplate: string;
     readonly ownerAccount: string;
     readonly agentAccount: string;
+    /** Open an `authorize!` window around owner-badge calls (0.49+ dialect) or not (0.47). */
+    readonly proofWindows: boolean;
     component: string | null;
     ownerBadge: string | null;
     agentBadge: string | null;
@@ -124,6 +128,13 @@ export declare class OnChainBudget {
     topUp(amount: AmountInput, opts?: {
         fromAccount?: string;
     }): Promise<void>;
+    /**
+     * Manifest lines that prove the owner badge — and, in the 0.49 dialect, open the authorization
+     * window the budget's owner-gated methods are reached through.
+     */
+    private ownerProofOpen;
+    /** Closes the window opened by `ownerProofOpen` (0.49 dialect) and drops the proof. */
+    private ownerProofClose;
     private ownerCall;
     private payManifest;
     /**
