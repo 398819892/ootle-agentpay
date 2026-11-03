@@ -174,9 +174,12 @@ jobs:
       # Gate: a clean type-checked compile of the committed sources, then the manifest-injection
       # test suite (node's built-in runner, no extra deps). typescript + @types/node are the only
       # (dev) deps.
+      # `npm ci` (not `npm install`): installs exactly the committed package-lock.json and fails if
+      # package.json and the lock disagree — a reproducible, lock-respecting build. typescript +
+      # @types/node are the only (dev) deps.
       - name: Install dev deps
         working-directory: clients/ts
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: tsc build
         working-directory: clients/ts
