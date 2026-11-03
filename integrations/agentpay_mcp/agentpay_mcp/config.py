@@ -39,15 +39,21 @@ PRESETS: dict[str, dict[str, str]] = {
         "budget_template": "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
         "owner_account": "default",
     },
+    # esmeralda: the 0.49 testnet reset (docs/compat-0.49.md) invalidated the previously-published
+    # template, so we do NOT bake a budget_template here. A stale address looks configured but fails
+    # on chain as "Template not found"; an empty default instead fails honestly at provision time.
+    # After re-publishing on the current 0.49 esmeralda, pass AGENTPAY_BUDGET_TEMPLATE (or --template).
     "esmeralda": {
         "walletd_url": "http://127.0.0.1:5100/json_rpc",
-        "budget_template": "template_88b112610740f457bcc04be70740edebc53c132885a3dda928b1c068d98db8f6",
+        "budget_template": "",
         "owner_account": "dev",
     },
     # NOTE — mainnet (Ootle L2, 2026-11-11): no preset yet, on purpose. The agent_budget / escrow
     # template addresses only exist after the mainnet publish (≈11-12), and we do NOT bake in a
-    # guessed walletd port. C-5 is decided: both templates publish IMMUTABLE (no upgrade opt-in) —
-    # see docs/mainnet-params.md. Until a "mainnet" entry is added here (with the real addresses),
+    # guessed walletd port. C-5 is decided: agent_budget is OWNER-UPGRADEABLE (its new() sets the
+    # component upgrade_rule to the owner badge, so only the owner can migrate it to a new template),
+    # while escrow / otc_board stay IMMUTABLE (Locked) — see docs/mainnet-params.md §0 and
+    # docs/template-freeze.md §3. Until a "mainnet" entry is added here (with the real addresses),
     # run mainnet by supplying AGENTPAY_WALLETD_URL + AGENTPAY_BUDGET_TEMPLATE + AGENTPAY_OWNER_ACCOUNT
     # explicitly; D-8 (load() below) fail-closes AGENTPAY_NETWORK=mainnet without an explicit URL, so
     # a mainnet run can never silently fall back to the local swarm's config.

@@ -7,10 +7,13 @@ repo's ``demo_agent.py``) launches:
     python -m agentpay_mcp.server
 
 Configuration comes from environment variables (what the client passes under ``"env"``) with
-optional CLI flags; see ``agentpay_mcp.config`` for the full list. With nothing but a running
-wallet daemon it defaults to the **local swarm** and opens a fresh budget on first use
-(provision mode). Point it at an already-open budget with ``AGENTPAY_COMPONENT`` to run in
-attach mode, or at the public testnet with ``AGENTPAY_NETWORK=esmeralda``.
+optional CLI flags; see ``agentpay_mcp.config`` for the full list. It defaults to the **local
+swarm** in **attach mode** (non-custodial): it expects a budget the owner already opened, so set
+``AGENTPAY_COMPONENT`` (+ ``AGENTPAY_AGENT_BADGE`` + ``AGENTPAY_AGENT_ACCOUNT``) — the agent then
+holds only the agent badge, never the owner key. With no component and no ``AGENTPAY_AUTO_PROVISION=1``
+it reports ``not_configured`` rather than opening a budget. For local demos, set
+``AGENTPAY_AUTO_PROVISION=1`` to let it open a fresh budget with the owner key (provision mode).
+Point it at the public testnet with ``AGENTPAY_NETWORK=esmeralda``.
 
 The three tools below are the agent's *entire* spending surface. Every payment is adjudicated
 by the Tari Ootle validator; a blocked payment returns the validator's own reason so the agent
