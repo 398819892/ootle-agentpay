@@ -118,3 +118,53 @@ def test_payment_status_maps_three_states():
     assert w.payment_status("t")["status"] == "rejected"
     w.budget.client = StubClient(("pending", None))
     assert w.payment_status("t")["status"] == "pending"
+
+
+# -- status() reads spend from chain, falls back to "unknown" — never a local estimate (#16) --------
+class _StatusBudget:
+    """A budget whose on-chain read is controllable. `spent` is a LOCAL estimate that status() must
+    never leak into the reported figure."""
+    def __init__(self, state=None, exc=None):
+        self.component = "component_" + "c" * 64
+        self.spent = 999            # stale local estimate — must NOT appear in status output
+        self.client = None
+        self._state = state
+        self._exc = exc
+
+    def would_reject(self, *_a, **_k):
+        return None                 # kill-switch probe says not revoked
+
+    def read_onchain_state(self):
+        if self._exc is not None:
+            raise self._exc
+        return self._state
+
+
+def test_status_reads_spent_from_chain_not_local_estimate():
+    chain = {"per_tx_cap": 1000, "daily_cap": 3000, "spent_in_window": 500,
+             "window_start_epoch": 10, "epochs_per_window": 48, "whitelist_raw": [], "revoked": False}
+    w = backend.AgentWallet(_StatusBudget(state=chain), per_tx_cap=1, daily_cap=1, whitelist=[MERCHANT])
+    s = w.status()
+    assert s["spent_source"] == "chain"
+    assert s["spent_in_window"] == 500          # from chain, not budget.spent (999)
+    assert s["remaining_in_window"] == 2500
+    assert s["daily_cap"] == 3000 and s["per_tx_cap"] == 1000   # chain caps, not the declared 1
+    assert s["caps_source"] == "chain"
+    assert s["revoked"] is False
+
+
+def test_status_unknown_when_chain_unreadable():
+    w = backend.AgentWallet(_StatusBudget(exc=ChainError("walletd down")),
+                            per_tx_cap=1000, daily_cap=2000, whitelist=[MERCHANT])
+    s = w.status()
+    assert s["spent_source"] == "unknown"
+    assert s["spent_in_window"] is None         # never the local estimate (999)
+    assert s["remaining_in_window"] is None
+    assert s["daily_cap"] == 2000 and s["caps_source"] == "declared"   # declared caps still shown
+
+
+def test_status_revoked_from_chain_flag():
+    chain = {"per_tx_cap": 1000, "daily_cap": 3000, "spent_in_window": 0,
+             "window_start_epoch": 0, "epochs_per_window": 48, "whitelist_raw": [], "revoked": True}
+    w = backend.AgentWallet(_StatusBudget(state=chain), per_tx_cap=1, daily_cap=1, whitelist=[MERCHANT])
+    assert w.status()["revoked"] is True        # chain flag alone marks it revoked

@@ -583,6 +583,68 @@ def _tagged_resources(state: list) -> list[str]:
     return out
 
 
+def _cbor_hex(x: Any) -> str | None:
+    """The 32-byte hex payload of a CBOR-tagged address object, or None. Tag-agnostic (any
+    ``{'value': {'hex': ...}}``), matching the web reconciler's reader (web/server/substate.js)."""
+    if isinstance(x, dict):
+        v = x.get("value")
+        if isinstance(v, dict) and isinstance(v.get("hex"), str):
+            return v["hex"]
+    return None
+
+
+def _parse_budget_state(state: Any) -> dict:
+    """Decode the AgentBudget component's POSITIONAL state array by explicit index + type, raising a
+    descriptive ``ValueError`` on any layout drift so a caller falls back to "unknown" rather than
+    reporting a wrong number. 1:1 with the web reconciler's substate.js ``parseBudgetState`` (#16).
+
+    Struct order (templates/agent_budget/src/lib.rs):
+      [0] vault  [1] owner_badge  [2] agent_badge  [3] per_tx_cap  [4] daily_cap
+      [5] spent_in_window  [6] window_start_epoch  [7] epochs_per_window
+      [8] merchant_whitelist  [9] revoked  [10] revoked_sessions  [11..] escrow fields
+
+    (The web reader rejects Amounts above 2^53 as a lossy JS-number read; Python's ``json`` decodes
+    integers losslessly, so no such guard is needed here — only the type checks.)
+    """
+    if not isinstance(state, list) or len(state) < 10:
+        raise ValueError(
+            "unexpected budget component layout: expected a list of >=10 fields, got "
+            + (f"length {len(state)}" if isinstance(state, list) else type(state).__name__)
+        )
+    if _cbor_hex(state[0]) is None:
+        raise ValueError("unexpected budget component layout: field 0 (vault) is not an address")
+
+    def _num(i: int, name: str) -> int:
+        v = state[i]
+        # bool is an int subclass in Python — exclude it so a mis-typed slot is still caught.
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(
+                f"unexpected budget component layout: field {i} ({name}) is "
+                f"{type(v).__name__}, expected an integer"
+            )
+        return v
+
+    per_tx_cap = _num(3, "per_tx_cap")
+    daily_cap = _num(4, "daily_cap")
+    spent_in_window = _num(5, "spent_in_window")
+    window_start_epoch = _num(6, "window_start_epoch")
+    epochs_per_window = _num(7, "epochs_per_window")
+    if not isinstance(state[8], list):
+        raise ValueError("unexpected budget component layout: field 8 (merchant_whitelist) is not an array")
+    if not isinstance(state[9], bool):
+        raise ValueError("unexpected budget component layout: field 9 (revoked) is not a boolean")
+    return {
+        "vault_hex": _cbor_hex(state[0]),
+        "per_tx_cap": per_tx_cap,
+        "daily_cap": daily_cap,
+        "spent_in_window": spent_in_window,
+        "window_start_epoch": window_start_epoch,
+        "epochs_per_window": epochs_per_window,
+        "whitelist_raw": state[8],
+        "revoked": state[9],
+    }
+
+
 @dataclass
 class LedgerEntry:
     merchant: str
@@ -682,6 +744,20 @@ class OnChainBudget:
         if len(resources) < 2:
             raise ChainError("budget component state did not expose the owner and agent badges")
         return resources[0], resources[1]  # struct order: owner_badge, agent_badge
+
+    def read_onchain_state(self) -> dict:
+        """Authoritatively read this budget's LIVE state from its on-chain component substate:
+        ``per_tx_cap``, ``daily_cap``, ``spent_in_window`` (the chain's own running total — it reflects
+        spends by EVERY session of this budget, not just this process), ``window_start_epoch``,
+        ``epochs_per_window`` and ``revoked``. Read-only. Raises ``ChainError`` (no component yet or
+        walletd unreachable) or ``ValueError`` (unexpected component layout). Mirrors the web
+        reconciler and closes the MCP status local-estimate gap (#16)."""
+        if not self.component:
+            raise ChainError("budget has no on-chain component yet")
+        state = _find_component_state(self.client.get_substate(self.component))
+        if state is None:
+            raise ChainError("could not read the budget component state from chain")
+        return _parse_budget_state(state)
 
     def revoke(self) -> None:
         self._owner_call("revoke()")

@@ -130,30 +130,55 @@ class AgentWallet:
     def status(self) -> dict[str, Any]:
         """What the agent is allowed to know about its own budget.
 
-        `revoked` IS confirmed against the chain here (a dry-run probe). `spent_in_window` is the
-        last figure this process saw — it is set from the chain's `pay` event on each payment, but it
-        resets on restart and does not reflect spends by OTHER sessions of the same budget, so treat it
-        as a local estimate, not an authoritative chain read. (A live read would call the template's
-        `get_info` via dry-run and decode a typed result; tracked with #16 in docs/audit-notes.md.)"""
-        spent = self.budget.spent
-        remaining_daily = max(self.daily_cap - spent, 0)
+        `spent_in_window` and the caps are read AUTHORITATIVELY from the on-chain component state —
+        the chain's own running total, which reflects spends by EVERY session of this budget, not
+        just this process. If that read fails (walletd unreachable, or an unexpected component
+        layout), the spend figures are reported as `unknown` (``spent_source="unknown"``,
+        ``spent_in_window=None``) rather than falling back to this process's local estimate: a stale
+        cache must never masquerade as a live balance (#16). `revoked` is confirmed against the chain
+        both ways — the component flag and a dry-run kill-switch probe."""
         # A tiny whitelisted probe tells us whether the kill switch has been pulled on chain.
         revoked = False
-        probe_reason = None
         if self.whitelist:
             probe_reason = self.budget.would_reject(self.whitelist[0], 1, memo="status-probe")
             if probe_reason and "revok" in probe_reason.lower():
                 revoked = True
-        return {
+        out: dict[str, Any] = {
             "component": self.component,
-            "per_tx_cap": self.per_tx_cap,
-            "daily_cap": self.daily_cap,
-            "spent_in_window": spent,
-            "remaining_in_window": remaining_daily,
             "whitelist": list(self.whitelist),
-            "revoked": revoked,
             "enforced_by": "Tari Ootle validator (AgentBudget on-chain template)",
         }
+        try:
+            chain = self.budget.read_onchain_state()
+        except Exception as e:  # noqa: BLE001 — any failure means we cannot vouch for the number
+            # Never present the local estimate as a live balance: report the spend as unknown. (#16)
+            out.update({
+                "spent_source": "unknown",
+                "spent_in_window": None,
+                "remaining_in_window": None,
+                "per_tx_cap": self.per_tx_cap,   # the owner-declared policy, for display only
+                "daily_cap": self.daily_cap,
+                "caps_source": "declared",
+                "revoked": revoked,
+                "note": (f"on-chain budget state unavailable ({type(e).__name__}); spend figures are "
+                         "unknown, not estimated"),
+            })
+            return out
+        spent = chain["spent_in_window"]
+        daily = chain["daily_cap"]
+        out.update({
+            "spent_source": "chain",
+            "spent_in_window": spent,
+            "remaining_in_window": max(daily - spent, 0),
+            "per_tx_cap": chain["per_tx_cap"],
+            "daily_cap": daily,
+            "caps_source": "chain",
+            "window_start_epoch": chain["window_start_epoch"],
+            "epochs_per_window": chain["epochs_per_window"],
+            # revoked if EITHER the chain flag is set OR the dry-run probe was refused for revocation.
+            "revoked": revoked or bool(chain["revoked"]),
+        })
+        return out
 
     def payment_status(self, tx_id: str) -> dict[str, Any]:
         """Resolve a previously-submitted payment by its tx id — the read-only follow-up to a PENDING

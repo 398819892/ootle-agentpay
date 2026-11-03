@@ -510,8 +510,10 @@ Followed up on the fifth review's deferred server items.
   session revoke works; it currently uses the one "default" session.)*
 - **#15 — MCP was custodial by default (fixed, core).** `AGENTPAY_AUTO_PROVISION` now defaults to
   **false**: the MCP/agent attaches to an owner-opened budget (holds only the agent badge) instead of
-  opening one with the owner key. Provision is opt-in for demos. The `status()` docstring is corrected
-  to stop claiming `spent_in_window` is chain-confirmed (it is a local estimate; `revoked` is probed).
+  opening one with the owner key. Provision is opt-in for demos. **Update (#16 port):** `status()` now
+  reads `spent_in_window` and the caps from the on-chain component state (the chain's own running total,
+  across all sessions), and falls back to `spent_source="unknown"` — never this process's local estimate
+  — when the chain is unreadable; `revoked` is confirmed by both the chain flag and a dry-run probe.
 
 ### #11 + #16 (done, with a concurrency / parse test each)
 - **#11 — serial lock blocked reads (fixed).** The dashboard router wrapped *every* handler in the
@@ -524,9 +526,13 @@ Followed up on the fifth review's deferred server items.
   numbers / first boolean / first array", so a struct reorder returned WRONG values silently. It now
   lives in `web/server/substate.js` and reads by **explicit index + type assertion**, throwing a
   descriptive error on layout drift (the caller falls back to cache). **Test:**
-  `web/server/substate.test.js`. *Remaining:* a fully type-safe read (template `get_info` via dry-run,
-  decoding a typed return) still wants validation against the live walletd result shape — tracked;
-  it would also give MCP `status()` a live `spent_in_window` (#15).
+  `web/server/substate.test.js`. The same strict positional read is now **ported to the Python SDK**
+  (`agentpay.onchain._parse_budget_state` + `OnChainBudget.read_onchain_state`, tests in
+  `sdk/tests/test_substate.py`) and consumed by MCP `status()`, so `spent_in_window` is a live chain
+  read there too — not a local estimate — closing the #15 live-spend gap. *Remaining:* a fully
+  type-safe read (template `get_info` via dry-run, decoding a typed return) still wants validation
+  against the live walletd result shape — tracked; it would also catch a same-type field swap, which
+  the positional read cannot.
 
 ### Design / SDK pass
 - **SDK `payEvents` topic + dedup (fixed).** It identified events by "payload has merchant+memo",
