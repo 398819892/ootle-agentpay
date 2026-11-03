@@ -93,12 +93,16 @@ class AgentWallet:
         try:
             amount = int(amount)
         except (TypeError, ValueError):
-            return PayResult(False, merchant, 0, memo, reason=f"amount {amount!r} is not an integer")
+            return PayResult(False, merchant, 0, memo, reason=f"amount {amount!r} is not an integer",
+                             status="rejected")
 
         # Ask the validator up front. This is a real dry run against the running network.
         reason = self.budget.would_reject(merchant, amount, memo=memo or "pay")
         if reason is not None:
-            return PayResult(False, merchant, amount, memo, reason=reason)
+            # A dry-run rejection by the validator: ok=False AND status="rejected". Without the explicit
+            # status it would default to "accepted" (PayResult.status), so the MCP tool — which reports
+            # `status` — would label a validator-rejected payment "accepted" (N-4).
+            return PayResult(False, merchant, amount, memo, reason=reason, status="rejected")
 
         try:
             res = self.budget.pay(merchant, amount, memo=memo)

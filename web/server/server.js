@@ -851,6 +851,19 @@ async function reconcileRecord(rec) {
       snapshotBudget(budget); // mount the recovered budget (chain stays authoritative in dashboardState)
       return txlog.settle(rec.key, { status: "confirmed", component: comp, event });
     }
+    // An issueSession that came back UNKNOWN actually LANDED: the badge is on chain, but the issued-
+    // session cache (store.budget.sessions) is only updated on the confirmed run-path (snapshotBudget).
+    // With REQUIRE_KEY_SESSIONS=true (the default) that leaves the API key permanently 403 after any
+    // unknown during issuance (N-1), since keySessionInfo derives `issued` from this cache. Rebuild it
+    // from the confirmed record so the key can pay. (A revoke that went unknown needs no cache fix: the
+    // pay path re-checks revocation on chain with a dry-run right before submit — S-7.)
+    if (rec.op === "issueSession" && rec.params && rec.params.session && store.budget) {
+      if (!Array.isArray(store.budget.sessions)) store.budget.sessions = ["default"];
+      if (!store.budget.sessions.includes(rec.params.session)) {
+        store.budget.sessions.push(rec.params.session);
+        saveStore();
+      }
+    }
     return txlog.settle(rec.key, { status: "confirmed", event });
   }
   if (got.status === "reject") {

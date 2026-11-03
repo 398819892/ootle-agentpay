@@ -86,6 +86,30 @@ def test_policy_violation_is_rejected_not_chain_error():
     assert "per-transaction cap" in (r.reason or "")
 
 
+class _RejectingStubBudget(StubBudget):
+    """Dry-run says NO (would_reject returns a reason) — the validator refuses before any submit."""
+    def would_reject(self, *_a, **_k):
+        return "Amount exceeds the per-transaction cap"
+
+
+def test_dry_run_reject_status_is_rejected():
+    # A dry-run rejection must surface as ok=False AND status="rejected" — not the default
+    # status="accepted" (N-4). The MCP tool reports `status`, so an "accepted" label on a
+    # validator-rejected pay would tell the agent the payment went through.
+    w = backend.AgentWallet(_RejectingStubBudget(), per_tx_cap=1000, daily_cap=2000, whitelist=[MERCHANT])
+    r = w.pay_merchant(MERCHANT, 10)
+    assert r.ok is False
+    assert r.status == "rejected"
+    assert "per-transaction cap" in (r.reason or "")
+
+
+def test_non_integer_amount_status_is_rejected():
+    # A non-integer amount is refused before any chain contact; it too must not read "accepted" (N-4).
+    r = _wallet().pay_merchant(MERCHANT, "not-a-number")
+    assert r.ok is False
+    assert r.status == "rejected"
+
+
 def test_payment_status_maps_three_states():
     w = _wallet()
     w.budget.client = StubClient(("accept", None))
