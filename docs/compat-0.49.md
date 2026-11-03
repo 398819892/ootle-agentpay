@@ -113,7 +113,9 @@
 
 **我们的现状**：三个模板的 `new()` 都没调 `with_upgrade_rule` → 每个 AgentBudget / Escrow / OtcBoard **实例创建即锁定**。模板发布后可以随时发新模板，但**已开的预算组件无法迁移到新代码**，owner 只能 `withdraw` 剩余资金、用新模板重新 `open`（SDK/仪表盘本来就支持换模板地址）。
 
-**决策建议（主网前必须拍板）**：
+**最终决策（2026-11-03,已拍板，取代下面的建议 1）：两个主网模板 `agent_budget` 与 `escrow` 均保持 `Locked`（immutable）—— `new()` 不调 `with_upgrade_rule`。** 理由:链上硬额度「连 owner 也不能事后改」是核心卖点,immutable 让 owner-key 失陷仍只是「提走余额」而非「改写行为」;v1 owner 自营、本金小额、可 withdraw 重开,bug 走下面的「提款→发新模板→重开」补救,成本低。权威记录见 `docs/mainnet-params.md` §0、`docs/template-freeze.md`。（下面原建议 1 曾倾向让 AgentBudget 可升级,现不采纳。）
+
+**原决策建议（主网前必须拍板,保留备查）**：
 1. **AgentBudget 加 `.with_upgrade_rule(UpdateRule::AccessRule(rule!(resource(owner_badge))))`**——只有持 owner 徽章的人能把自己的预算迁到新模板，agent 徽章不能。代价：一行代码 + 一个测试（agent 持 agent 徽章尝试 `UpdateComponentTemplate` 必须被拒；owner 能迁）。收益：主网后修 bug 不用"提资金、重开、重发 badge"。这与"链是权威"不冲突：升级权仍归 owner。
 2. **Escrow 保持 `Locked`**：托管期间代码不可变是卖点，而且 Escrow 没有 owner 徽章（身份鉴权），`Owner` 规则会落到创建者密钥，而创建者在 `pay_via_escrow` 路径下是 AgentBudget 组件，语义不对。
 3. **OtcBoard 冻结，不上主网**（已有结论）。

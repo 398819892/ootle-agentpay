@@ -10,9 +10,9 @@
 |---|---|
 | 决策 | `agent_budget` 与 `escrow` 两个模板在主网**以不可升级方式发布**（发布时**不** opt-in 升级）。 |
 | 为什么 | 链上硬额度「连 owner 也不能事后改」是产品核心卖点（与 C-1 revoke 不可逆同理）；immutable 让 owner-key 失陷的爆炸半径仍只是「提走当前余额」（owner badge 本就能），而非「改写未来所有行为」。v1 为 owner 自营、本金小额、随时可 `withdraw` 重开，模板若有 bug 的补救成本低。 |
-| 机制（已核实） | Ootle 模板按 `hash(author_pubkey, binary_hash)` **内容寻址**（`tari_engine_types/published_template.rs`）——换代码即换地址，每个模板地址天生不可变。「模板升级 opt-in」(#3195) 是**引擎/发布层**特性，由主网 `tari publish` 的旗标声明;**不声明 = 永久不可变 = 我们要的默认**。`template_lib` 的 `UpdateRule` 只管资源(mintable/burnable)可变性，与 WASM 代码升级无关。 |
-| 对 D3 冻结的影响 | **不需要改任何合约代码**。C-5 是发布时的策略决定，不是代码改动——冻结的是现有 WASM，本条只要求「发布时别加升级旗标」。 |
-| 待官方 | 主网 `tari publish` 中「不可升级 = 默认」这一点的确切旗标/行为，待主网 CLI 到手后在 D6–D7 核一次（预期:不传升级旗标即 immutable）。 |
+| 机制（已核实源码，详 `docs/compat-0.49.md` §6.2 / #3195） | **模板**（`template_xxx` 地址）按 `hash(author, binary_hash)` 内容寻址，永远不可变。0.49 的「升级」指把一个**组件实例**用 `UpdateComponentTemplate` 指向新模板，校验该组件头里的 `upgrade_rule`（**创建时固定、永不可改**）:`Locked`（**默认**，含构造返回 `Self` 的组件）= 谁都不能升；`Owner` / `AccessRule(r)` = 对应规则可升。设置方式是组件构造里 `Component::new(..).with_upgrade_rule(UpdateRule::...)`。**我们三个模板的 `new()` 都没调它 → 实例创建即 `Locked` = immutable**。所以 immutable = 保持默认。（更正:先前写的「发布时旗标」不准确——它是**组件代码**构造,默认即锁；已据 §6.2 改正。） |
+| 对 D3 冻结的影响 | **不需要改任何合约代码**:immutable 就是不调用 `with_upgrade_rule`（保持默认 `Locked`）。冻结的是现有 WASM;本条是确认「保持默认、不加升级规则」。 |
+| 核实状态 | 机制已由 0.49.1 源码核实（§6.2），非待办;主网发布命令本身无「升级声明」之说（升级是组件级 `UpdateComponentTemplate`,我们从不触发）。 |
 | bug 补救 runbook | 不原地热修。发现模板 bug 时:owner 用 owner badge `withdraw` 旧预算余额 → 发布修正后的新模板（新地址）→ 在新模板上重开预算并 top-up → 切客户端地址表。旧预算继续跑旧代码直到被提空。 |
 
 ## 1. 参数表

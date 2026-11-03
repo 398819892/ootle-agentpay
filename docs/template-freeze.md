@@ -44,20 +44,23 @@
 
 本机运行的 swarm 是 **walletd 0.47.0**（localnet，:12010）;**没有 0.49 的 swarm 二进制**,立不起 0.49 的真链环境。因此 live e2e 的覆盖如下:
 
+本机(`cam`)运行的 swarm 是 **walletd 0.47.0**（localnet，:12010）;本机**没有** 0.49 swarm（`/root/ootle49` 不在本机——0.49 环境在**另一台机器**上,见 `docs/compat-0.49.md` §4/§7 的 `C:\Users\39881` / `I:\wsl`）。所以本机的 live e2e 只能打 0.47,而 **0.49 的 live 真链 e2e 已在那台机器的 0.49 swarm 上完成并记录**:
+
 | 维度 | 0.49（主网同代） | 0.47（本机 live swarm） |
 |---|---|---|
-| cargo test（in-process wasmer） | ✅ §2,99/0 | — |
-| 参考 WASM hash | ✅ §3 | — |
-| live e2e: 确认付款 + 超额拒绝 | 归 compat 会话的 0.49 swarm（见下） | ✅ `e2e_onchain_pay`:vault−500 / merchant+500,超额被链上 `TemplateError: Amount exceeds the per-transaction cap` 拒绝 |
-| live e2e: admin（set_limits/remove_merchant） | 归 compat 会话 | ⚠️ 失败:`Invalid param 'manifest' … Invalid macro name` —— **master 的 SDK 讲 0.49 manifest 方言,0.47 swarm 的解析器不认**(pay 路径的宏未变故通过)。**这是客户端方言 vs 引擎版本的不匹配,不是模板 bug**;需版本匹配的 swarm 才能验证 admin 路径。 |
-| live e2e: `pay_via_escrow` | 归 compat 会话 | 未跑（同样受 0.49/0.47 方言限制,且需 live escrow 地址） |
+| cargo test（in-process wasmer） | ✅ §2,99/0（本机复现） | — |
+| 参考 WASM hash | ✅ §3（本机） | — |
+| live e2e: 确认付款 + 超额拒绝 | ✅ **已完成**,`compat-0.49.md` §5（0.49 swarm :13010,pay 500 确认 + 超额被验证节点拒,2026-11-02） | ✅ `e2e_onchain_pay`:vault−500 / merchant+500,超额被链上 `TemplateError: Amount exceeds the per-transaction cap` 拒绝 |
+| live e2e: admin（set_limits/remove_merchant） | ✅ **已完成**,`compat-0.49.md` §5（add/remove_merchant、set_limits、日上限链上生效） | ⚠️ 失败:`Invalid param 'manifest' … Invalid macro name` —— **master 的 SDK 讲 0.49 manifest 方言,0.47 swarm 的解析器不认**(pay 路径的宏未变故通过)。**客户端方言 vs 引擎版本不匹配,不是模板 bug**。 |
+| live e2e: `pay_via_escrow` | ✅ **已完成**,`compat-0.49.md` §5（400 → escrow → release 380 / fee 20） | 未跑（同样受 0.49/0.47 方言限制） |
+| `/api/v1` key→session 真链 | ✅ **已完成**,`compat-0.49.md` §5（default→发 badge→`key-bot1`→撤销 403→重发 `key-bot1.2`） | — |
 
-**结论**:本机能给出的冻结主证据是 **0.49 cargo test 全绿 + 可复现参考 hash**(§2/§3),这是与主网同代引擎的权威证据。**0.49 的 live 真链 e2e(pay/admin/escrow + key→session)必须在 0.49 swarm 上跑**——按 readiness P0 #1 属 `ootle-049-compat` 会话;本机 0.47 swarm 仅给出 pay 路径的旁证。
+**结论**:冻结证据齐了——**0.49 cargo test 全绿 + 可复现参考 hash**（本机 §2/§3）+ **0.49 live 真链 e2e 三条 + key→session 全过**（另一台机器,`compat-0.49.md` §5）。本机 0.47 swarm 的 e2e 仅为旁证(pay 过;admin 因方言不匹配,非 bug)。
 
 ## 5. 真正「冻结 OK」还差什么
 
-- [ ] `ootle-049-compat` 会话在 **0.49 本地 swarm** 上跑通三条 e2e（pay / admin / escrow）+ key→session 真链(readiness P0 #1)。
-- [ ] 主网发布日(≈11-12)记录**发布后**的 `binary_hash`(post-wasm-opt,模板地址输入)到 `docs/mainnet.md`——那才是最终 hash。
 - [x] 0.49 cargo test 全绿（本文 §2）。
 - [x] 参考 WASM hash 固定（本文 §3）。
-- [x] C-5 升级规则已定 immutable（`docs/mainnet-params.md` §0）。
+- [x] C-5 升级规则已定 immutable（`docs/mainnet-params.md` §0 / `compat-0.49.md` §6.2）。
+- [x] **0.49 本地 swarm 三条 e2e + key→session 真链**（`compat-0.49.md` §5,2026-11-02,另一台机器的 0.49 swarm）。
+- [ ] 主网发布日(≈11-12)记录**发布后**的 `binary_hash`(post-wasm-opt,模板地址输入)到 `docs/mainnet.md`——那才是最终 hash（唯一剩余项,发布时做）。
