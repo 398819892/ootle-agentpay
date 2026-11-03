@@ -40,3 +40,10 @@ release 380 / fee 20。
 - 新 agent_budget 模板地址 → `docs/compat-0.49.md` §5(替旧 `template_1dc1be00…`)、`docs/template-freeze.md`。
 - 三条 e2e 3/3 结果 → `compat-0.49.md` §5 证据行(标注「C-5 改后复测」)。
 - escrow 地址不变:`template_f4c323fcd0c05aef17f9d4070e2e97dbecd969eca7633aebdae5af52025eac82`。
+
+## 执行结果（2026-11-03，已在 39881 机完成）
+- 同步 C-5 源码到 ext4 → `c49-publish.sh agent_budget` 发布到 0.49 swarm（:13010）。
+- **新 agent_budget 模板**：`template_eb00556978cfe1b378beaf31952d596f94f6e61d997d2888862332b3bf5db17d`（旧 `1dc1be00…` 为 C-5 前）。escrow 不变 `template_f4c323fc…`。
+- 三条 e2e 用新地址（默认 0.49 方言）**3/3 全过**：pay 500 确认+超限被验证节点拒；remove/add_merchant、set_limits、日上限链上生效；pay_via_escrow 400→escrow→release 380/fee 20。
+- 结论：C-5 的 `with_upgrade_rule` 为纯增量改动，pay/额度/会话/撤销/escrow 运行时行为未被破坏。已回填 `compat-0.49.md` §5、`template-freeze.md` §3、`mainnet-readiness.md`。
+- 回填清单：[x] 新地址 [x] 3/3 结果 [x] escrow 不变。
