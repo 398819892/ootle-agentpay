@@ -13,6 +13,12 @@ TEMPLATES  := escrow agent_budget otc_board
 # Local swarm layout (see docs/devnet.md).
 SWARM_DIR  ?= /root/ootle/swarm
 WALLETD_URL ?= http://127.0.0.1:12010/json_rpc
+# Proof-window manifest dialect for `make e2e`. Default 0 for the 0.47 local swarm that WALLETD_URL
+# points at: its parser rejects the 0.49 authorize!/drop_authorize! macros, so e2e must use the
+# pre-0.49 dialect there (see docs/compat-0.49.md §4). For a 0.49 swarm, override all of:
+#   make e2e WALLETD_URL=http://127.0.0.1:13010/json_rpc PROOF_WINDOWS=1 \
+#            AGENT_TEMPLATE=<0.49 agent_budget> ESCROW_TEMPLATE=<0.49 escrow>
+PROOF_WINDOWS ?= 0
 
 .DEFAULT_GOAL := help
 
@@ -48,9 +54,9 @@ test-ts: ## tsc type-check build of the clients/ts client
 
 .PHONY: e2e
 e2e: ## Real on-chain e2e vs a local swarm: confirmed pay, remove_merchant/set_limits, pay_via_escrow (needs WALLETD_URL)
-	RUN_E2E=1 WALLETD_URL=$(WALLETD_URL) $(PYTHON) scripts/e2e_onchain_pay.py
-	RUN_E2E=1 WALLETD_URL=$(WALLETD_URL) $(PYTHON) scripts/e2e_onchain_admin.py
-	RUN_E2E=1 WALLETD_URL=$(WALLETD_URL) $(PYTHON) scripts/e2e_onchain_escrow.py
+	RUN_E2E=1 WALLETD_URL=$(WALLETD_URL) AGENTPAY_PROOF_WINDOWS=$(PROOF_WINDOWS) $(PYTHON) scripts/e2e_onchain_pay.py
+	RUN_E2E=1 WALLETD_URL=$(WALLETD_URL) AGENTPAY_PROOF_WINDOWS=$(PROOF_WINDOWS) $(PYTHON) scripts/e2e_onchain_admin.py
+	RUN_E2E=1 WALLETD_URL=$(WALLETD_URL) AGENTPAY_PROOF_WINDOWS=$(PROOF_WINDOWS) $(PYTHON) scripts/e2e_onchain_escrow.py
 
 # ---------------------------------------------------------------- stability / reliability (B-6)
 # Drives the UNMODIFIED dashboard backend against a controllable MOCK walletd (scripts/stability/),
