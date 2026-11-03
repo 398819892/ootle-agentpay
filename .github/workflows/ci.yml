@@ -116,20 +116,24 @@ jobs:
           node-version: "20"
 
       # Zero dependencies: each suite boots the real server (Node built-ins only) on a random port
-      # against throwaway state. security = the web-security boundary; audit = high-risk audit
-      # durability; stepup = the step-up gate; substate = the strict chain-state parse (#16);
+      # against throwaway state. security = the web-security boundary; xff_proxy = single-hop proxy
+      # keys the throttle on the right-most XFF, not the forgeable left-most (N-2); audit = high-risk
+      # audit durability; stepup = the step-up gate; substate = the strict chain-state parse (#16);
       # concurrency = reads not blocked by an in-flight write (#11); reconcile = an ambiguous
       # ("unknown") open is recovered and mounted, and a second open is refused meanwhile (#3);
+      # session_reconcile = a reconciled unknown issueSession leaves the key issued (N-1);
       # apikeys = API key -> on-chain session mapping (role gate / 404 / 409 / key listing). No install.
       - name: node test suites
         working-directory: web
         run: |
           node server/security.test.js
+          node server/xff_proxy.test.js
           node server/audit.test.js
           node server/stepup.test.js
           node server/substate.test.js
           node server/concurrency.test.js
           node server/reconcile.test.js
+          node server/session_reconcile.test.js
           node server/apikeys.test.js
 
   # ------------------------------------------------------------------ TS client

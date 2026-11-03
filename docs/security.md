@@ -113,8 +113,10 @@ ambient credential to abuse, so the CSRF/origin gate is off and the dev experien
 - **Trusted-proxy boundary (fixes the rate-limit bypass).** The client IP used by the login lockout
   and operation throttle comes from the **socket peer by default** — `X-Forwarded-For` is ignored, so
   an attacker cannot rotate a forged XFF to dodge the per-IP lockout. Behind a real proxy, set
-  `TRUSTED_PROXY=true` (single hop → left-most XFF) or `TRUSTED_PROXY=<proxy-ip,…>` (trust XFF only
-  when the direct peer is a listed proxy, then take the right-most non-proxy entry).
+  `TRUSTED_PROXY=true` (single trusted hop → the **right-most** XFF entry, i.e. the address your proxy
+  appends via nginx `$proxy_add_x_forwarded_for` / Caddy; the left-most is client-supplied and forgeable)
+  or `TRUSTED_PROXY=<proxy-ip,…>` (trust XFF only when the direct peer is a listed proxy, then take the
+  right-most non-proxy entry).
 - **Session rotation + logout invalidation.** Every successful login mints a **fresh random `sid`**
   and a newly signed cookie (no attacker-fixable identifier; a pre-set cookie can't be forged without
   `SESSION_SECRET`). Logout **revokes the `sid`** server-side until its own expiry, so a reused
@@ -124,7 +126,10 @@ ambient credential to abuse, so the CSRF/origin gate is off and the dev experien
 **Automated tests:** `node web/server/security.test.js` boots a real auth-on server and asserts the
 headers, the 401/403 outcomes for unauthenticated / cross-origin / missing-CSRF requests, that a
 cookie + correct token + same origin passes the security layer, that logout invalidates the token, and
-that a forged XFF cannot evade the lockout. 22 checks, no walletd required.
+that a forged XFF cannot evade the lockout. 22 checks, no walletd required. `node
+web/server/xff_proxy.test.js` additionally asserts the single-hop (`TRUSTED_PROXY=true`) rule: the
+throttle keys on the right-most (proxy-appended) XFF entry, so a forged left-most entry can neither
+lock out a victim nor rotate past the limit.
 
 ### Go-live hardening pass (fund-safety follow-ups)
 

@@ -326,7 +326,11 @@ function clientIp(req) {
   const xff = req.headers["x-forwarded-for"];
   if (!xff) return peer || "?";
   const chain = String(xff).split(",").map((s) => normalizeIp(s)).filter(Boolean);
-  if (mode === "true") return chain[0] || peer || "?"; // single trusted hop → left-most is the client
+  // Single trusted hop: our proxy APPENDS the real client to any client-supplied XFF
+  // (nginx `$proxy_add_x_forwarded_for`, Caddy), so the RIGHT-most entry is the address the proxy
+  // actually observed. Taking the left-most would let a client forge its own entry and so choose its
+  // rate-limit/lockout key — evading the throttle, or locking out a victim's IP. (N-2)
+  if (mode === "true") return chain[chain.length - 1] || peer || "?";
   // IP-list mode: only honour XFF when the direct peer is a configured proxy, then walk right-to-left
   // past any further trusted proxies to the first address we did not place there ourselves.
   if (TRUSTED_PROXY_IPS && TRUSTED_PROXY_IPS.has(peer)) {
@@ -2395,7 +2399,7 @@ server.listen(PORT, HOST, () => {
       !TRUSTED_PROXY || TRUSTED_PROXY.toLowerCase() === "false"
         ? "direct (X-Forwarded-For ignored; client IP = socket peer)"
         : TRUSTED_PROXY.toLowerCase() === "true"
-          ? "trusted (left-most X-Forwarded-For = client IP)"
+          ? "trusted (right-most X-Forwarded-For = client IP)"
           : `trusted IPs [${[...(TRUSTED_PROXY_IPS || [])].join(", ")}]`
     }`,
   );
