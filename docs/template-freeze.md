@@ -30,13 +30,15 @@
 
 ## 3. 参考 WASM hash（可复现指纹）
 
-`cargo build --release --target wasm32-unknown-unknown` 的产物 sha256。**这是参考指纹,不是主网地址输入**:主网发布时 walletd 会跑 wasm-opt,发布后的 `binary_hash`(= 模板地址的输入,见 `docs/mainnet-params.md` §0)与下表的裸 hash 不同。本表的用途是:任何人用上表工具链在 `d78ba5b` 重建,应得到完全相同的 hash → 证明冻结源码确定性编译。
+`cargo build --release --target wasm32-unknown-unknown` 的产物 sha256。**这是参考指纹,不是主网地址输入**:主网发布时 walletd 会跑 wasm-opt,发布后的 `binary_hash`(= 模板地址的输入,见 `docs/mainnet-params.md` §0)与下表的裸 hash 不同。本表的用途是:任何人用上表工具链在对应「源码 commit」列重建,应得到完全相同的 hash → 证明冻结源码确定性编译。
 
-| 模板 | sha256（release, pre-wasm-opt, 0.49 @ d78ba5b） | 裸体积 |
-|---|---|---|
-| `agent_budget` | `fc3129bbcab29f71853c4c23bed4e0e947e9181ed474a9dac539fd45c0662794` | 293042 B (286 KiB) |
-| `escrow` | `aacecb214cb0b0ddfe8a1c231b23da5c83b8d8110e8cb5790900b4ebe627f9c6` | 189625 B (185 KiB) |
-| `otc_board` | `131bb8de69b3416673d9b4e6b0a273f0fd05913e086a0867ff01ffdb881dbb66` | 304365 B (297 KiB) |
+| 模板 | sha256（release, pre-wasm-opt, 0.49） | 裸体积 | 源码 commit |
+|---|---|---|---|
+| `agent_budget` | `cd2def8d4182bbf3f507983355fb87a377d4a3a8635c1c1752196f9a2db39b7d` | 293477 B (287 KiB) | C-5 升级规则提交（见下注） |
+| `escrow` | `aacecb214cb0b0ddfe8a1c231b23da5c83b8d8110e8cb5790900b4ebe627f9c6` | 189625 B (185 KiB) | `d78ba5b` |
+| `otc_board` | `131bb8de69b3416673d9b4e6b0a273f0fd05913e086a0867ff01ffdb881dbb66` | 304365 B (297 KiB) | `d78ba5b` |
+
+> **agent_budget hash 变更（2026-11-03,C-5）**:为落地「AgentBudget 可升级 + Escrow 不可升级」决策（`docs/mainnet-params.md` §0）,`agent_budget/src/lib.rs` `new()` 新增一行 `.with_upgrade_rule(UpdateRule::AccessRule(rule!(resource(owner_badge))))`,故裸 hash 由 `fc3129bb…` 变为 `cd2def8d…`、体积 +435 B。此改动为**纯增量**（组件头新增 upgrade_rule 字段）,pay/额度/会话/撤销逻辑不变,`cargo test` 28/28 仍全绿。`escrow` / `otc_board` 源码未动,hash 不变。
 
 裸体积比 readiness 记的 244.9 / 156.1 KiB 大,因为那是 esmeralda 发布后(经 wasm-opt)的体积——再次印证发布后 hash/体积都会变。`agent_budget` 与 `escrow` 两处构建上下文产出的 `escrow.wasm` hash 完全一致,说明构建确定。
 
@@ -61,6 +63,6 @@
 
 - [x] 0.49 cargo test 全绿（本文 §2）。
 - [x] 参考 WASM hash 固定（本文 §3）。
-- [x] C-5 升级规则已定 immutable（`docs/mainnet-params.md` §0 / `compat-0.49.md` §6.2）。
+- [x] C-5 升级规则已定:**agent_budget 可升级(owner 限定)+ escrow 不可升级(Locked)**（`docs/mainnet-params.md` §0 / `compat-0.49.md` §6.2）。agent_budget 已加 `with_upgrade_rule`,28/28 仍绿,新 hash 见 §3。
 - [x] **0.49 本地 swarm 三条 e2e + key→session 真链**（`compat-0.49.md` §5,2026-11-02,另一台机器的 0.49 swarm）。
 - [ ] 主网发布日(≈11-12)记录**发布后**的 `binary_hash`(post-wasm-opt,模板地址输入)到 `docs/mainnet.md`——那才是最终 hash（唯一剩余项,发布时做）。

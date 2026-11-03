@@ -188,6 +188,14 @@ mod agent_budget {
                 escrow_max_timeout: 0,
             })
             .with_access_rules(rules)
+            // C-5 (mainnet): let the OWNER — and only the owner-badge holder — migrate THIS budget to
+            // a newer AgentBudget template via `UpdateComponentTemplate`, so a template bug can be
+            // fixed in place on mainnet without withdraw → republish → reopen → refund → re-issue
+            // badges. The agent badge cannot upgrade (the rule names the owner-badge resource), and
+            // the migration frame is engine-restricted (cannot touch the vault or call out, #3206);
+            // `pay`/caps/whitelist/revoke logic is unchanged. Escrow stays Locked (default) on purpose
+            // — escrow immutability is its guarantee. See docs/mainnet-params.md §0 / compat-0.49.md §6.2.
+            .with_upgrade_rule(UpdateRule::AccessRule(rule!(resource(owner_badge))))
             .create();
 
             (component, owner_badge_bucket, agent_badge_bucket)

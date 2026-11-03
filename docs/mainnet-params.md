@@ -4,16 +4,16 @@
 > 状态口径：**已定**=本仓库已拍板（可直接写死）；**已知**=官方/实测已有数值；**待官方**=Ootle 官方尚未公布，上线版本到手再核；**待发布后**=主网发布（≈11-12）产生后回填。
 > 最后更新：2026-11-03。
 
-## 0. C-5 模板升级规则 —— 已定:**不可升级(immutable)**
+## 0. C-5 模板升级规则 —— 已定:**AgentBudget 可升级(owner 限定)+ Escrow 不可升级**
 
 | 项 | 结论 |
 |---|---|
-| 决策 | `agent_budget` 与 `escrow` 两个模板在主网**以不可升级方式发布**（发布时**不** opt-in 升级）。 |
-| 为什么 | 链上硬额度「连 owner 也不能事后改」是产品核心卖点（与 C-1 revoke 不可逆同理）；immutable 让 owner-key 失陷的爆炸半径仍只是「提走当前余额」（owner badge 本就能），而非「改写未来所有行为」。v1 为 owner 自营、本金小额、随时可 `withdraw` 重开，模板若有 bug 的补救成本低。 |
-| 机制（已核实源码，详 `docs/compat-0.49.md` §6.2 / #3195） | **模板**（`template_xxx` 地址）按 `hash(author, binary_hash)` 内容寻址，永远不可变。0.49 的「升级」指把一个**组件实例**用 `UpdateComponentTemplate` 指向新模板，校验该组件头里的 `upgrade_rule`（**创建时固定、永不可改**）:`Locked`（**默认**，含构造返回 `Self` 的组件）= 谁都不能升；`Owner` / `AccessRule(r)` = 对应规则可升。设置方式是组件构造里 `Component::new(..).with_upgrade_rule(UpdateRule::...)`。**我们三个模板的 `new()` 都没调它 → 实例创建即 `Locked` = immutable**。所以 immutable = 保持默认。（更正:先前写的「发布时旗标」不准确——它是**组件代码**构造,默认即锁；已据 §6.2 改正。） |
-| 对 D3 冻结的影响 | **不需要改任何合约代码**:immutable 就是不调用 `with_upgrade_rule`（保持默认 `Locked`）。冻结的是现有 WASM;本条是确认「保持默认、不加升级规则」。 |
-| 核实状态 | 机制已由 0.49.1 源码核实（§6.2），非待办;主网发布命令本身无「升级声明」之说（升级是组件级 `UpdateComponentTemplate`,我们从不触发）。 |
-| bug 补救 runbook | 不原地热修。发现模板 bug 时:owner 用 owner badge `withdraw` 旧预算余额 → 发布修正后的新模板（新地址）→ 在新模板上重开预算并 top-up → 切客户端地址表。旧预算继续跑旧代码直到被提空。 |
+| 决策 | `agent_budget` 组件实例以 `upgrade_rule = AccessRule(owner badge)` 发布 —— 仅 owner-badge 持有者可经 `UpdateComponentTemplate` 把自己的预算迁到修正后的新 agent_budget 模板（agent badge 不能升）。`escrow`（及不上主网的 `otc_board`）保持默认 `Locked` = 不可升级。 |
+| 为什么 | AgentBudget 逻辑复杂（额度/窗口/白名单/会话/撤销）,主网若发现模板 bug,owner **原地迁移**比「`withdraw`→发新模板→重开→refund→重发 badge」成本低得多,且客户端地址表不变（组件地址不变）；升级权锁死在 owner 徽章、迁移帧引擎受限（#3206 不能碰 vault/外呼）。Escrow 的**不可变本身是其资金托管担保**（托管期「连 owner 也改不了规则」）,故保持 `Locked`；且 Escrow 无 owner 徽章,`Owner` 规则会落到创建者密钥（`pay_via_escrow` 下即 AgentBudget 组件,语义不对）。权衡:owner-key 失陷的爆炸半径从「提走当前余额」扩大到「可把预算迁到新模板」,但新模板仍须 owner 自己发布、内容寻址可审计,非任意改写。 |
+| 机制（已核实源码，详 `docs/compat-0.49.md` §6.2 / #3195） | **模板**（`template_xxx` 地址）按 `hash(author, binary_hash)` 内容寻址，永远不可变。0.49 的「升级」指把一个**组件实例**用 `UpdateComponentTemplate` 指向新模板，校验该组件头里的 `upgrade_rule`（**创建时固定、永不可改**）:`Locked`（**默认**）= 谁都不能升；`Owner` / `AccessRule(r)` = 对应规则可升。设置方式是组件构造里 `Component::new(..).with_upgrade_rule(UpdateRule::...)`。**`agent_budget` 的 `new()` 现调 `.with_upgrade_rule(UpdateRule::AccessRule(rule!(resource(owner_badge))))`；`escrow` / `otc_board` 不调 → 默认 `Locked`。** |
+| 对 D3 冻结的影响 | **需要改 `agent_budget` 合约代码**（已改:`new()` 新增一行 builder 调用）。28/28 cargo test 仍绿（行为不变）,新 WASM hash `cd2def8d…`（见 `docs/template-freeze.md` §3）。`escrow` / `otc_board` 不变,hash 不变。 |
+| 核实状态 | 机制已由 0.49 源码核实（§6.2）。**限制:**enforcement 测试（owner 能升 / agent 不能升）暂**无法写**——test_tooling 0.49.2 未暴露驱动 `UpdateComponentTemplate` 的 API；依赖现有 28 测试做回归,主网/0.49 CLI 待核一次实际迁移。 |
+| bug 补救 runbook | **agent_budget:** owner 发布修正后的新 agent_budget 模板（新地址）→ 用 owner badge 对每个预算组件执行 `UpdateComponentTemplate` 迁到新模板（额度/会话状态保留,无需 withdraw/重开/重发 badge,无需切客户端地址表）。**escrow（不可升级）:** owner `withdraw` 旧托管余额 → 发布新 escrow 模板（新地址）→ 新模板重开 → 切客户端地址表；旧组件跑旧代码直到被提空。 |
 
 ## 1. 参数表
 
@@ -21,7 +21,7 @@
 |---|---|---|---|
 | 主网日期 | 2026-11-11 | 已知 | 官方倒计时;具体时刻未公布 |
 | `tari publish -n` 网络名 | `mainnet`（拼写待确认） | 待官方 | 发布命令;readiness D1–D2 |
-| 模板升级 opt-in | **否（immutable）** | 已定 | 见 §0;发布命令**不**加升级旗标 |
+| 模板升级规则（组件 `upgrade_rule`） | **agent_budget = `AccessRule(owner badge)`（owner 可升）；escrow = `Locked`（不可升）** | 已定 | 见 §0;在模板 `new()` 里设,非发布旗标 |
 | agent_budget 模板地址 | `template_…` | 待发布后 | config.py PRESETS / web env / SDK+TS README / docs/mainnet.md |
 | escrow 模板地址 | `template_…` | 待发布后 | 同上 |
 | owner walletd JSON-RPC | owner 自有、仅绑 loopback（端口待定，官方主网 walletd `--network mainnet`） | 待官方 | `AGENTPAY_WALLETD_URL`;不对公网暴露 |
