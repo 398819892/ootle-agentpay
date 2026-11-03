@@ -69,12 +69,14 @@ jobs:
 
       - name: cargo test
         working-directory: templates/${{ matrix.template }}
-        # tari_template_test_tooling does not build against tari_crypto 0.24.1
-        # (RistrettoSecretKey: From<i32> is not satisfied); pin 0.24.0 as the dev box does.
-        run: |
-          cargo generate-lockfile
-          cargo update -p tari_crypto --precise 0.24.0
-          cargo test
+        # Build against the COMMITTED Cargo.lock with --locked: a reproducible build that fails if the
+        # lock and Cargo.toml disagree, rather than re-resolving to floating latest versions each run.
+        # The old `generate-lockfile` + `cargo update -p tari_crypto --precise 0.24.0` dance was both
+        # non-reproducible AND broken: every current tari_template_test_tooling 0.49.x requires
+        # tari_crypto ^0.24.1, so the 0.24.0 downgrade turned unsatisfiable and the job failed at
+        # resolution. All 99 template tests pass against the committed lock's 0.24.1 (the old
+        # "doesn't build against 0.24.1" note no longer holds for test_tooling 0.49.2).
+        run: cargo test --locked
 
   # ------------------------------------------------------------------ Python SDK
   sdk:
