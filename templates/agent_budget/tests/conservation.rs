@@ -50,7 +50,7 @@ fn empty(test: &mut TemplateTest) -> Account {
 
 fn tari_balance(test: &mut TemplateTest, a: &Account) -> Amount {
     test.execute_expect_success(
-        test.transaction().call_method(a.component, "balance", args![XTR]).build_and_seal(&a.key),
+        test.transaction().call_method(a.component, "balance", args![TARI_TOKEN]).build_and_seal(&a.key),
         vec![a.owner_token.clone()],
     );
     test.expect_return::<Amount>(0)
@@ -67,7 +67,7 @@ fn create_budget(ctx: &mut Ctx, owner: &Account, agent: &Account, whitelist: Vec
                  fund: Amount, per_tx: Amount, daily: Amount, epochs_per_window: u64) -> Budget {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(owner.component, "withdraw", args![XTR, fund])
+            .call_method(owner.component, "withdraw", args![TARI_TOKEN, fund])
             .put_last_instruction_output_on_workspace("funds")
             .call_function(ctx.template, "new", args![Workspace("funds"), per_tx, daily, epochs_per_window, whitelist])
             .put_last_instruction_output_on_workspace("ret")
@@ -121,7 +121,7 @@ fn pay_expect_failure(ctx: &mut Ctx, agent: &Account, b: &Budget, merchant: Comp
 fn top_up(ctx: &mut Ctx, funder: &Account, b: &Budget, amount: Amount) {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(funder.component, "withdraw", args![XTR, amount])
+            .call_method(funder.component, "withdraw", args![TARI_TOKEN, amount])
             .put_last_instruction_output_on_workspace("funds")
             .call_method(b.component, "top_up", args![Workspace("funds")])
             .build_and_seal(&funder.key),
@@ -135,6 +135,7 @@ fn owner_withdraw(ctx: &mut Ctx, owner: &Account, b: &Budget, sink: &Account, am
         ctx.test.transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "withdraw", args![amount])
             .put_last_instruction_output_on_workspace("out")
             .call_method(sink.component, "deposit", args![Workspace("out")])

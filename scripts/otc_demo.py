@@ -55,8 +55,8 @@ fn main() {{ let mut o=var!["o"]; let (c,ob)=OtcBoard::new(address!("{treasury}"
     print("\n== Seller lists 1000 (asset) + 100 (bond), arbiter=default ==")
     LIST=f'''fn main() {{
   let mut s=var!["s"];
-  let asset=s.withdraw(XTR, amount!(1000));
-  let bond=s.withdraw(XTR, amount!(100));
+  let asset=s.withdraw(TARI, amount!(1000));
+  let bond=s.withdraw(TARI, amount!(100));
   let mut b=var!["b"];
   b.list(asset, bond, address!("{DEFAULT}"), hex_bytes!("{terms_hex("widget terms v1")}"), public_key!("{DEFAULT_PK}"), 20u64);
 }}'''

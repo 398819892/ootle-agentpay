@@ -185,6 +185,23 @@ cd web && AGENTPAY_STATE_FILE=$PWD/server/state.local.json \
   改为真正链上移除（本地别名保留，便于按名重加），新增 `POST /api/v1/budget/limits`；治理页白名单 chip 带 ✕ 移除 + "支出限额"表单（中英）。
   测试：TS 注入/形状、Python、`stepup.test.js` 的 setLimits/removeMerchant 参数绑定用例；api.md / openapi.json / web README 已同步。
 
+**2026-11-02 晚：tari-ootle 0.49.x 兼容（会话 `ootle-049-compat`，详见 `docs/compat-0.49.md`）**：
+- 上游当天发 v0.48.0/v0.49.0/v0.49.1（Linux 二进制构建失败）和 **v0.49.2**（第一个带二进制的版本）；两次 testnet reset。
+- 模板升到 `tari_template_lib 0.37` / `tari_template_test_tooling 0.49` / `tari_ootle_template_build 0.17`：源码只改 `XTR`→`TARI_TOKEN`
+  （otc_board 质押断言）+ 测试里 owner 徽章调用加 `.authorize_proof("proof")`（0.49 的 proof 授权窗口，#3206）。`pay`/`pay_via_escrow`
+  收 proof 参数不受影响（出示即可读）。agent_budget 28/28、escrow 26/26、otc_board 45/45 在新工具链上全绿。
+- **0.49 本地 swarm 真链全过**：三模板已发布（agent_budget `template_1dc1be00…`、escrow `template_f4c323fc…`、otc_board `template_50705dbc…`），
+  `e2e_onchain_pay/admin/escrow` 3/3（同一批脚本在 0.47 swarm 上加 `AGENTPAY_PROOF_WINDOWS=0` 也 3/3），`/api/v1` key→session
+  （发 badge → 按 badge 付款 → 链上撤销后 403 → 第二代 `key-bot1.2`）通过；esme-fund 0.49.2 产物经 `submit_dry_run` 被 walletd 接受封签。
+- SDK/TS：manifest 关键字 `XTR`→`TARI`（0.47 也认）；owner 调用包 `authorize!`/`drop_authorize!`，由 `AGENTPAY_PROOF_WINDOWS`
+  （Python `proof_windows` / TS `proofWindows`）切换方言，默认 0.49，`=0` 给 0.47 链。单测 Python 77 / TS 20 绿。**`clients/ts/dist` 未重建**，
+  要在本地盘 `npm test` 后把 `dist/*.js` + `*.d.ts` 回拷，仪表盘才会用新 manifest。
+- `scripts/esme-fund` 升到 0.49.2 crate 零改动编译；但 esmeralda reset 后 Caravel 水龙头不存在，主网走 `accounts.claim_burn`（compat 文档 §6.3）。
+- 本机新增 0.49 本地 swarm：`/root/ootle49/swarm`，端口 13000 段（walletd **:13010**，webui :8081），脚本 `I:\wsl\setup\c49-*.sh`；0.47 swarm 不变。
+- **主网准备三点结论**（网络名 `mainnet`/费率/模板升级 opt-in/burn→claim）在 `docs/compat-0.49.md` §6；最重要的决策：AgentBudget 是否加
+  `.with_upgrade_rule(AccessRule(resource(owner_badge)))`，不加则主网上每个预算实例代码永久锁定。
+- WSL 来宾反复崩溃的根因是宿主**没有页面文件**（commit 耗尽），已加 `.wslconfig`（memory=10GB/swap=12GB）并限 `CARGO_BUILD_JOBS=3`。
+
 **仍待办（需要人拍板/链环境）**：
 - ~~三个模板 `lib.rs` 的版权头仍是 `Copyright 2026 The Tari Project`~~ ✅ 2026-11-02 统一为 `Copyright 2026 The AgentPay Authors`（三模板源码+测试、`Cargo.toml` authors、新增根 `LICENSE`、`sdk/LICENSE`）。
 - ~~API key → 链上会话映射~~ ✅ 2026-11-02：每个 `/api/v1` key 固定映射到会话 `key-<id>`；

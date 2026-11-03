@@ -368,19 +368,23 @@ def test_connect_defaults_to_admin_on_devnet():
 # -- resource parametrization (drop the hard-coded XTR) --------------------------------
 
 def test_resource_parametrization_uses_address_not_xtr():
-    """A non-XTR budget splices a validated `address!("resource_…")` into the withdraw, not the `XTR`
-    keyword; the default stays `XTR` so the devnet flow is unchanged."""
+    """A non-XTR budget splices a validated `address!("resource_…")` into the withdraw, not the
+    native-token keyword; the default stays the native token (API name ``"XTR"``), spliced as the
+    manifest keyword ``TARI`` — the only spelling a 0.48+ parser resolves (#3076) and one 0.47 also
+    accepts — so the devnet flow is unchanged on either chain."""
     rescoin = "resource_" + "d" * 64
     b = _budget(resource=rescoin)
     b.top_up(500)
     manifest, _ = b.client.runs[-1]
     assert f'withdraw(address!("{rescoin}"), amount!(500))' in manifest
-    assert "withdraw(XTR" not in manifest
+    assert "withdraw(TARI" not in manifest and "withdraw(XTR" not in manifest
 
-    b2 = _budget()  # default resource
-    b2.top_up(500)
-    m2, _ = b2.client.runs[-1]
-    assert "withdraw(XTR, amount!(500))" in m2
+    for native in ("XTR", "TARI"):  # both API spellings of the native token
+        b2 = _budget(resource=native)
+        b2.top_up(500)
+        m2, _ = b2.client.runs[-1]
+        assert "withdraw(TARI, amount!(500))" in m2
+        assert "XTR" not in m2                      # the removed alias never reaches a manifest
 
 
 def test_resource_parametrization_rejects_bad_resource():
@@ -388,6 +392,73 @@ def test_resource_parametrization_rejects_bad_resource():
     with pytest.raises(ChainError):
         b.top_up(500)                       # bad resource address is rejected at manifest-build time
     assert b.client.runs == []
+
+
+# -- proof authorization windows (tari-ootle 0.49, #3206) -------------------------------------
+# A workspace proof authorizes nothing until `authorize!(proof)` opens a window over it, so every
+# OWNER-badge manifest opens one around the owner-gated call and closes it (`drop_authorize!`) before
+# dropping the proof. The agent's `pay` proof is only SHOWN to the template (an argument it reads), so
+# it never needs a window. A 0.47 parser does not know the macros: `proof_windows=False`
+# (`AGENTPAY_PROOF_WINDOWS=0`) keeps the old dialect.
+
+def _once(m: str, needle: str) -> int:
+    i = m.find(needle)
+    assert i >= 0, f"missing {needle!r} in:\n{m}"
+    assert m.find(needle, i + 1) < 0, f"{needle!r} occurs more than once"
+    return i
+
+
+def test_owner_calls_open_a_proof_window_by_default():
+    b = _budget()
+    assert b.proof_windows is True
+    b.set_limits(250, 900)
+    b.withdraw(100)
+    b.issue_agent_badge("s2")
+    b.revoke_session("s2")
+    b.add_merchant(OTHER)
+    assert len(b.client.runs) == 5
+    for m, _ in b.client.runs:
+        create = _once(m, f'owner.create_proof_for_resource(address!("{OWNER_BADGE}"));')
+        opened = _once(m, "\n    authorize!(proof);")
+        closed = _once(m, "drop_authorize!(proof);")
+        dropped = _once(m, "drop_all_proofs!();")
+        call = m.find("budget.")
+        # create -> authorize! -> the budget call -> drop_authorize! -> drop_all_proofs!
+        assert create < opened < call < closed < dropped, m
+
+
+def test_pay_proof_is_only_shown_no_window_on_either_dialect():
+    for pw in (True, False):
+        b = _budget(proof_windows=pw)
+        b.pay(SHOP, 10, memo="m")
+        m, _ = b.client.runs[-1]
+        assert "create_proof_by_non_fungible_ids(" in m and "budget.pay(proof, " in m
+        assert "authorize!(" not in m, m
+        assert "drop_all_proofs!();" in m
+
+
+def test_proof_windows_off_keeps_the_pre_0_49_dialect():
+    b = _budget(proof_windows=False)
+    b.set_limits(250, 900)
+    m, _ = b.client.runs[-1]
+    assert f'owner.create_proof_for_resource(address!("{OWNER_BADGE}"));' in m
+    assert "budget.set_limits(amount!(250), amount!(900));" in m
+    assert "drop_all_proofs!();" in m
+    assert "authorize!(" not in m, m
+
+
+def test_proof_windows_env_switch(monkeypatch):
+    from agentpay.onchain import _proof_windows_default
+    monkeypatch.setenv("AGENTPAY_PROOF_WINDOWS", "0")
+    assert _proof_windows_default() is False
+    assert OnChainBudget(FakeWalletd().connect(), TPL, OWNER).proof_windows is False
+    monkeypatch.setenv("AGENTPAY_PROOF_WINDOWS", "1")
+    assert _proof_windows_default() is True
+    monkeypatch.delenv("AGENTPAY_PROOF_WINDOWS")
+    assert _proof_windows_default() is True
+    # an explicit field wins over the environment
+    monkeypatch.setenv("AGENTPAY_PROOF_WINDOWS", "0")
+    assert OnChainBudget(FakeWalletd().connect(), TPL, OWNER, proof_windows=True).proof_windows is True
 
 
 # -- session selection: the pay proof carries exactly ONE badge, chosen by id ---------------

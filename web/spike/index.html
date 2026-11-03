@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentPay wallet spike</title>
+    <style>
+      :root { --bg: #f7f7f5; --fg: #1a1a1a; --mut: #666; --box: #fff; --line: #ddd; --ok: #1b7f3b; --bad: #b3261e; --acc: #4b3ad6; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #15161a; --fg: #ececec; --mut: #9a9aa3; --box: #1f2127; --line: #33363f; } }
+      body { margin: 0; padding: 16px; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+      h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 15px; margin: 0 0 8px; }
+      p.sub { color: var(--mut); margin: 0 0 16px; }
+      .grid { display: grid; gap: 16px; grid-template-columns: 1fr; } @media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+      section { background: var(--box); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+      label { display: block; color: var(--mut); font-size: 12px; margin-top: 8px; }
+      input { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); font-family: ui-monospace, monospace; font-size: 12px; }
+      button { margin: 8px 6px 0 0; padding: 7px 12px; border: 1px solid var(--acc); background: var(--acc); color: #fff; border-radius: 6px; cursor: pointer; }
+      button.ghost { background: transparent; color: var(--acc); } button:disabled { opacity: .5; cursor: default; }
+      pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 360px; overflow: auto; margin: 10px 0 0; }
+      .ok { color: var(--ok); } .bad { color: var(--bad); } .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+      .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--mut); font-size: 12px; margin-left: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>AgentPay — sign in the browser (spike)</h1>
+    <p class="sub">Local swarm (Ootle 0.47) · indexer <span class="mono" id="indexer-url"></span> · AgentBudget <span class="mono" id="template-short"></span>. The page builds <code>open</code>/<code>pay</code> as instruction lists with ootle.ts 0.11.1 and submits them to the indexer; nothing goes through the dashboard backend.</p>
+
+    <section>
+      <h2>Chain settings</h2>
+      <label>Indexer REST URL</label><input id="cfg-indexer" value="http://127.0.0.1:12008" />
+      <label>AgentBudget template</label><input id="cfg-template" value="template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f" />
+      <label>Merchant account (whitelisted, paid)</label><input id="cfg-merchant" value="component_7ce2546e4f2384eee64b89e77fab606aff50099e0c14be140c50db294780ec6c" />
+    </section>
+
+    <div class="grid" style="margin-top:16px">
+      <section>
+        <h2>A · Key in the browser <span class="pill">SecretKeyWallet · WASM sr25519 · no walletd</span></h2>
+        <div id="a-key" class="mono">no key yet</div>
+        <button id="a-gen">Generate key (localStorage)</button>
+        <button id="a-fund" class="ghost" disabled>Fund via localnet faucet</button>
+        <button id="a-open" class="ghost" disabled>Open budget (50 000 / caps 1 000 · 1 500)</button>
+        <button id="a-pay" class="ghost" disabled>Pay 700</button>
+        <button id="a-over" class="ghost" disabled>Try pay 5 000 (over cap)</button>
+        <pre id="a-log"></pre>
+      </section>
+
+      <section>
+        <h2>B · Key in the user's walletd <span class="pill">signing_requests · owner approves · page seals+submits</span></h2>
+        <label>walletd JSON-RPC (proxied by vite: /walletd → 127.0.0.1:12010, because 0.47 walletd has no CORS)</label>
+        <input id="b-url" value="/walletd" />
+        <div id="b-acct" class="mono">not connected</div>
+        <button id="b-connect">Connect (request SigningRequests + Accounts:Read)</button>
+        <button id="b-open" class="ghost" disabled>Open budget</button>
+        <button id="b-pay" class="ghost" disabled>Pay 700</button>
+        <button id="b-over" class="ghost" disabled>Try pay 5 000 (over cap)</button>
+        <div id="b-pending" style="margin-top:8px"></div>
+        <pre id="b-log"></pre>
+      </section>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

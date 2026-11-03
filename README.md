@@ -36,6 +36,10 @@ agents. A third template, **OtcBoard, is FROZEN** (experimental, not for product
 | **AgentBudget** | Owner/agent badges; `pay` within per-tx + rolling-daily caps + whitelist; revoke; `pay_via_escrow` (cross-template) | 28 ✅ | `template_978113ef…` | `template_88b11261…` |
 | **OtcBoard** *(frozen)* | P2P OTC escrow board — kept compiling + tested as a reference artifact only | 45 ✅ | `template_5c0cd27e…` | `template_bafbe76e…` |
 
+> **Upstream moved to tari-ootle 0.49.x on 2026-11-02 (two testnet resets).** The localnet column is the
+> 0.47 swarm; the esmeralda addresses predate the reset and will have to be republished. What changed
+> and how the templates / SDK / TS client were adapted is in [`docs/compat-0.49.md`](docs/compat-0.49.md).
+
 Escrow and AgentBudget are deployed to a local swarm **and to the public esmeralda testnet** and
 exercised with **real on-chain calls** (not just unit tests): see the demos below. Full esmeralda
 addresses and the deployment method are in [`docs/esmeralda.md`](docs/esmeralda.md); how the local
@@ -70,7 +74,8 @@ repo was built on **WSL Ubuntu**.
 ```bash
 # 1. toolchain (in WSL)
 rustup target add wasm32-unknown-unknown
-cargo install tari-ootle-cli            # the `tari` CLI
+cargo install tari-ootle-cli --version 0.34.1   # the `tari` CLI matching tari-ootle 0.49.x
+# templates target tari_template_lib 0.37 / test_tooling 0.49 (tari-ootle v0.49.2) — see docs/compat-0.49.md
 
 # 2. test a template
 cd templates/escrow && cargo test        # (likewise agent_budget, otc_board)
@@ -174,7 +179,8 @@ Escrow 与 AgentBudget 都已部署到本地链**以及公共测试网 esmeralda
 ```bash
 # 1. 工具链（WSL 里）
 rustup target add wasm32-unknown-unknown
-cargo install tari-ootle-cli            # tari CLI
+cargo install tari-ootle-cli --version 0.34.1   # 与 tari-ootle 0.49.x 配套的 tari CLI
+# 模板基于 tari_template_lib 0.37 / test_tooling 0.49（tari-ootle v0.49.2）——见 docs/compat-0.49.md
 
 # 2. 测试模板
 cd templates/escrow && cargo test        # agent_budget、otc_board 同理

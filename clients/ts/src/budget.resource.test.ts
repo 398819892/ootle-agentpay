@@ -1,6 +1,6 @@
 /**
  * Resource parametrization — the budget is not bound to XTR. `open({ resource })` sets the budget's
- * resource and `topUp` reuses it: the manifest splices the `XTR` keyword for the native token, or a
+ * resource and `topUp` reuses it: the manifest splices the `TARI` keyword for the native token, or a
  * strictly-validated `address!("resource_…")` for anything else (never a raw string). Mirrors the
  * Python SDK's `test_resource_parametrization_uses_address_not_xtr`.
  *     npm run build && node --test dist/budget.resource.test.js
@@ -41,11 +41,11 @@ function mounted(resource?: string): { b: OnChainBudget; fake: FakeWalletd } {
   return { b, fake };
 }
 
-test("default resource is XTR: topUp withdraws with the XTR keyword", async () => {
+test("default resource is XTR: topUp withdraws with the TARI keyword (0.47 and 0.48+ parsers)", async () => {
   const { b, fake } = mounted();
   assert.equal(b.resource, XTR);
   await b.topUp(500);
-  assert.ok(fake.runs[0].manifest.includes("withdraw(XTR, amount!(500))"));
+  assert.ok(fake.runs[0].manifest.includes("withdraw(TARI, amount!(500))"));
 });
 
 test("a non-XTR budget splices a validated address!(\"resource_…\"), not XTR", async () => {
@@ -53,7 +53,7 @@ test("a non-XTR budget splices a validated address!(\"resource_…\"), not XTR",
   await b.topUp(500);
   const m = fake.runs[0].manifest;
   assert.ok(m.includes(`withdraw(address!("${RESCOIN}"), amount!(500))`));
-  assert.ok(!m.includes("withdraw(XTR"));
+  assert.ok(!m.includes("withdraw(TARI"));
 });
 
 test("open({ resource }) records the resource and funds the budget in it", async () => {

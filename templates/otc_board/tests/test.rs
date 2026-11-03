@@ -48,7 +48,7 @@ fn empty(test: &mut TemplateTest) -> Account {
 
 fn bal(test: &mut TemplateTest, a: &Account) -> Amount {
     test.execute_expect_success(
-        test.transaction().call_method(a.component, "balance", args![XTR]).build_and_seal(&a.key),
+        test.transaction().call_method(a.component, "balance", args![TARI_TOKEN]).build_and_seal(&a.key),
         vec![a.owner_token.clone()],
     );
     test.expect_return::<Amount>(0)
@@ -96,9 +96,9 @@ fn list_locked(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account
         amount: Amount, bond_amt: Amount, timeout: u64, hashlock: Option<Hash32>) -> u64 {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(seller.component, "withdraw", args![XTR, amount])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount])
             .put_last_instruction_output_on_workspace("asset")
-            .call_method(seller.component, "withdraw", args![XTR, bond_amt])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, bond_amt])
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
@@ -354,9 +354,9 @@ fn listing_over_cap_is_rejected() {
     let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![500], 500);
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
-            .call_method(seller.component, "withdraw", args![XTR, amount![1000]])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount![1000]])
             .put_last_instruction_output_on_workspace("asset")
-            .call_method(seller.component, "withdraw", args![XTR, amount![100]])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount![100]])
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
@@ -378,9 +378,9 @@ fn listing_bond_too_low_is_rejected() {
     let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 500);
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
-            .call_method(seller.component, "withdraw", args![XTR, amount![1000]])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount![1000]])
             .put_last_instruction_output_on_workspace("asset")
-            .call_method(seller.component, "withdraw", args![XTR, amount![10]]) // bond 10 < 100
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount![10]]) // bond 10 < 100
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
@@ -403,9 +403,9 @@ fn non_whitelisted_arbiter_is_rejected() {
     let board = new_board(&mut ctx, &owner, &treasury, &arbiter, amount![100], amount![10000], 500);
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
-            .call_method(seller.component, "withdraw", args![XTR, amount![1000]])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount![1000]])
             .put_last_instruction_output_on_workspace("asset")
-            .call_method(seller.component, "withdraw", args![XTR, amount![100]])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount![100]])
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
@@ -449,6 +449,7 @@ fn owner_adds_arbiter_then_listing_with_them_works() {
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(board.component, "add_arbiter", args![arbiter2.public_key])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -466,6 +467,7 @@ fn set_arbiter_stake(ctx: &mut Ctx, board: &Board, owner: &Account, stake: Amoun
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(board.component, "set_arbiter_stake", args![stake])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -477,7 +479,7 @@ fn set_arbiter_stake(ctx: &mut Ctx, board: &Board, owner: &Account, stake: Amoun
 fn stake_arbiter(ctx: &mut Ctx, board: &Board, arbiter: &Account, stake: Amount) {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(arbiter.component, "withdraw", args![XTR, stake])
+            .call_method(arbiter.component, "withdraw", args![TARI_TOKEN, stake])
             .put_last_instruction_output_on_workspace("stake")
             .call_method(board.component, "stake_arbiter", args![Workspace("stake")])
             .build_and_seal(&arbiter.key),
@@ -541,6 +543,7 @@ fn owner_slashes_arbiter_stake_to_treasury() {
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(board.component, "slash_arbiter", args![arbiter.public_key])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -644,6 +647,7 @@ fn stake_locked_to_a_dispute_cannot_be_unstaked_or_slashed() {
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(board.component, "slash_arbiter", args![arbiter.public_key])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),

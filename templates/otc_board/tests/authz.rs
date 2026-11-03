@@ -52,7 +52,7 @@ fn empty(test: &mut TemplateTest) -> Account {
 
 fn bal(test: &mut TemplateTest, a: &Account) -> Amount {
     test.execute_expect_success(
-        test.transaction().call_method(a.component, "balance", args![XTR]).build_and_seal(&a.key),
+        test.transaction().call_method(a.component, "balance", args![TARI_TOKEN]).build_and_seal(&a.key),
         vec![a.owner_token.clone()],
     );
     test.expect_return::<Amount>(0)
@@ -97,9 +97,9 @@ fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
         amount: Amount, bond_amt: Amount, timeout: u64) -> u64 {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(seller.component, "withdraw", args![XTR, amount])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount])
             .put_last_instruction_output_on_workspace("asset")
-            .call_method(seller.component, "withdraw", args![XTR, bond_amt])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, bond_amt])
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
@@ -151,6 +151,7 @@ fn set_arbiter_stake(ctx: &mut Ctx, board: &Board, owner: &Account, stake: Amoun
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("p")
+            .authorize_proof("p")
             .call_method(board.component, "set_arbiter_stake", args![stake])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -161,7 +162,7 @@ fn set_arbiter_stake(ctx: &mut Ctx, board: &Board, owner: &Account, stake: Amoun
 fn stake_arbiter(ctx: &mut Ctx, board: &Board, arbiter: &Account, stake: Amount) {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(arbiter.component, "withdraw", args![XTR, stake])
+            .call_method(arbiter.component, "withdraw", args![TARI_TOKEN, stake])
             .put_last_instruction_output_on_workspace("stake")
             .call_method(board.component, "stake_arbiter", args![Workspace("stake")])
             .build_and_seal(&arbiter.key),
@@ -174,6 +175,7 @@ fn add_tradable_asset(ctx: &mut Ctx, board: &Board, owner: &Account, asset: Reso
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("p")
+            .authorize_proof("p")
             .call_method(board.component, "add_tradable_asset", args![asset])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -406,6 +408,7 @@ fn malicious_owner_cannot_block_an_in_flight_resolve() {
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("p")
+            .authorize_proof("p")
             .call_method(board.component, "slash_arbiter", args![arbiter.public_key])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -439,9 +442,9 @@ fn list_locked(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account
         amount: Amount, bond_amt: Amount, timeout: u64, hashlock: Option<Hash32>) -> u64 {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(seller.component, "withdraw", args![XTR, amount])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount])
             .put_last_instruction_output_on_workspace("asset")
-            .call_method(seller.component, "withdraw", args![XTR, bond_amt])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, bond_amt])
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
@@ -577,6 +580,7 @@ fn set_params(ctx: &mut Ctx, board: &Board, owner: &Account, bond: Amount, max: 
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("p")
+            .authorize_proof("p")
             .call_method(board.component, "set_params", args![bond, max, fee_bps])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -639,6 +643,7 @@ fn fee_above_platform_maximum_is_rejected() {
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("p")
+            .authorize_proof("p")
             .call_method(board.component, "set_params", args![amount![0], amount![10000], 1001u64])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -663,7 +668,7 @@ fn bond_in_wrong_resource_is_rejected() {
 
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
-            .call_method(owner.component, "withdraw", args![XTR, amount![1000]])
+            .call_method(owner.component, "withdraw", args![TARI_TOKEN, amount![1000]])
             .put_last_instruction_output_on_workspace("asset")
             // bond is one OTC-OWN badge (a different resource than the XTR asset)
             .call_method(owner.component, "withdraw", args![board.owner_badge, amount![1]])
@@ -904,6 +909,7 @@ fn listing_below_min_timeout_is_rejected() {
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("p")
+            .authorize_proof("p")
             .call_method(board.component, "set_min_timeout", args![10u64])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -913,9 +919,9 @@ fn listing_below_min_timeout_is_rejected() {
     // a listing with timeout 1 (below the minimum) is rejected
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
-            .call_method(seller.component, "withdraw", args![XTR, amount![1000]])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount![1000]])
             .put_last_instruction_output_on_workspace("asset")
-            .call_method(seller.component, "withdraw", args![XTR, amount![100]])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount![100]])
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
@@ -946,9 +952,9 @@ fn listing_a_non_whitelisted_asset_is_rejected() {
 
     let reason = ctx.test.execute_expect_failure(
         ctx.test.transaction()
-            .call_method(seller.component, "withdraw", args![XTR, amount![1000]])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount![1000]])
             .put_last_instruction_output_on_workspace("asset")
-            .call_method(seller.component, "withdraw", args![XTR, amount![100]])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount![100]])
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,

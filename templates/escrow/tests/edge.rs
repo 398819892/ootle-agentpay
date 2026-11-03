@@ -45,7 +45,7 @@ fn empty(test: &mut TemplateTest) -> Account {
 
 fn bal(test: &mut TemplateTest, a: &Account) -> Amount {
     test.execute_expect_success(
-        test.transaction().call_method(a.component, "balance", args![XTR]).build_and_seal(&a.key),
+        test.transaction().call_method(a.component, "balance", args![TARI_TOKEN]).build_and_seal(&a.key),
         vec![a.owner_token.clone()],
     );
     test.expect_return::<Amount>(0)
@@ -57,7 +57,7 @@ fn new_escrow(ctx: &mut Ctx, payer: &Account, payee: &Account, treasury: &Accoun
               arbiter: Option<RistrettoPublicKeyBytes>, amount: Amount, fee_bps: u64) -> ComponentAddress {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(payer.component, "withdraw", args![XTR, amount])
+            .call_method(payer.component, "withdraw", args![TARI_TOKEN, amount])
             .put_last_instruction_output_on_workspace("funds")
             .call_function(ctx.template, "new",
                 args![Workspace("funds"), payer.public_key, payer.component, payee.component, payee.public_key,

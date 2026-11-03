@@ -1,0 +1,31 @@
+{
+  "name": "agentpay-wallet-spike",
+  "private": true,
+  "type": "module",
+  "version": "0.0.1",
+  "description": "Spike: AgentBudget open/pay signed by the user's own key (browser SecretKeyWallet or walletd signing requests) via ootle.ts, submitted through the indexer. Pinned to the Ootle 0.47 package set for the local swarm.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "flow:a": "node --experimental-wasm-modules node/flow-a-browser-key.mjs",
+    "flow:a:dry": "node --experimental-wasm-modules node/flow-a-browser-key.mjs --dry-run",
+    "flow:b": "node --experimental-wasm-modules node/flow-b-walletd-approve.mjs"
+  },
+  "dependencies": {
+    "@tari-project/ootle": "0.11.1",
+    "@tari-project/ootle-indexer": "0.11.1",
+    "@tari-project/ootle-secret-key-wallet": "0.11.1",
+    "@tari-project/ootle-wallet-daemon-signer": "0.11.1"
+  },
+  "overrides": {
+    "@tari-project/ootle-ts-bindings": "1.60.0",
+    "@tari-project/indexer-client": "1.11.0",
+    "@tari-project/wallet_jrpc_client": "1.26.0",
+    "@tari-project/ootle-wasm": "0.47.0"
+  },
+  "devDependencies": {
+    "vite": "^6.4.5",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.6.0"
+  }
+}

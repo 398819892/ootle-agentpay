@@ -57,7 +57,7 @@ fn empty(test: &mut TemplateTest) -> Account {
 
 fn bal(test: &mut TemplateTest, a: &Account) -> Amount {
     test.execute_expect_success(
-        test.transaction().call_method(a.component, "balance", args![XTR]).build_and_seal(&a.key),
+        test.transaction().call_method(a.component, "balance", args![TARI_TOKEN]).build_and_seal(&a.key),
         vec![a.owner_token.clone()],
     );
     test.expect_return::<Amount>(0)
@@ -103,6 +103,7 @@ fn set_fee(ctx: &mut Ctx, owner: &Account, board: &Board, fee_bps: u64, max_amou
         ctx.test.transaction()
             .create_proof(owner.component, board.owner_badge)
             .put_last_instruction_output_on_workspace("p")
+            .authorize_proof("p")
             .call_method(board.component, "set_params", args![amount![0], max_amount, fee_bps])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -114,9 +115,9 @@ fn list(ctx: &mut Ctx, board: &Board, seller: &Account, arbiter: &Account,
         amount: Amount, bond_amt: Amount, timeout: u64) -> u64 {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(seller.component, "withdraw", args![XTR, amount])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, amount])
             .put_last_instruction_output_on_workspace("asset")
-            .call_method(seller.component, "withdraw", args![XTR, bond_amt])
+            .call_method(seller.component, "withdraw", args![TARI_TOKEN, bond_amt])
             .put_last_instruction_output_on_workspace("bond")
             .call_method(board.component, "list",
                 args![Workspace("asset"), Workspace("bond"), seller.component,
@@ -300,7 +301,7 @@ fn arbiter_stake_is_conserved() {
         let a0 = bal(&mut ctx.test, &arbiter);
         ctx.test.execute_expect_success(
             ctx.test.transaction()
-                .call_method(arbiter.component, "withdraw", args![XTR, amount![5000]])
+                .call_method(arbiter.component, "withdraw", args![TARI_TOKEN, amount![5000]])
                 .put_last_instruction_output_on_workspace("stake")
                 .call_method(board.component, "stake_arbiter", args![Workspace("stake")])
                 .build_and_seal(&arbiter.key),
@@ -323,7 +324,7 @@ fn arbiter_stake_is_conserved() {
         let t0 = bal(&mut ctx.test, &treasury);
         ctx.test.execute_expect_success(
             ctx.test.transaction()
-                .call_method(arbiter.component, "withdraw", args![XTR, amount![3000]])
+                .call_method(arbiter.component, "withdraw", args![TARI_TOKEN, amount![3000]])
                 .put_last_instruction_output_on_workspace("stake")
                 .call_method(board.component, "stake_arbiter", args![Workspace("stake")])
                 .build_and_seal(&arbiter.key),
@@ -333,6 +334,7 @@ fn arbiter_stake_is_conserved() {
             ctx.test.transaction()
                 .create_proof(owner.component, board.owner_badge)
                 .put_last_instruction_output_on_workspace("p")
+                .authorize_proof("p")
                 .call_method(board.component, "slash_arbiter", args![arbiter.public_key])
                 .drop_all_proofs_in_workspace()
                 .build_and_seal(&owner.key),

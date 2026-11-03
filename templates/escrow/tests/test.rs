@@ -56,7 +56,7 @@ fn new_account(test: &mut TemplateTest) -> Account {
 fn tari_balance(test: &mut TemplateTest, account: &Account) -> Amount {
     test.execute_expect_success(
         test.transaction()
-            .call_method(account.component, "balance", args![XTR])
+            .call_method(account.component, "balance", args![TARI_TOKEN])
             .build_and_seal(&account.key),
         vec![account.owner_token.clone()],
     );
@@ -114,7 +114,7 @@ fn create_escrow(
     ctx.test.execute_expect_success(
         ctx.test
             .transaction()
-            .call_method(payer.component, "withdraw", args![XTR, p.fund])
+            .call_method(payer.component, "withdraw", args![TARI_TOKEN, p.fund])
             .put_last_instruction_output_on_workspace("funds")
             .call_function(
                 ctx.escrow_template,
@@ -468,7 +468,7 @@ fn fee_above_cap_is_rejected() {
     let reason = ctx.test.execute_expect_failure(
         ctx.test
             .transaction()
-            .call_method(payer.component, "withdraw", args![XTR, amount![1000]])
+            .call_method(payer.component, "withdraw", args![TARI_TOKEN, amount![1000]])
             .put_last_instruction_output_on_workspace("funds")
             .call_function(
                 ctx.escrow_template,
@@ -503,7 +503,7 @@ fn zero_funds_is_rejected() {
     let reason = ctx.test.execute_expect_failure(
         ctx.test
             .transaction()
-            .call_method(payer.component, "withdraw", args![XTR, amount![0]])
+            .call_method(payer.component, "withdraw", args![TARI_TOKEN, amount![0]])
             .put_last_instruction_output_on_workspace("funds")
             .call_function(
                 ctx.escrow_template,

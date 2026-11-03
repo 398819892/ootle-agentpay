@@ -56,7 +56,7 @@ fn empty(test: &mut TemplateTest) -> Account {
 
 fn tari_balance(test: &mut TemplateTest, a: &Account) -> Amount {
     test.execute_expect_success(
-        test.transaction().call_method(a.component, "balance", args![XTR]).build_and_seal(&a.key),
+        test.transaction().call_method(a.component, "balance", args![TARI_TOKEN]).build_and_seal(&a.key),
         vec![a.owner_token.clone()],
     );
     test.expect_return::<Amount>(0)
@@ -77,7 +77,7 @@ fn create_budget(ctx: &mut Ctx, owner: &Account, agent: &Account, whitelist: Vec
                  fund: Amount, per_tx: Amount, daily: Amount, epochs_per_window: u64) -> Budget {
     ctx.test.execute_expect_success(
         ctx.test.transaction()
-            .call_method(owner.component, "withdraw", args![XTR, fund])
+            .call_method(owner.component, "withdraw", args![TARI_TOKEN, fund])
             .put_last_instruction_output_on_workspace("funds")
             .call_function(ctx.template, "new",
                 args![Workspace("funds"), per_tx, daily, epochs_per_window, whitelist])
@@ -103,6 +103,7 @@ fn configure_escrow(ctx: &mut Ctx, owner: &Account, b: &Budget, treasury: &Accou
         ctx.test.transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "configure_escrow",
                 args![escrow_tpl, owner.component, treasury.component, None::<RistrettoPublicKeyBytes>, fee_bps,
                       pubkey(&owner.key), 100_000u64])
@@ -171,6 +172,7 @@ fn revoke_global(ctx: &mut Ctx, owner: &Account, b: &Budget) {
         ctx.test.transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "revoke", args![])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -183,6 +185,7 @@ fn issue_badge(ctx: &mut Ctx, owner: &Account, b: &Budget, to: &Account, session
         ctx.test.transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "issue_agent_badge", args![session.to_string()])
             .put_last_instruction_output_on_workspace("badge")
             .call_method(to.component, "deposit", args![Workspace("badge")])
@@ -197,6 +200,7 @@ fn revoke_session(ctx: &mut Ctx, owner: &Account, b: &Budget, session: &str) {
         ctx.test.transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "revoke_session", args![session.to_string()])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -412,6 +416,7 @@ fn leaked_agent_key_cannot_release_open_escrow() {
         ctx.test.transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("p")
+            .authorize_proof("p")
             .call_method(b.component, "revoke", args![])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),

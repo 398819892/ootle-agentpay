@@ -681,7 +681,7 @@ mod otc_board {
             // slash-on-misbehaviour penalty (stake -> treasury) empty (a confirmed fund-safety bug —
             // see `docs/audit-notes.md`).
             assert!(
-                stake.resource_address() == XTR,
+                stake.resource_address() == TARI_TOKEN,
                 "Arbiter stake must be posted in XTR"
             );
             let amt = stake.amount();

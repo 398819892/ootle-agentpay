@@ -12,11 +12,11 @@ tags = ["otc", "escrow", "p2p", "marketplace"]
 category = "defi"
 
 [dependencies]
-tari_template_lib = { version = "0.35" }
+tari_template_lib = { version = "0.37" }
 minicbor = { version = "2.2", default-features = false, features = ["alloc", "derive"] }
 
 [dev-dependencies]
-tari_template_test_tooling = "0.47"
+tari_template_test_tooling = "0.49"
 sha2 = "0.10"
 
 [lib]
@@ -44,4 +44,4 @@ opt-level = 2
 opt-level = 2
 
 [build-dependencies]
-tari_ootle_template_build = "0.16"
+tari_ootle_template_build = "0.17"

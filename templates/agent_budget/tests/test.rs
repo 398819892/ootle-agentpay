@@ -49,7 +49,7 @@ fn empty(test: &mut TemplateTest) -> Account {
 fn tari_balance(test: &mut TemplateTest, account: &Account) -> Amount {
     test.execute_expect_success(
         test.transaction()
-            .call_method(account.component, "balance", args![XTR])
+            .call_method(account.component, "balance", args![TARI_TOKEN])
             .build_and_seal(&account.key),
         vec![account.owner_token.clone()],
     );
@@ -84,7 +84,7 @@ fn create_budget(
     ctx.test.execute_expect_success(
         ctx.test
             .transaction()
-            .call_method(owner.component, "withdraw", args![XTR, fund])
+            .call_method(owner.component, "withdraw", args![TARI_TOKEN, fund])
             .put_last_instruction_output_on_workspace("funds")
             .call_function(
                 ctx.template,
@@ -154,6 +154,7 @@ fn issue_badge(ctx: &mut Ctx, owner: &Account, b: &Budget, to: &Account, session
             .transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "issue_agent_badge", args![session.to_string()])
             .put_last_instruction_output_on_workspace("badge")
             .call_method(to.component, "deposit", args![Workspace("badge")])
@@ -170,6 +171,7 @@ fn revoke_session(ctx: &mut Ctx, owner: &Account, b: &Budget, session: &str) {
             .transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "revoke_session", args![session.to_string()])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -182,7 +184,7 @@ fn top_up(ctx: &mut Ctx, funder: &Account, b: &Budget, amount: Amount) {
     ctx.test.execute_expect_success(
         ctx.test
             .transaction()
-            .call_method(funder.component, "withdraw", args![XTR, amount])
+            .call_method(funder.component, "withdraw", args![TARI_TOKEN, amount])
             .put_last_instruction_output_on_workspace("funds")
             .call_method(b.component, "top_up", args![Workspace("funds")])
             .build_and_seal(&funder.key),
@@ -197,6 +199,7 @@ fn set_window(ctx: &mut Ctx, owner: &Account, b: &Budget, epochs_per_window: u64
             .transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "set_window", args![epochs_per_window])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -330,6 +333,7 @@ fn pay_after_revoke_fails() {
             .transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "revoke", args![])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -359,6 +363,7 @@ fn agent_cannot_call_owner_method() {
             .transaction()
             .create_proof(agent.component, b.agent_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "set_limits", args![amount![999999], amount![999999]])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&agent.key),
@@ -390,6 +395,7 @@ fn owner_can_raise_limits_then_agent_pays_more() {
             .transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "set_limits", args![amount![2000], amount![5000]])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -421,6 +427,7 @@ fn owner_can_withdraw_remaining() {
             .transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "withdraw", args![amount![4000]])
             .put_last_instruction_output_on_workspace("coins")
             .call_method(owner.component, "deposit", args![Workspace("coins")])
@@ -509,6 +516,7 @@ fn global_revoke_freezes_every_session() {
             .transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(b.component, "revoke", args![])
             .drop_all_proofs_in_workspace()
             .build_and_seal(&owner.key),
@@ -613,6 +621,7 @@ fn agent_pays_via_escrow_then_release() {
             .transaction()
             .create_proof(owner.component, b.owner_badge)
             .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
             .call_method(
                 b.component,
                 "configure_escrow",
