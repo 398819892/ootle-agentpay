@@ -518,7 +518,12 @@ export class OnChainBudget {
     });
     for (const ev of OnChainBudget.payEvents(res)) { // ledger follows the chain's events
       const paid = big(ev.amount ?? amount); // exact, from the on-chain event
-      this.spent = (big(this.spent) + paid).toString();
+      // Track spend from the chain's OWN running total (`spent_in_window`), not by accumulating
+      // locally. The on-chain window resets lazily, so a local accumulator keeps growing past a window
+      // roll (and misses spends by OTHER sessions of this budget), making the `#precheck` daily-cap
+      // guard wrongly reject payments the chain would accept. Fall back to accumulation only if an
+      // event lacks the field. Mirrors the Python SDK (onchain.py). (D-4)
+      this.spent = ev.spent_in_window != null ? big(ev.spent_in_window).toString() : (big(this.spent) + paid).toString();
       this.ledger.push({ merchant: ev.merchant ?? merchant, amount: paid.toString(), memo: ev.memo ?? memo, txKind: "pay" });
     }
     return res;
