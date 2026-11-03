@@ -177,7 +177,12 @@ def act_pay(body: dict) -> dict:
         STATE.add_log(f"付款 {amount} → {label}", False, f"链拒绝:{reason}")
         return {"ok": False, "reason": str(reason)}
     for ev in OnChainBudget.pay_events(res):
-        b.spent += int(ev.get("amount", amount))
+        # Track spend from the chain's OWN running total (spent_in_window), not a local sum —
+        # the window resets lazily and other sessions also spend, so `+=` drifts. Mirrors the
+        # SDK's OnChainBudget.pay() (onchain.py) and the TS client (H4/D-4). Fall back to
+        # accumulation only if an event omits the field.
+        siw = ev.get("spent_in_window")
+        b.spent = int(siw) if siw is not None else b.spent + int(ev.get("amount", amount))
         from agentpay.onchain import LedgerEntry
         b.ledger.append(LedgerEntry(ev.get("merchant", merchant),
                                     int(ev.get("amount", amount)), ev.get("memo", memo), "pay"))
