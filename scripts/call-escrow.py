@@ -45,7 +45,7 @@ def submit(tok, manifest, dry_run):
 INSTANTIATE = f'''use {TPL} as Escrow;
 fn main() {{
     let mut payer = var!["payer"];
-    let funds = payer.withdraw(XTR, amount!(1000));
+    let funds = payer.withdraw(TARI, amount!(1000));
     Escrow::new(
         funds,
         public_key!("{DEFAULT_PK}"),

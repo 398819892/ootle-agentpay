@@ -129,14 +129,14 @@ def main():
     print("  已设 arbiter_stake = 500")
 
     print("\n【3】仲裁人先质押 500(新规则:take 时必须已有足额【空闲】质押,否则买方无法接单)")
-    STAKE = ('fn main() { let mut a=var!["a"]; let s=a.withdraw(XTR, amount!(500)); '
+    STAKE = ('fn main() { let mut a=var!["a"]; let s=a.withdraw(TARI, amount!(500)); '
              'let mut b=var!["b"]; b.stake_arbiter(s); }')
     run(t, STAKE, {"a": DEFAULT, "b": board})
     print("  已质押 500")
 
     print("\n【4】卖方挂单 1000 + 保证金 100,买方接单(质押被锁定到该单),开争议")
     LIST = ('fn main() { let mut s=var!["s"]; '
-            'let asset=s.withdraw(XTR, amount!(1000)); let bond=s.withdraw(XTR, amount!(100)); '
+            'let asset=s.withdraw(TARI, amount!(1000)); let bond=s.withdraw(TARI, amount!(100)); '
             'let mut b=var!["b"]; '
             f'b.list(asset, bond, address!("{DEFAULT}"), hex_bytes!("{sha("stake demo")}"), public_key!("{DEFAULT_PK}"), 20u64); }}')
     run(t, LIST, {"s": DEFAULT, "b": board})
