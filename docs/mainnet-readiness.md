@@ -38,9 +38,10 @@
 
 ### P0 — 不做就上不了
 1. **0.49.x 兼容**（会话 `ootle-049-compat` 进行中）：模板升级到配套 template_lib / test_tooling，28/26/45 测试全绿；SDK、TS、`esme-fund` 按 sr25519 / 主签名者 / proof 授权窗口改好；在 0.49 本地 swarm 上三条 e2e + key→session 真链全过；产出 `docs/compat-0.49.md`。
-2. **主网参数**：网络名、端点、费率、模板升级 opt-in 的机制与决策（发布时要不要声明可升级，不声明即永久不可变）→ 写进 MCP `config.py` 预设、web env 文档、SDK/TS README。
+2. **主网参数**：网络名、端点、费率、模板升级 opt-in 的机制与决策（发布时要不要声明可升级，不声明即永久不可变）→ 写进 MCP `config.py` 预设、web env 文档、SDK/TS README。**权威汇总表:`docs/mainnet-params.md`**（含各参数的已定/已知/待官方/待发布后状态与回填位置清单）;其中模板升级 opt-in **已定 immutable**。
 3. **资金准备（只有你能做）**：主网 L1（Minotari）钱包里要有足量 XTM。粗估：两个模板发布 ≈ esmeralda 的 4.8 tTARI × 主网费率倍数（待核，先按 ×3 备 ≈ 15 XTM）+ 运营手续费 + 预算本金；再加 20% 余量。burn 流程先在 esmeralda（reset 后）演练一遍，确认 claim key 填法。
 4. **模板冻结**：决定主网版本改不改任何行为（建议：不改固定窗口；只允许文案/注释级改动）。冻结后在 0.47 和 0.49 两套 swarm 上都跑一遍 cargo test + e2e，记录最终 WASM hash。
+   - **C-5 升级规则 — 已定(2026-11-03):不可升级(immutable)**。两个模板发布时**不** opt-in 升级。核实结论:模板按 `hash(author, binary_hash)` 内容寻址,升级 opt-in 是引擎/发布层旗标,**不声明即永久不可变**——所以 C-5 **不需要改合约代码**,只要求发布命令不加升级旗标。完整理由/机制/bug 补救 runbook 见 `docs/mainnet-params.md` §0。待 D6–D7 用主网 CLI 核一次「不传旗标=immutable」。
 5. **生产部署**：按 `web/DEPLOYMENT.md` §8 清单逐项打勾；walletd 数据目录备份与**恢复演练** ✅ 11-02 已在 0.47 esmeralda walletd 上通过（文件级恢复，docs/walletd-backup-drill.md；助记词导出是 owner 手动步骤），主网版本 walletd 上要重做一次。
 
 ### P1 — 上线一周内
@@ -59,7 +60,7 @@
 |---|---|---|
 | **D0 11-02** | 两个会话已开（0.49 兼容、钱包 spike）；本文 | ✅ 已持有 XTM；待办：放进自己的 minotari 主网 console wallet（不要留在交易所，burn 必须从自己控制的 L1 钱包发） |
 | **D1–D2 11-03/04** | 0.49 兼容结论与修复；0.49 swarm 上模板全绿；主网参数表（网络名/端点/费率/升级 opt-in） | 把 XTM 转进主网 console wallet |
-| **D3 11-05** | 模板冻结 + 升级 opt-in 决策；esmeralda reset 后重发 + burn→claim 演练；可选：试 `opt-level='z'` / 手动 wasm-opt 看体积能降多少 | 在 esmeralda 上亲手做一次 burn→claim |
+| **D3 11-05** | 模板冻结；~~升级 opt-in 决策~~ ✅ C-5 已定 immutable(见 P0 §4 / `docs/mainnet-params.md`，无需改代码)；esmeralda reset 后重发 + burn→claim 演练；可选：试 `opt-level='z'` / 手动 wasm-opt 看体积能降多少 | 在 esmeralda 上亲手做一次 burn→claim |
 | **D4 11-06** | mainnet 预设进 MCP / web / SDK 文档；生产部署脚手架（compose + Caddy + env）以 esmeralda 为后端演练 | 决定部署在哪台机器 / VPS |
 | **D5 11-07** | 全链路演练：owner 开预算 → API key 发 badge → 代理付款 → 撤销 → 重新启用；**备份/恢复演练** | 复核 `web/DEPLOYMENT.md` §8 清单 |
 | **D6–D7 11-08/09** | 缓冲：吸收上游 0.49.x 后续补丁；写 Day-0 操作手册（§4）；按 `docs/security.md` 审计清单自检 | 准备公告文案、地址表模板 |

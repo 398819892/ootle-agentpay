@@ -44,6 +44,13 @@ PRESETS: dict[str, dict[str, str]] = {
         "budget_template": "template_88b112610740f457bcc04be70740edebc53c132885a3dda928b1c068d98db8f6",
         "owner_account": "dev",
     },
+    # NOTE — mainnet (Ootle L2, 2026-11-11): no preset yet, on purpose. The agent_budget / escrow
+    # template addresses only exist after the mainnet publish (≈11-12), and we do NOT bake in a
+    # guessed walletd port. C-5 is decided: both templates publish IMMUTABLE (no upgrade opt-in) —
+    # see docs/mainnet-params.md. Until a "mainnet" entry is added here (with the real addresses),
+    # run mainnet by supplying AGENTPAY_WALLETD_URL + AGENTPAY_BUDGET_TEMPLATE + AGENTPAY_OWNER_ACCOUNT
+    # explicitly; D-8 (load() below) fail-closes AGENTPAY_NETWORK=mainnet without an explicit URL, so
+    # a mainnet run can never silently fall back to the local swarm's config.
 }
 DEFAULT_NETWORK = "local"
 
