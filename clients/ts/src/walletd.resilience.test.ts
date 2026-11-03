@@ -78,6 +78,28 @@ test("a REAL submit is NOT auto-resubmitted on an auth-looking error (D-5)", asy
   assert.equal(submits.length, 1, "a real submit must never be resubmitted on an auth-looking error (H5/D-5)");
 });
 
+test("a REAL submit IS re-minted & retried once on an expired token, then lands (D-13)", async () => {
+  // An expired *token* is rejected at walletd's auth layer BEFORE the manifest is dispatched, so
+  // nothing executed — unlike the template access-rule reject above, re-minting and retrying here is
+  // a first-and-only submission, not a double-spend. (The live walletd message is "Access denied.
+  // Expired token", which contains both substrings; only the token-expiry one makes it retryable.)
+  let submits = 0;
+  installFetch({
+    "auth.request": { result: { token: "fresh" } },
+    [SUBMIT]: () => {
+      submits += 1;
+      return submits === 1
+        ? { error: { message: "Access denied. Expired token" } }
+        : { result: { transaction_id: "txE" } };
+    },
+    [GETRES]: { result: { Accept: { ok: 1 } } },
+  });
+  const c = new WalletdClient("http://fake"); // internally-minted token (tokenIsExternal = false)
+  await c.connect();
+  assert.deepEqual(await c.run("m", {}), { Accept: { ok: 1 } });
+  assert.equal(submits, 2, "an expired-token real submit re-mints and retries exactly once");
+});
+
 test("a dry run IS still re-minted & retried when an internally-minted token expires", async () => {
   // The auth-retry is preserved for non-state-changing calls: a dry run that hits an expired token
   // re-mints once and retries (only a REAL submit and an external token are excluded).

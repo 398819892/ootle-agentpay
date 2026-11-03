@@ -32,6 +32,17 @@ function isAuthError(message: string | undefined): boolean {
   return !!message && AUTH_ERROR_MARKERS.some((m) => message.includes(m));
 }
 
+// A strict subset of auth errors raised by walletd's RPC auth middleware BEFORE the method is
+// dispatched — the request never reached the handler, so nothing executed. Unlike a broader
+// auth-looking error (e.g. the engine's "Access denied by a template access rule", an
+// execution-level reject on a tx that DID run), an expired/invalid *token* on a real submit is safe
+// to re-mint and retry: the manifest was never submitted, so the retry is a first-and-only
+// submission, not a resubmission (H5-safe). (D-13)
+const TOKEN_EXPIRY_MARKERS = ["Expired token", "Invalid token"];
+function isTokenExpiry(message: string | undefined): boolean {
+  return !!message && TOKEN_EXPIRY_MARKERS.some((m) => message.includes(m));
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -189,17 +200,22 @@ export class WalletdClient {
     }
     // If a previously-minted token has expired, re-mint it once and retry the call transparently,
     // so a long-lived client (the dashboard server) doesn't fail every op until it's restarted.
-    // Two exclusions (D-5):
-    //  • a REAL (state-changing) `submit_manifest`: its error may merely *look* like an auth failure
-    //    — the engine's template "Access denied"/"Unauthorized" shares the substring — while the tx
-    //    has already landed, so resubmitting it would double-spend (H5). Surface it instead.
+    // Two constraints (D-5 / D-13):
+    //  • a REAL (state-changing) `submit_manifest` re-mints & retries ONLY on an unambiguous
+    //    token-expiry error (`isTokenExpiry`) — rejected at the auth layer before dispatch, so nothing
+    //    landed and the retry is a first-and-only submission. A broader auth-looking error (the
+    //    engine's "Access denied by a template access rule") may be a reject on a tx that already ran,
+    //    so it is surfaced, never resubmitted (double-spend / H5).
     //  • an externally-supplied token: re-minting would escalate a least-privilege token to the
     //    configured `permissions` (non-custodial). Surface it instead.
     const isRealSubmit =
       method === "transactions.submit_manifest" && (params as any)?.dry_run === false;
+    const authRetryable = isRealSubmit
+      ? isTokenExpiry(out.error?.message)
+      : isAuthError(out.error?.message);
     if (
-      !retriedAuth && this.token && !this.tokenIsExternal && !isRealSubmit &&
-      method !== "auth.request" && isAuthError(out.error?.message)
+      !retriedAuth && this.token && !this.tokenIsExternal &&
+      method !== "auth.request" && authRetryable
     ) {
       this.token = null;
       await this.connect();
