@@ -172,6 +172,16 @@ def _is_transient(message: str) -> bool:
     return any(m in message for m in _TRANSIENT_MARKERS)
 
 
+def _err_message(err: Any) -> str:
+    """The human message from a JSON-RPC ``error`` field, whatever its shape. A conformant daemon
+    sends ``{"code", "message"}``, but real responses also carry a bare string or an object without a
+    ``message`` — reading ``err["message"]`` blindly then raises AttributeError/KeyError on a tx that
+    was already SUBMITTED, which the caller would misreport as a hard failure. (N-5)"""
+    if isinstance(err, dict):
+        return str(err.get("message") or "")
+    return str(err) if err else ""
+
+
 class WalletdClient:
     """Minimal JSON-RPC client for a Tari Ootle wallet daemon (auth = ``none`` devnet mode)."""
 
@@ -227,7 +237,7 @@ class WalletdClient:
             req.add_header("Authorization", "Bearer " + self._token)
         try:
             with urllib.request.urlopen(req, timeout=120) as r:
-                return json.loads(r.read())
+                envelope = json.loads(r.read())
         except urllib.error.HTTPError as e:
             # A JSON-RPC daemon normally answers 200 even for RPC-level errors; a non-2xx means an
             # HTTP-layer failure (bad token → 401, overload → 5xx …). If the error body still carries a
@@ -267,6 +277,13 @@ class WalletdClient:
         except json.JSONDecodeError as e:
             # walletd answered with a truncated / non-JSON body — a transport-level fault too. (D-1)
             raise ChainError(f"walletd call {method} returned an unreadable response: {e}") from e
+        # A 200 body must be a JSON-RPC envelope: a bare null / list / dict lacking BOTH `result` and
+        # `error` is a malformed response (a transport-level fault). Surface it as ChainError here so
+        # the real-submit path promotes it to pending, instead of letting a caller crash parsing
+        # `result`/`error` on a tx that may already have landed. (N-5)
+        if not isinstance(envelope, dict) or ("result" not in envelope and "error" not in envelope):
+            raise ChainError(f"walletd call {method} returned a malformed response (no result/error envelope)")
+        return envelope
 
     def connect(self) -> "WalletdClient":
         """Obtain a token. If one was supplied (a least-privilege token minted out-of-band for this
@@ -333,7 +350,7 @@ class WalletdClient:
             for _ in range(max(1, self._submit_retries)):
                 last = self._rpc("transactions.submit_manifest", params)
                 err = last.get("error")
-                if not err or not _is_transient(err.get("message", "")):
+                if not err or not _is_transient(_err_message(err)):
                     return last
                 time.sleep(self._submit_retry_delay)
             return last
@@ -352,10 +369,9 @@ class WalletdClient:
                 pe.pending = True  # unknown: reconcile, never auto-resubmit (H5)
             raise pe from e
         err = resp.get("error")
-        if err and _is_transient(err.get("message", "")):
+        if err is not None and _is_transient(_err_message(err)):
             e = ChainError(
-                "submit may or may not have landed (transient error, not resubmitted): "
-                + err.get("message", "")
+                "submit may or may not have landed (transient error, not resubmitted): " + _err_message(err)
             )
             e.pending = True  # unknown: reconcile, never auto-resubmit (H5)
             raise e
@@ -368,14 +384,24 @@ class WalletdClient:
         """Submit a manifest for real and wait for it to finalize. Returns the finalized result
         (whose transaction result is ``Accept``). Raises ChainError on rejection."""
         r = self._submit_manifest(manifest, variables, max_fee, dry_run=False)
-        if "error" in r:
-            raise ChainError(r["error"]["message"])
-        tx_id = r["result"].get("transaction_id") or r["result"].get("hash")
+        # `r` is a validated JSON-RPC envelope (see _rpc). A well-formed `error` is a DEFINITIVE
+        # submit-time rejection — the node refused it, so no tx was created; read the message whatever
+        # its shape (dict / bare string / object without `message`) rather than crashing on it. (N-5)
+        if r.get("error") is not None:
+            raise ChainError(_err_message(r["error"]) or "submit rejected")
+        # Otherwise read a tx id from `result`. If `result` is null / not a dict / carries no id, the
+        # submit returned 200 but we cannot identify the tx: it MAY have landed, so it is UNKNOWN
+        # (pending) — never a hard failure (which would invite a blind resubmit, H5) and never a 120x
+        # poll of `None`. Any unforeseen parse fault here is treated the same way. (N-5 / D-1)
+        try:
+            result = r.get("result")
+            tx_id = (result.get("transaction_id") or result.get("hash")) if isinstance(result, dict) else None
+        except Exception as e:  # pragma: no cover - defensive against an unforeseen result shape
+            pe = ChainError("submit response could not be parsed; outcome unknown: " + str(e))
+            pe.pending = True
+            raise pe from e
         if not tx_id:
-            # Submit reported success but carried no transaction id: we can neither poll nor reconcile
-            # it by id, yet it MAY have landed — so it is UNKNOWN (pending), never a silent 120x poll of
-            # `None`. (review follow-up)
-            e = ChainError("submit returned no transaction id; outcome unknown")
+            e = ChainError("submit returned no usable transaction id; outcome unknown")
             e.pending = True
             raise e
         for _ in range(120):   # esmeralda finalization can be slow under congestion

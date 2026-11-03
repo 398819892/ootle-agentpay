@@ -483,3 +483,92 @@ def test_pay_rejects_injected_session_label_before_any_rpc():
         with pytest.raises(ChainError):
             b.pay(SHOP, 100, memo="m", session=bad)
     assert len(b.client.runs) == n
+
+
+# -- N-5: post-submit response parse is under the pending umbrella --------------------
+# A REAL submit that returns 200 but a response we can't read a tx id from means the tx MAY have
+# landed — so run() must raise a PENDING ChainError (reconcile by id, never blind-resubmit), not a
+# bare AttributeError/KeyError that the MCP/Python layer misreports as a hard "chain_error" failure.
+# We drive the real run() / _submit_manifest / _rpc logic by stubbing ONLY the _rpc transport.
+
+class _RpcStub(WalletdClient):
+    """Returns a canned response for submit_manifest (and, optionally, for get_result), so the real
+    run()/_submit_manifest parsing runs against it."""
+    def __init__(self, submit_response, get_result_response=None):
+        super().__init__("http://fake")
+        self._token = "fake"
+        self._submit_response = submit_response
+        self._get_result_response = get_result_response
+
+    def _rpc(self, method, params):
+        if method == "transactions.submit_manifest":
+            return self._submit_response
+        if method == "transactions.get_result":
+            return self._get_result_response
+        raise AssertionError(f"unexpected rpc {method}")
+
+
+def _run_submit(submit_response):
+    return _RpcStub(submit_response).run("MANIFEST", {})
+
+
+def test_run_submit_result_null_is_pending():
+    # {"result": null} — the old code did null.get(...) → AttributeError.
+    with pytest.raises(ChainError) as ei:
+        _run_submit({"result": None})
+    assert getattr(ei.value, "pending", False) is True
+
+
+def test_run_submit_result_without_tx_id_is_pending():
+    # {"result": {}} — a success-shaped response that carries no transaction id.
+    with pytest.raises(ChainError) as ei:
+        _run_submit({"result": {}})
+    assert getattr(ei.value, "pending", False) is True
+
+
+def test_run_submit_error_string_is_rejected_not_crash():
+    # {"error": "boom"} — the old code did "boom"["message"] → TypeError. A well-formed error is a
+    # DEFINITIVE submit-time rejection (no tx created), so it is rejected, NOT pending.
+    with pytest.raises(ChainError) as ei:
+        _run_submit({"error": "boom"})
+    assert getattr(ei.value, "pending", False) is False
+    assert "boom" in str(ei.value)
+
+
+def test_run_submit_error_object_without_message_is_rejected():
+    # {"error": {"code": 1}} — the old code did err["message"] → KeyError. Rejected, not a crash.
+    with pytest.raises(ChainError) as ei:
+        _run_submit({"error": {"code": 1}})
+    assert getattr(ei.value, "pending", False) is False
+
+
+def test_run_happy_path_accept_returns_result():
+    # Guard the refactor: a normal submit (tx id) + an Accept verdict still returns the result.
+    stub = _RpcStub(
+        {"result": {"transaction_id": "tx1"}},
+        {"result": {"result": {"Accept": {}}}},
+    )
+    res = stub.run("MANIFEST", {})
+    assert res == {"result": {"Accept": {}}}
+
+
+def test_rpc_rejects_malformed_200_envelope(monkeypatch):
+    # A 200 body that is not a JSON-RPC envelope (bare null, or a dict with neither result nor error)
+    # is a transport-level fault — _rpc raises ChainError rather than handing a caller a shape it will
+    # crash on. A well-formed envelope passes through untouched.
+    import urllib.request as _ur
+
+    class _FakeResp:
+        def __init__(self, body): self._b = body
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return self._b
+
+    c = WalletdClient("http://fake")
+    c._token = "fake"
+    for bad in (b"null", b"{}", b"[]", b'{"jsonrpc":"2.0"}'):
+        monkeypatch.setattr(_ur, "urlopen", lambda req, timeout=120, _b=bad: _FakeResp(_b))
+        with pytest.raises(ChainError):
+            c._rpc("transactions.get_result", {"transaction_id": "t"})
+    monkeypatch.setattr(_ur, "urlopen", lambda req, timeout=120: _FakeResp(b'{"result": null}'))
+    assert c._rpc("x", {}) == {"result": None}
