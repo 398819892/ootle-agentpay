@@ -22,7 +22,7 @@ knowingly want them):
 ## The supported path: on-chain conditions via the `AgentBudget` template
 
 `agentpay.onchain` backs a budget with the **`AgentBudget`** Ootle template (in this repo's sibling
-`templates/agent_budget`), so the per-transaction cap, the rolling daily cap, the merchant whitelist
+`templates/agent_budget`), so the per-transaction cap, the per-window spending cap (fixed epoch window), the merchant whitelist
 and the kill switch are enforced **on chain by the validator** — not by the client. The SDK's own
 policy check is a friendly early error only; `OnChainBudget.would_reject()` asks the *validator*
 (a dry run) and returns its reason, e.g. `Amount exceeds the per-transaction cap`. The invoice/memo

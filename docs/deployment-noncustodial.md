@@ -1,6 +1,6 @@
 # Non-custodial deployment (the deployment that makes on-chain caps real)
 
-AgentBudget enforces the per-transaction cap, rolling daily cap, merchant whitelist and kill switch
+AgentBudget enforces the per-transaction cap, per-window spending cap (fixed epoch window), merchant whitelist and kill switch
 **on chain**, against the holder of the **agent badge**. Those limits are only a real security
 boundary when the party they constrain — the agent — holds *its own* key, in *its own* environment,
 and that key can touch *nothing else*.

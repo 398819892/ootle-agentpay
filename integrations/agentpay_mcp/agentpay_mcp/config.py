@@ -235,10 +235,10 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--agent-badge", dest="agent_badge", help="attach mode: the agent badge resource")
     p.add_argument("--agent-account", dest="agent_account", help="attach mode: the agent's account")
     p.add_argument("--per-tx-cap", dest="per_tx_cap", type=int, help="per-transaction cap (provision)")
-    p.add_argument("--daily-cap", dest="daily_cap", type=int, help="rolling daily cap (provision)")
+    p.add_argument("--daily-cap", dest="daily_cap", type=int, help="per-window spending cap; fixed epoch window, not a trailing 24h (provision)")
     p.add_argument("--fund", type=int, help="amount to fund a provisioned budget with")
     p.add_argument("--epochs-per-window", dest="epochs_per_window", type=int,
-                   help="epochs per daily-cap window (provision)")
+                   help="epochs per spending window (provision)")
     p.add_argument("--whitelist", help="comma-separated merchant account addresses")
     p.add_argument("--no-provision", dest="no_provision", action="store_true",
                    help="do not open a budget automatically; require attach vars")

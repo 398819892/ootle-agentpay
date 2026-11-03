@@ -19,7 +19,7 @@ browser ──HTTPS──> dashboard backend ──JSON-RPC──> walletd (HOLD
             (session cookie)          (no auth on the local socket)
 ```
 
-The on-chain `AgentBudget` template already constrains the **agent**: per-tx cap, rolling daily cap,
+The on-chain `AgentBudget` template already constrains the **agent**: per-tx cap, per-window spending cap (fixed epoch window),
 merchant whitelist, global revoke and per-session revoke are all validator-enforced and a compromised
 *agent client* cannot exceed them (see `security.md`). **But the owner side is a separate attack
 surface.** Whoever can make this backend call walletd can, within the chain's rules:

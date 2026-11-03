@@ -16,7 +16,8 @@ Two products on one shared escrow core:
 
 1. **AgentPay (on-chain)** — a spending wallet for an AI agent. The owner funds it and hands the
    agent a session badge; the agent can only spend within chain-enforced rules: a per-transaction
-   cap, a rolling daily cap, a merchant whitelist, and an instant kill switch. The client's own
+   cap, a per-window spending cap (a *fixed* epoch window, not a trailing 24h — the cap resets at
+   each window boundary), a merchant whitelist, and an instant kill switch. The client's own
    limit check is only a friendly early error — the chain is authoritative.
 2. **P2P OTC escrow** — sellers list an asset (locked in escrow), a buyer takes it and pays
    **off chain**, then the asset is released / refunded on timeout / split by an arbiter on dispute.
@@ -33,7 +34,7 @@ agents. A third template, **OtcBoard, is FROZEN** (experimental, not for product
 | Template | What it does | Tests | Published (localnet) | Published (esmeralda) |
 |---|---|---|---|---|
 | **Escrow** | Lock funds; release (opt. hashlock) / refund after timeout / dispute → arbiter resolves; platform fee | 26 ✅ | `template_bb8d36d2…` | `template_11dc03f7…` (2026-11-01; the old `7de6ee2d…` is superseded) |
-| **AgentBudget** | Owner/agent badges; `pay` within per-tx + rolling-daily caps + whitelist; revoke; `pay_via_escrow` (cross-template) | 28 ✅ | `template_978113ef…` | `template_88b11261…` |
+| **AgentBudget** | Owner/agent badges; `pay` within per-tx + per-window caps (fixed epoch window) + whitelist; revoke; `pay_via_escrow` (cross-template) | 28 ✅ | `template_978113ef…` | `template_88b11261…` |
 | **OtcBoard** *(frozen)* | P2P OTC escrow board — kept compiling + tested as a reference artifact only | 45 ✅ | `template_5c0cd27e…` | `template_bafbe76e…` |
 
 > **Upstream moved to tari-ootle 0.49.x on 2026-11-02 (two testnet resets).** The localnet column is the

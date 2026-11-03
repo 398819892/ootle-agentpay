@@ -2,8 +2,9 @@
 
 The phase-1 `BudgetManager` (budget.py) gets a hard ceiling from throw-away key derivation
 and enforces the per-tx cap / allowlist *client-side only*. This module instead backs the
-budget with the **AgentBudget** Ootle template, so the per-transaction cap, the rolling daily
-cap, the merchant whitelist and the kill switch are all enforced **on chain** by the
+budget with the **AgentBudget** Ootle template, so the per-transaction cap, the per-window
+spending cap (a fixed epoch window, not a trailing 24h), the merchant whitelist and the kill
+switch are all enforced **on chain** by the
 validator — the agent's client cannot override them.
 
 It talks to a running Tari Ootle wallet daemon over JSON-RPC (the same one `tari publish`

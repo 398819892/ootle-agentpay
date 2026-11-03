@@ -13,7 +13,7 @@ It lets front-end / Node developers integrate AgentPay without Python.
   (`walletd`) over JSON-RPC and drives the on-chain **AgentBudget** template by submitting
   transaction *manifests*. The daemon parses, **signs (with the referenced account) and pays the
   fee** — so there is **no client-side signing and no crypto dependency**.
-- The per-transaction cap, rolling daily cap, merchant whitelist and kill switch are all enforced
+- The per-transaction cap, per-window spending cap (fixed epoch window), merchant whitelist and kill switch are all enforced
   **on chain by the validator** — the agent's client cannot override them. `wouldReject()` asks the
   validator (via a dry run) and returns the chain's own reject reason.
 - **Zero runtime dependencies.** Node 18+ ships a global `fetch`; that is all the client uses.

@@ -2,7 +2,7 @@
 
 Copy-paste examples for calling a **hosted AgentPay service** from a third-party app or an
 autonomous agent. You call the owner's HTTP API with an **API key**; the on-chain AgentBudget
-enforces the per-transaction cap, rolling daily cap, merchant whitelist and kill switch. You never
+enforces the per-transaction cap, per-window spending cap (fixed epoch window), merchant whitelist and kill switch. You never
 touch the wallet daemon and never hold keys.
 
 > Full reference + integration guide: [`docs/api.md`](../docs/api.md). Machine spec:

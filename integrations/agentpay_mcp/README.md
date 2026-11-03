@@ -73,7 +73,7 @@ overridable by a CLI flag. **Defaults target a local swarm, so a dev usually set
 | `AGENTPAY_BUDGET_TEMPLATE` | `--template` | `template_978113ef…` | AgentBudget template address |
 | `AGENTPAY_OWNER_ACCOUNT` | `--owner` | `default` | account that funds a provisioned budget |
 | `AGENTPAY_PER_TX_CAP` | `--per-tx-cap` | `1000` | per-transaction cap |
-| `AGENTPAY_DAILY_CAP` | `--daily-cap` | `1500` | rolling daily cap |
+| `AGENTPAY_DAILY_CAP` | `--daily-cap` | `1500` | per-window spending cap (fixed epoch window, not a trailing 24h) |
 | `AGENTPAY_WHITELIST` | `--whitelist` | *(empty)* | comma-separated merchant account addresses |
 | `AGENTPAY_FUND` | `--fund` | `10000` | amount to fund a provisioned budget |
 | `AGENTPAY_COMPONENT` | `--component` | *(unset)* | **attach mode:** an already-open budget component |

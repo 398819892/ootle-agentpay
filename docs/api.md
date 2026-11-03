@@ -3,7 +3,7 @@
 A **machine-to-machine REST API** for AgentPay on Tari Ootle. The *owner* runs the hosted service
 (the `web/` backend); third-party developers and autonomous agents integrate against it with an
 **API key**. Every payment is capped and enforced **on chain** by the AgentBudget template — the
-per-transaction cap, the rolling daily cap, the merchant whitelist and the kill switch are validator
+per-transaction cap, the per-window spending cap (fixed epoch window), the merchant whitelist and the kill switch are validator
 rules, not server policy, so a compromised integrator (or a compromised web layer) cannot exceed
 them. Integrators never talk to the wallet daemon and never hold keys.
 

@@ -2,7 +2,7 @@
 
 The supported, on-chain path is ``agentpay.onchain`` (``OnChainBudget`` / ``WalletdClient``): a
 stdlib-only adapter that drives the ``AgentBudget`` template through a wallet daemon, so the
-per-transaction cap, rolling daily cap, merchant whitelist and kill switch are enforced by the
+per-transaction cap, per-window spending cap (fixed epoch window), merchant whitelist and kill switch are enforced by the
 validator. Amounts are PUBLIC on chain (see docs/security.md).
 
 EXPERIMENTAL (not part of the supported surface, kept importable for the offline demo/tests only):

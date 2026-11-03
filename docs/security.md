@@ -9,7 +9,7 @@ Enforced **on chain** (a compromised client cannot bypass):
 - **Escrow**: funds only leave via `release` (payer or preimage), `refund` (payer, after timeout),
   or `resolve` (arbiter, after dispute). Double-release is blocked by the state machine. Fees are
   computed on chain.
-- **AgentBudget**: per-tx cap, rolling daily cap, merchant whitelist, global revoke, and **per-session
+- **AgentBudget**: per-tx cap, per-window spending cap (fixed epoch window), merchant whitelist, global revoke, and **per-session
   revoke** are all enforced in the template. Owner methods are badge-gated (`rule!(resource(owner_badge))`).
   `pay`/`pay_via_escrow` are `allow_all` at the component level **by design** and self-enforce the agent
   badge inside the method: the caller must pass a proof of an agent-badge session token, which the

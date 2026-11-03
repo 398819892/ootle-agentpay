@@ -3,7 +3,7 @@
   "info": {
     "title": "AgentPay integration API",
     "version": "1.0.0",
-    "description": "Machine-to-machine REST API for AgentPay on Tari Ootle. The owner runs this hosted service; third-party developers and autonomous agents call it with a bearer API key to make payments that are capped and enforced ON CHAIN by the AgentBudget template (per-transaction cap, rolling daily cap, merchant whitelist, kill switch). Callers never touch the wallet daemon or hold keys. This is a testnet-grade API; see docs/api.md for the integration guide and the out-of-scope follow-up list (per-key rate limits/quotas, webhooks, key rotation).",
+    "description": "Machine-to-machine REST API for AgentPay on Tari Ootle. The owner runs this hosted service; third-party developers and autonomous agents call it with a bearer API key to make payments that are capped and enforced ON CHAIN by the AgentBudget template (per-transaction cap, per-window spending cap (fixed epoch window), merchant whitelist, kill switch). Callers never touch the wallet daemon or hold keys. This is a testnet-grade API; see docs/api.md for the integration guide and the out-of-scope follow-up list (per-key rate limits/quotas, webhooks, key rotation).",
     "license": { "name": "see repository" }
   },
   "servers": [

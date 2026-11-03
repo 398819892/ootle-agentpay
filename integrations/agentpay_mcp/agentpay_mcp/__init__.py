@@ -2,8 +2,9 @@
 agent a *hard-limited, on-chain* wallet.
 
 The agent only ever sees three tools (``pay_merchant``, ``get_budget_status``,
-``list_merchants``). The spending rules — per-transaction cap, rolling daily cap,
-merchant whitelist and the owner's kill switch — are enforced by the Tari Ootle
+``list_merchants``). The spending rules — per-transaction cap, per-window spending
+cap (a fixed epoch window, not a trailing 24h), merchant whitelist and the owner's
+kill switch — are enforced by the Tari Ootle
 validator through the ``AgentBudget`` template, not by this code. The agent's client
 cannot talk its way past them.
 

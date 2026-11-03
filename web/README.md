@@ -2,7 +2,7 @@
 
 A polished, hosted web console for **AgentPay** — the on-chain, validator-enforced spending
 budget for AI agents on **Tari Ootle**. An owner opens a budget, funds it, sets the rules
-(per-transaction cap, rolling daily cap, merchant whitelist, kill switch), and watches an agent
+(per-transaction cap, per-window spending cap (fixed epoch window), merchant whitelist, kill switch), and watches an agent
 spend **only within those rules** — because the rules live in the budget's on-chain component and
 are enforced by the validators, not by this app.
 
