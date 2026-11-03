@@ -11,7 +11,10 @@ Two networks are supported out of the box via ``AGENTPAY_NETWORK`` (or ``--netwo
     esmeralda   the public testnet, walletd on 127.0.0.1:5100
 
 Each preset supplies a default walletd URL, AgentBudget template address and owner account
-name; any of those can still be overridden individually.
+name; any of those can still be overridden individually. An **unknown** network name is
+fail-closed: it is rejected unless the operator points the server at it explicitly with
+``AGENTPAY_WALLETD_URL`` — the server never silently falls back to the local swarm's config
+(so e.g. ``AGENTPAY_NETWORK=mainnet`` demands an explicit endpoint, never an assumed one).
 
 Two running modes, chosen automatically:
 
@@ -123,12 +126,27 @@ def load(argv: list[str] | None = None) -> ServerConfig:
 
     ``argv`` defaults to the process args; pass ``[]`` to read environment only.
     """
-    # 1) pick the network preset (env), so its values become the defaults.
+    # 1) pick the network preset (env), so its values become the defaults. An UNKNOWN network name is
+    #    fail-closed: we NEVER silently fall back to the local swarm's walletd/template for it (D-8) —
+    #    a typo'd or real "mainnet" would otherwise run against local-swarm config. A name with no
+    #    built-in preset (notably "mainnet", whose real addresses must never be hardcoded here) is
+    #    allowed ONLY when the operator points the server at it explicitly with AGENTPAY_WALLETD_URL;
+    #    the template/owner should be given too, or provisioning fails honestly later.
     network = os.environ.get("AGENTPAY_NETWORK", DEFAULT_NETWORK).strip().lower()
-    preset = PRESETS.get(network, PRESETS[DEFAULT_NETWORK])
+    if network in PRESETS:
+        preset = PRESETS[network]
+    elif os.environ.get("AGENTPAY_WALLETD_URL"):
+        preset = {"walletd_url": "", "budget_template": "", "owner_account": ""}
+    else:
+        raise SystemExit(
+            f"Unknown AGENTPAY_NETWORK={network!r}: no built-in preset. Known presets: "
+            f"{', '.join(sorted(PRESETS))}. For any other network (e.g. mainnet) point the server at "
+            f"it explicitly with AGENTPAY_WALLETD_URL (and AGENTPAY_BUDGET_TEMPLATE / "
+            f"AGENTPAY_OWNER_ACCOUNT) — there is NO default, so nothing about mainnet is ever assumed."
+        )
 
     cfg = ServerConfig(
-        network=network if network in PRESETS else DEFAULT_NETWORK,
+        network=network,  # keep the real name — never silently coerce an unknown network to "local"
         walletd_url=os.environ.get("AGENTPAY_WALLETD_URL", preset["walletd_url"]),
         budget_template=os.environ.get("AGENTPAY_BUDGET_TEMPLATE", preset["budget_template"]),
         owner_account=os.environ.get("AGENTPAY_OWNER_ACCOUNT", preset["owner_account"]),

@@ -98,9 +98,10 @@ const AUTO_CREATE_MERCHANTS =
 // API key -> on-chain session. Each /api/v1 key maps to its own agent session badge (`key-<id>`,
 // see apikeys.js). Once an admin has issued that badge (POST /api/v1/keys/:id/session) the key's
 // payments prove it, so `revoke_session` on chain cuts off that one key. Until then a key pays
-// through the budget's "default" session — unless this is set, in which case a key without an
-// issued session is refused (403) instead of silently falling back.
-const REQUIRE_KEY_SESSIONS = process.env.AGENTPAY_REQUIRE_KEY_SESSIONS === "true";
+// through the budget's "default" session — UNLESS this is on (the default), in which case a key
+// without an issued session is refused (403) instead of silently falling back to the shared session.
+// Set AGENTPAY_REQUIRE_KEY_SESSIONS=false to restore the old permissive fallback. (S-7)
+const REQUIRE_KEY_SESSIONS = process.env.AGENTPAY_REQUIRE_KEY_SESSIONS !== "false";
 // Secret for signing the session cookie. Provide SESSION_SECRET in production so sessions survive
 // restarts and are stable across replicas; otherwise we mint an ephemeral one per process.
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
@@ -1244,6 +1245,21 @@ const OPS = {
       // request body — a client must never be able to pay as another key's session.
       const session = ctx.apiKeyId ? keySession(b, ctx.apiKeyId) : "default";
       const key = idemKey(body, "pay:" + invoiceId);
+      // S-7: for a key-authenticated pay, verify the session on chain RIGHT NOW with a dry-run before
+      // the real submit. A session revoked a moment ago (or any cap/whitelist violation) is refused by
+      // the validator, so this catches it authoritatively — not just from this process's cached
+      // snapshot — and never spends a fee on a certain reject. Dashboard/owner pays skip the probe.
+      const submit = ctx.apiKeyId
+        ? async () => {
+            const reason = await b.wouldReject(merchant, amount, { memo, session });
+            if (reason) {
+              const err = new Error(reason);
+              err.chainRejected = true; // the validator refused it on a dry-run — a definitive verdict
+              throw err;
+            }
+            return b.payInvoice({ merchant, invoiceId, amount, agentTag, session });
+          }
+        : () => b.payInvoice({ merchant, invoiceId, amount, agentTag, session });
       let r;
       try {
         r = await runChainOp(
@@ -1251,7 +1267,7 @@ const OPS = {
           "pay",
           b.component,
           { merchant, amount, invoiceId, memo, session },
-          () => b.payInvoice({ merchant, invoiceId, amount, agentTag, session }),
+          submit,
           { merchant, amount, memo }, // fingerprint on what the money DOES, not the (often auto-generated) invoiceId
         );
       } catch (e) {
@@ -1785,20 +1801,45 @@ function keysWithSessions() {
   return apiKeys.list().map((k) => ({ ...k, session: keySessionInfo(store.budget, k.id) }));
 }
 /**
- * Which session badge an API key pays with. Its own badge once issued (a revoked one is refused here
- * with a clear 403 rather than spending a fee on a certain on-chain reject); otherwise the budget's
- * "default" session, or a 403 when AGENTPAY_REQUIRE_KEY_SESSIONS forbids the fallback.
+ * Which session badge an API key pays with: its own badge once issued, otherwise the budget's
+ * "default" session, or a 403 when AGENTPAY_REQUIRE_KEY_SESSIONS forbids the fallback. Whether that
+ * badge has been REVOKED is NOT decided here from the cached snapshot — the pay path asks the chain
+ * with a dry-run right before submitting (S-7), so a just-revoked session is caught authoritatively
+ * even if this process's cache is stale.
  */
 function keySession(b, keyId) {
   const info = keySessionInfo(b, keyId);
-  if (info.issued && info.revoked) {
-    throw httpError(403, `The on-chain session of API key ${JSON.stringify(keyId)} has been revoked.`, { session: info.label });
-  }
   if (info.issued) return info.label;
   if (REQUIRE_KEY_SESSIONS) {
     throw httpError(403, `API key ${JSON.stringify(keyId)} has no on-chain session badge yet; an admin must POST /api/v1/keys/${encodeURIComponent(keyId)}/session first.`, { session: null });
   }
   return "default";
+}
+
+// --- per-key idempotency namespacing (S-2/S-3) ----------------------------------------------
+// The v1 journal key is namespaced by the CALLING API key, so the same Idempotency-Key value sent by
+// two different keys gets two independent journal entries instead of colliding — which would either
+// leak one key's receipt to the other or wrongly 409 a legitimate payment. The caller only ever sees
+// the raw Idempotency-Key it chose; the namespace is internal.
+const PAY_KEY_SEP = "\u0000"; // NUL: never valid in a caller-supplied Idempotency-Key
+function payKeyFor(keyId, rawId) {
+  return `${keyId}${PAY_KEY_SEP}${rawId}`;
+}
+// How much of a caller's Idempotency-Key we keep, sized so the namespaced key stays within idemKey's
+// 128-char bound and so the split below is always lossless.
+function rawIdemLimit(keyId) {
+  return Math.max(16, 128 - String(keyId).length - PAY_KEY_SEP.length);
+}
+// The public payment id = the caller's own raw Idempotency-Key (namespace stripped). Dashboard/owner
+// pays carry no namespace, so their key is returned unchanged.
+function publicPayId(recKey) {
+  if (typeof recKey !== "string") return recKey;
+  const i = recKey.indexOf(PAY_KEY_SEP);
+  return i === -1 ? recKey : recKey.slice(i + 1);
+}
+// Does this journal record belong to the given API key? (Only namespaced pay records can.)
+function ownsPayRecord(rec, keyId) {
+  return !!rec && typeof rec.key === "string" && rec.key.startsWith(`${keyId}${PAY_KEY_SEP}`);
 }
 
 function receiptOf(rec) {
@@ -1808,7 +1849,7 @@ function receiptOf(rec) {
   const ev = rec.event || null;
   const merchant = (ev && ev.merchant) || p.merchant || null;
   return {
-    id: rec.key, // the idempotency key is the stable payment id
+    id: publicPayId(rec.key), // the caller's own Idempotency-Key is the stable payment id (namespace stripped)
     status: rec.status, // pending | confirmed | rejected | unknown
     txId: rec.txId || null,
     amount: ev && ev.amount != null ? String(ev.amount) : p.amount != null ? String(p.amount) : null,
@@ -1933,9 +1974,11 @@ async function handleApiV1(req, res, urlPath) {
         throw httpError(400, "POST /payments requires an Idempotency-Key header (so a retried request cannot pay twice).");
       }
       const invoiceId = validInvoiceId(body.invoiceId) || newInvoiceId();
-      // Payment id = the caller's Idempotency-Key. A repeat with the same key never re-submits to
-      // chain (txlog enforces it); a repeat with different funding params is a hard conflict.
-      const key = idemHeader.slice(0, 128);
+      // Payment id = the caller's Idempotency-Key, namespaced by the calling API key (S-2). A repeat
+      // with the same key never re-submits to chain (txlog enforces it); a repeat with different
+      // funding params is a hard conflict. The public receipt id strips the namespace (publicPayId).
+      const rawId = idemHeader.slice(0, rawIdemLimit(who.id));
+      const key = payKeyFor(who.id, rawId);
       const payBody = {
         merchant: body.merchant,
         amount: body.amount,
@@ -1966,19 +2009,30 @@ async function handleApiV1(req, res, urlPath) {
       return sendJson(res, status, { receipt, replayed });
     }
     if (sub === "/payments" && method === "GET") {
+      // S-3: a key sees only the payments it made; an admin key keeps the full cross-key view.
+      const isAdmin = who.role === apiKeys.ROLES.ADMIN;
       const payments = txlog
         .list()
-        .filter((r) => r.op === "pay")
+        .filter((r) => r.op === "pay" && (isAdmin || ownsPayRecord(r, who.id)))
         .map(receiptOf);
       return sendJson(res, 200, { payments });
     }
     if (sub.startsWith("/payments/") && method === "GET") {
-      const id = decodeURIComponent(sub.slice("/payments/".length));
+      const rawId = decodeURIComponent(sub.slice("/payments/".length));
+      const isAdmin = who.role === apiKeys.ROLES.ADMIN;
+      // S-3: look the record up WITHIN the caller's own namespace first, so one key cannot read
+      // another key's receipt by guessing its Idempotency-Key. Admin keys may also resolve a raw or
+      // namespaced key directly (cross-key observability).
+      let rec = txlog.get(payKeyFor(who.id, rawId));
+      if (!rec && isAdmin) rec = txlog.get(rawId);
       // This is the payments endpoint: only ever expose `pay` records. Looking a record up by its
       // idempotency key could otherwise return any op (e.g. a withdraw), leaking it on this route.
-      let rec = txlog.get(id);
       if (rec && rec.op !== "pay") rec = null;
-      if (!rec) rec = txlog.list().find((r) => r.op === "pay" && r.txId === id) || null;
+      if (!rec) {
+        rec = txlog.list().find(
+          (r) => r.op === "pay" && r.txId === rawId && (isAdmin || ownsPayRecord(r, who.id)),
+        ) || null;
+      }
       // Status tracking: advance an open record by settling it against chain (read-only get_result).
       if (rec && txlog.isOpen(rec.status) && rec.txId) {
         try {
@@ -1987,6 +2041,8 @@ async function handleApiV1(req, res, urlPath) {
           /* leave it open; the caller can poll again */
         }
       }
+      // Defence in depth: never hand back a record the caller does not own (unless admin).
+      if (rec && !isAdmin && !ownsPayRecord(rec, who.id)) rec = null;
       if (!rec) return sendJson(res, 404, { error: "No payment with that id." });
       return sendJson(res, 200, { receipt: receiptOf(rec) });
     }
