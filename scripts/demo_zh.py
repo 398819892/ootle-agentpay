@@ -31,15 +31,15 @@ except Exception:
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)                       # F:\oolte
 sys.path.insert(0, os.path.join(_ROOT, "sdk", "src"))
+sys.path.insert(0, _HERE)
+
+from _defaults import template as _template  # noqa: E402
 
 AUTO = "--auto" in sys.argv or not sys.stdout.isatty()
 OTC = "--otc" in sys.argv
 
-# 已发布到本地链的模板地址(发布一次就常驻链上)
-BUDGET_TEMPLATE = os.environ.get(
-    "BUDGET_TEMPLATE",
-    "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
-)
+# 已发布到本地链的模板地址(发布一次就常驻链上);默认取仓库根 defaults.json,BUDGET_TEMPLATE 可覆盖。
+BUDGET_TEMPLATE = _template("agent_budget", "BUDGET_TEMPLATE")
 
 
 # --- 小工具:彩色/分隔/暂停 ----------------------------------------------------

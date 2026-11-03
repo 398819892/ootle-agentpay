@@ -32,18 +32,17 @@ import sys
 import urllib.error
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "sdk", "src"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from agentpay.onchain import (  # noqa: E402
     WalletdClient,
     OnChainBudget,
     ChainError,
     _find_component_state,
 )
+from _defaults import template as _template  # noqa: E402
 
 WALLETD_URL = os.environ.get("WALLETD_URL", "http://127.0.0.1:12010/json_rpc")
-TEMPLATE = os.environ.get(
-    "AGENT_TEMPLATE",
-    "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
-)
+TEMPLATE = _template("agent_budget", "AGENT_TEMPLATE")
 OWNER = os.environ.get("OWNER", "default")
 MERCHANT_NAME = os.environ.get("E2E_MERCHANT", "e2e_merchant")
 

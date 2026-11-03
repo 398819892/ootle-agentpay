@@ -19,6 +19,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
@@ -28,6 +29,26 @@ from .invoice import encode_memo
 
 # Native Tari test token used as the (plaintext, countable) budget resource on a devnet.
 XTR = "XTR"
+# Manifest keyword for the native token. `XTR` was a deprecated alias that tari-ootle 0.48 removed
+# (#3076): a 0.48+ manifest parser resolves only `TARI`, while 0.47 accepts both — so every manifest
+# splices `TARI`. The `XTR` constant stays as the API-level name for "the native token".
+_NATIVE_KEYWORD = "TARI"
+_NATIVE_ALIASES = ("XTR", "TARI")
+
+
+def _proof_windows_default() -> bool:
+    """Whether owner-badge manifests open an explicit proof authorization window.
+
+    tari-ootle 0.49 (#3206) changed the model: a proof left on the transaction workspace authorizes
+    NOTHING until ``authorize!(proof)`` opens a window over it (closed by ``drop_authorize!``), and a
+    window is lent exactly one hop (the budget component). A 0.47 manifest parser does not know the
+    two macros and rejects the manifest outright, so the dialect is a switch: default ON (the repo
+    targets 0.49); set ``AGENTPAY_PROOF_WINDOWS=0`` to keep the pre-0.49 dialect for a 0.47 walletd.
+    The agent's ``pay`` proof is only *shown* to the template (passed as an argument, read with
+    ``assert_resource``/``get_non_fungibles``), which needs no window on either version.
+    """
+    v = os.environ.get("AGENTPAY_PROOF_WINDOWS", "").strip().lower()
+    return v not in ("0", "false", "no", "off")
 
 # --- manifest value validation (injection guard, issue #7) --------------------------------------
 # A transaction manifest is assembled as text, so EVERY value spliced into it must be validated here,
@@ -118,8 +139,32 @@ _TRANSIENT_MARKERS = (
     "http2", "stream error", "connection error", "Indexer client error",
     "Failed to send request", "SendRequest", "Failed to submit transaction",
 )
+# Defaults for the dry-run transient-retry loop (esmeralda indexer hiccups). 30 × 12s ≈ 6 min is a
+# deliberately patient ceiling for a congested public testnet; a local swarm never retries at all
+# (it produces no transient markers). Override per-client via the `WalletdClient` constructor, or
+# process-wide via `AGENTPAY_SUBMIT_RETRIES` / `AGENTPAY_SUBMIT_RETRY_DELAY`.
 _SUBMIT_RETRIES = 30
 _SUBMIT_RETRY_DELAY = 12  # seconds
+
+
+def _env_int(name: str, default: int) -> int:
+    v = os.environ.get(name, "").strip()
+    if not v:
+        return default
+    try:
+        return int(v)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    v = os.environ.get(name, "").strip()
+    if not v:
+        return default
+    try:
+        return float(v)
+    except ValueError:
+        return default
 
 
 def _is_transient(message: str) -> bool:
@@ -136,6 +181,8 @@ class WalletdClient:
         token: str | None = None,
         permissions: list[str] | None = None,
         credentials: str = "None",
+        submit_retries: int | None = None,
+        submit_retry_delay: float | None = None,
     ) -> None:
         """Connect to a wallet daemon.
 
@@ -150,6 +197,11 @@ class WalletdClient:
         ``docs/deployment-noncustodial.md``. Defaults can also come from the environment:
         ``AGENTPAY_WALLETD_TOKEN``, ``AGENTPAY_WALLETD_PERMISSIONS`` (comma-separated),
         ``AGENTPAY_WALLETD_CREDENTIALS``.
+
+        The dry-run transient-retry budget is tunable too: ``submit_retries`` /
+        ``submit_retry_delay`` (seconds) override the module defaults, or set
+        ``AGENTPAY_SUBMIT_RETRIES`` / ``AGENTPAY_SUBMIT_RETRY_DELAY`` process-wide. These bound only
+        the **dry-run** loop; a real submit never auto-retries (H5), whatever these are set to.
         """
         self.url = url
         self._token: str | None = token or os.environ.get("AGENTPAY_WALLETD_TOKEN") or None
@@ -158,14 +210,47 @@ class WalletdClient:
             permissions = [p.strip() for p in env_perms.split(",") if p.strip()] if env_perms else ["Admin"]
         self._permissions = permissions
         self._credentials = os.environ.get("AGENTPAY_WALLETD_CREDENTIALS", credentials)
+        self._submit_retries = (
+            submit_retries if submit_retries is not None
+            else _env_int("AGENTPAY_SUBMIT_RETRIES", _SUBMIT_RETRIES)
+        )
+        self._submit_retry_delay = (
+            submit_retry_delay if submit_retry_delay is not None
+            else _env_float("AGENTPAY_SUBMIT_RETRY_DELAY", _SUBMIT_RETRY_DELAY)
+        )
 
     def _rpc(self, method: str, params: Any) -> dict:
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
         req = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"})
         if self._token:
             req.add_header("Authorization", "Bearer " + self._token)
-        with urllib.request.urlopen(req, timeout=120) as r:
-            return json.loads(r.read())
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            # A JSON-RPC daemon normally answers 200 even for RPC-level errors; a non-2xx means an
+            # HTTP-layer failure (bad token → 401, overload → 5xx …). If the error body still carries a
+            # JSON-RPC envelope, hand it back untouched so the normal `error`/transient-retry handling
+            # applies; otherwise surface a structured ChainError instead of a bare HTTPError.
+            raw = b""
+            try:
+                raw = e.read()
+            except Exception:
+                pass
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict) and ("error" in parsed or "result" in parsed):
+                    return parsed
+            except Exception:
+                pass
+            snippet = raw.decode("utf-8", "replace")[:200].strip()
+            raise ChainError(
+                f"walletd HTTP {e.code} for {method}" + (f": {snippet}" if snippet else "")
+            ) from e
+        except urllib.error.URLError as e:
+            # Connection refused / DNS / socket timeout: the daemon was unreachable. For a real submit
+            # this is handled one level up (a transient marker → `pending`, never a blind resubmit).
+            raise ChainError(f"could not reach walletd at {self.url} for {method}: {e.reason}") from e
 
     def connect(self) -> "WalletdClient":
         """Obtain a token. If one was supplied (a least-privilege token minted out-of-band for this
@@ -229,12 +314,12 @@ class WalletdClient:
         params = {"manifest": manifest, "variables": variables, "max_fee": max_fee, "dry_run": dry_run}
         if dry_run:
             last = None
-            for _ in range(_SUBMIT_RETRIES):
+            for _ in range(max(1, self._submit_retries)):
                 last = self._rpc("transactions.submit_manifest", params)
                 err = last.get("error")
                 if not err or not _is_transient(err.get("message", "")):
                     return last
-                time.sleep(_SUBMIT_RETRY_DELAY)
+                time.sleep(self._submit_retry_delay)
             return last
         resp = self._rpc("transactions.submit_manifest", params)
         err = resp.get("error")
@@ -424,6 +509,9 @@ class OnChainBudget:
     # template rejects a proof with several session tokens ("Present exactly one agent session
     # badge"), which is what `create_proof_for_resource` yields once an account holds 2+ badges.
     session: str = "default"
+    # Manifest dialect for owner-badge calls: open an `authorize!` window around the call (0.49+) or
+    # not (0.47). See `_proof_windows_default`.
+    proof_windows: bool = field(default_factory=_proof_windows_default)
     component: str | None = None
     owner_badge: str | None = None
     agent_badge: str | None = None
@@ -446,7 +534,7 @@ class OnChainBudget:
         """Manifest expression for the budget's resource: the ``XTR`` keyword for the native token,
         else a strictly-validated ``address!("resource_…")``. Keeps the resource out of a raw string
         splice (same injection guard as every other spliced value)."""
-        return "XTR" if self.resource == "XTR" else f'address!("{_check_resource(self.resource)}")'
+        return _NATIVE_KEYWORD if self.resource in _NATIVE_ALIASES else f'address!("{_check_resource(self.resource)}")'
 
     # -- owner -----------------------------------------------------------------------
     def open(self, *, fund: int, per_tx_cap: int, daily_cap: int,
@@ -497,11 +585,11 @@ class OnChainBudget:
         manifest = (
             'fn main() {\n'
             '    let mut owner = var!["owner"];\n'
-            f'    let proof = owner.create_proof_for_resource(address!("{_check_resource(self.owner_badge)}"));\n'
+            + self._owner_proof_open() +
             '    let mut budget = var!["budget"];\n'
             f'    let coins = budget.withdraw(amount!({_check_amount(amount)}));\n'
             '    owner.deposit(coins);\n'
-            '    drop_all_proofs!();\n'
+            + self._owner_proof_close() +
             '}\n'
         )
         self.client.run(manifest, {"owner": self.owner_account, "budget": self.component})
@@ -536,12 +624,12 @@ class OnChainBudget:
         manifest = (
             'fn main() {\n'
             '    let mut owner = var!["owner"];\n'
-            f'    let proof = owner.create_proof_for_resource(address!("{_check_resource(self.owner_badge)}"));\n'
+            + self._owner_proof_open() +
             '    let mut budget = var!["budget"];\n'
             f'    let badge = budget.issue_agent_badge("{session}");\n'
             '    let mut agent = var!["agent"];\n'
             '    agent.deposit(badge);\n'
-            '    drop_all_proofs!();\n'
+            + self._owner_proof_close() +
             '}\n'
         )
         self.client.run(manifest, {"owner": self.owner_account, "budget": self.component,
@@ -581,14 +669,24 @@ class OnChainBudget:
         )
         self.client.run(manifest, {"funder": funder, "budget": self.component})
 
+    def _owner_proof_open(self) -> str:
+        """Manifest lines that prove the owner badge — and, in the 0.49 dialect, open the
+        authorization window the budget's owner-gated methods are reached through."""
+        line = f'    let proof = owner.create_proof_for_resource(address!("{_check_resource(self.owner_badge)}"));\n'
+        return line + ('    authorize!(proof);\n' if self.proof_windows else '')
+
+    def _owner_proof_close(self) -> str:
+        """Closes the window opened by `_owner_proof_open` (0.49 dialect) and drops the proof."""
+        return ('    drop_authorize!(proof);\n' if self.proof_windows else '') + '    drop_all_proofs!();\n'
+
     def _owner_call(self, call: str) -> None:
         manifest = (
             'fn main() {\n'
             '    let mut owner = var!["owner"];\n'
-            f'    let proof = owner.create_proof_for_resource(address!("{_check_resource(self.owner_badge)}"));\n'
+            + self._owner_proof_open() +
             '    let mut budget = var!["budget"];\n'
             f'    budget.{call};\n'
-            '    drop_all_proofs!();\n'
+            + self._owner_proof_close() +
             '}\n'
         )
         self.client.run(manifest, {"owner": self.owner_account, "budget": self.component})

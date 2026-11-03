@@ -37,9 +37,9 @@ from e2e_onchain_pay import (  # noqa: E402
     WALLETD_URL, TEMPLATE, OWNER, MERCHANT_NAME, log, ensure_merchant, xtr_balance,
     budget_vault_id, vault_balance_from_result,
 )
+from _defaults import template as _template  # noqa: E402
 
-ESCROW_TEMPLATE = os.environ.get(
-    "ESCROW_TEMPLATE", "template_bb8d36d251730c7e6d5a725bddf51ce43acf99ca62e7e4977e635ea3305ee3c0")
+ESCROW_TEMPLATE = _template("escrow", "ESCROW_TEMPLATE")
 FUND, PER_TX, DAILY = 5000, 1000, 1500
 AMOUNT, FEE_BPS, TIMEOUT = 400, 500, 50
 

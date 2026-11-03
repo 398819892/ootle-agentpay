@@ -49,8 +49,20 @@ const PORT = Number(process.env.PORT || 8787);
 // no override for local dev (verified: Windows `localhost:8787` → WSL `127.0.0.1`).
 const HOST = process.env.HOST || "127.0.0.1";
 const WALLETD_URL = process.env.AGENTPAY_WALLETD_URL || "http://127.0.0.1:12010/json_rpc";
+// Fallback template addresses live in the repo-root defaults.json (single source of truth, shared
+// with the Python scripts), so a republished template is updated once. The env var still wins.
+const DEFAULT_TEMPLATES = (() => {
+  try {
+    return JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, "..", "..", "defaults.json"), "utf8"),
+    ).templates || {};
+  } catch {
+    return {};
+  }
+})();
 const BUDGET_TEMPLATE =
   process.env.AGENTPAY_BUDGET_TEMPLATE ||
+  DEFAULT_TEMPLATES.agent_budget ||
   "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f";
 const OWNER = process.env.AGENTPAY_OWNER_ACCOUNT || "default";
 

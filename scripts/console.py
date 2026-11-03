@@ -32,10 +32,11 @@ sys.path.insert(0, os.path.join(_ROOT, "sdk", "src"))
 from agentpay.errors import ChainError, PolicyViolation  # noqa: E402
 from agentpay.onchain import OnChainBudget, WalletdClient  # noqa: E402
 
-BUDGET_TEMPLATE = os.environ.get(
-    "BUDGET_TEMPLATE",
-    "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
-)
+sys.path.insert(0, _HERE)
+from _defaults import template as _template  # noqa: E402
+
+# Default from the repo-root defaults.json; BUDGET_TEMPLATE env var still overrides.
+BUDGET_TEMPLATE = _template("agent_budget", "BUDGET_TEMPLATE")
 PORT = int(os.environ.get("PORT", "8700"))
 HTML_PATH = os.path.join(_HERE, "console.html")
 

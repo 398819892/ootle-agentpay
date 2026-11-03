@@ -69,6 +69,10 @@ clients/ts/dist/*.test.d.ts
 *.docx
 *.doc
 *.pdf
+# …including the per-round review write-ups kept as local .md (the consolidated, committed record
+# is docs/audit-notes.md). Anchored to the review-artifact name so real docs/*.md are unaffected.
+/Ootle_*.md
+docs/Ootle_*.md
 
 # Claude desktop app preview launcher (machine-specific)
 .claude/launch.json

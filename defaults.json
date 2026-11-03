@@ -1,0 +1,8 @@
+{
+  "_comment": "Single source of truth for the published template addresses the demos / scripts / web dashboard fall back to when no env override is set. When a template is republished (e.g. after a testnet reset), update it here ONCE instead of editing each consumer. Per-consumer env vars still win over these: BUDGET_TEMPLATE / AGENT_TEMPLATE / AGENTPAY_BUDGET_TEMPLATE (agent_budget), ESCROW_TEMPLATE (escrow). Only the supported product line (agent_budget + escrow) is tracked here; the frozen OtcBoard demo and the throwaway call-escrow.py keep their own literals. These are the localnet addresses from README.md; esmeralda addresses are set via env.",
+  "network": "localnet",
+  "templates": {
+    "agent_budget": "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
+    "escrow": "template_bb8d36d251730c7e6d5a725bddf51ce43acf99ca62e7e4977e635ea3305ee3c0"
+  }
+}

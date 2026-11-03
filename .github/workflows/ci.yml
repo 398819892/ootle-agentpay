@@ -159,6 +159,19 @@ jobs:
         working-directory: clients/ts
         run: test -f dist/index.js
 
+      # The dashboard runs with no build step, so dist/ is committed on purpose (see .gitignore).
+      # That only stays safe if the committed dist/ actually matches the current src/: a stale dist/
+      # would ship behaviour the type-check never saw. Fail the build if `tsc` produced anything that
+      # differs from what is committed. (The compiled *test* artifacts are gitignored, hence untracked,
+      # so `git diff` ignores them; this guards only the tracked, shipped dist/*.js and *.d.ts.)
+      - name: dist/ is in sync with src/
+        working-directory: clients/ts
+        run: |
+          if ! git diff --exit-code -- dist; then
+            echo "::error::clients/ts/dist is out of date — run 'npm run build' in clients/ts and commit the result."
+            exit 1
+          fi
+
       - name: Run tests (manifest-injection guard)
         working-directory: clients/ts
         run: node --test dist/*.test.js
