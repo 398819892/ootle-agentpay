@@ -136,15 +136,6 @@ function components(blob: string, exclude: Set<string>): string[] {
   return [...all].filter((c) => !exclude.has(c));
 }
 
-function badgeResources(blob: string): string[] {
-  // Non-fungible badge resources minted by the template (exclude the native XTR resource 0101..
-  // and the zero template address resource 0000..).
-  const all = new Set(blob.match(/resource_[0-9a-f]{64}/g) ?? []);
-  return [...all]
-    .filter((x) => !x.startsWith("resource_0101") && !x.startsWith("resource_0000"))
-    .sort();
-}
-
 /**
  * Extract the meaningful reason from a walletd RPC *error message* for a dry run. This is the ONE
  * place we parse a reject out of free text, and only because a dry-run rejection arrives as an RPC
@@ -205,6 +196,78 @@ function* iterEvents(result: any): Generator<any> {
   } else if (Array.isArray(result)) {
     for (const v of result) yield* iterEvents(v);
   }
+}
+
+/**
+ * The component this tx CREATED from `template`, read from the engine's `std.component.created`
+ * event (its `template_address` identifies the creating template) — authoritative, rather than
+ * guessing "the first unknown component_… address" in the result blob. `template` is a
+ * `template_<hex>` address; the event carries the bare hex, so compare on that. Mirrors the Python
+ * SDK's `_created_component`. (#2)
+ */
+function createdComponent(result: any, template: string): string | null {
+  const tmplHex = template.includes("_") ? template.slice(template.indexOf("_") + 1) : template;
+  for (const ev of iterEvents(result)) {
+    const topic = typeof ev.topic === "string" ? ev.topic : "";
+    const leaf = topic.includes(".") ? topic.slice(topic.lastIndexOf(".") + 1) : topic;
+    const sid = ev.substate_id;
+    if (leaf === "created" && typeof sid === "string" && sid.startsWith("component_") && ev.template_address === tmplHex) {
+      return sid;
+    }
+  }
+  return null;
+}
+
+/** Live budget state decoded from the name-keyed `AgentBudget.info` event (#1). Amount/epoch fields
+ * are kept as exact decimal strings (the event payload is strings — no lossy JS-number round-trip). */
+export interface BudgetInfo {
+  revoked: boolean;
+  balance: string;
+  perTxCap: string;
+  dailyCap: string;
+  spentInWindow: string;
+  windowStartEpoch: string;
+  epochsPerWindow: string;
+}
+
+/** The payload of the `info` event emitted by `AgentBudget::get_info` (topic `AgentBudget.info`) — a
+ * NAME-keyed map — or null if absent. Mirrors the Python SDK's `_info_event_payload`. (#1) */
+function infoEventPayload(result: any): Record<string, any> | null {
+  for (const ev of iterEvents(result)) {
+    const topic = typeof ev.topic === "string" ? ev.topic : "";
+    const leaf = topic.includes(".") ? topic.slice(topic.lastIndexOf(".") + 1) : topic;
+    if (leaf === "info") return ev.payload && typeof ev.payload === "object" ? ev.payload : null;
+  }
+  return null;
+}
+
+/**
+ * Decode the name-keyed `info` payload (every value is a string) into typed fields. Because the read
+ * is keyed by NAME, a same-type field swap in the component struct is caught here — the gap the
+ * positional reader cannot see (#1). Throws on a missing/mistyped field so a caller can fall back.
+ * Mirrors the Python SDK's `_parse_info_payload`.
+ */
+function parseInfoPayload(p: Record<string, any>): BudgetInfo {
+  const str = (name: string): string => {
+    const v = p[name];
+    if (typeof v !== "string" || !/^\d+$/.test(v)) {
+      throw new Error(`info event field '${name}' missing or not a non-negative integer string: ${JSON.stringify(v)}`);
+    }
+    return v;
+  };
+  const revoked = p.revoked;
+  if (revoked !== "true" && revoked !== "false") {
+    throw new Error(`info event field 'revoked' is not a boolean: ${JSON.stringify(revoked)}`);
+  }
+  return {
+    revoked: revoked === "true",
+    balance: str("balance"),
+    perTxCap: str("per_tx_cap"),
+    dailyCap: str("daily_cap"),
+    spentInWindow: str("spent_in_window"),
+    windowStartEpoch: str("window_start_epoch"),
+    epochsPerWindow: str("epochs_per_window"),
+  };
 }
 
 export interface OnChainBudgetOptions {
@@ -299,13 +362,17 @@ export class OnChainBudget {
       "    owner.deposit(agent_badge);\n" +
       "}\n";
     const res = await this.client.run(manifest, { owner: this.ownerAccount });
-    const blob = JSON.stringify(res);
-    const comps = components(blob, new Set([this.ownerAccount, this.agentAccount, ...whitelist]));
-    const badges = badgeResources(blob);
-    if (comps.length === 0 || badges.length < 2) {
-      throw new ChainError("could not locate the new budget component / badges in the result");
+    // Locate the new component from the engine's `std.component.created` event (its template address
+    // identifies it), not by scanning for "the first unknown component address" in the result blob.
+    // Fall back to that scan only if the event is ever absent, so discovery never regresses. (#2)
+    let comp = createdComponent(res, this.budgetTemplate);
+    if (!comp) {
+      const blob = JSON.stringify(res);
+      const comps = components(blob, new Set([this.ownerAccount, this.agentAccount, ...whitelist]));
+      comp = comps.length > 0 ? comps[0] : null;
     }
-    this.component = comps[0];
+    if (!comp) throw new ChainError("could not locate the new budget component in the result");
+    this.component = comp;
     // Resolve which badge is which from the component's on-chain state, NOT from address sort order.
     // The owner and agent badges are two distinct non-fungible resources; `pay` asserts the *agent*
     // badge resource specifically, so proving the wrong one is rejected on chain ("Proof of resource
@@ -328,11 +395,15 @@ export class OnChainBudget {
    * record open rather than mount the wrong thing).
    */
   async attachFromOpenResult(result: unknown, exclude: string[] = []): Promise<string | null> {
-    const blob = JSON.stringify(result ?? null);
-    const skip = new Set([this.ownerAccount, this.agentAccount, ...exclude]);
-    const comps = components(blob, skip);
-    if (comps.length === 0) return null;
-    this.component = comps[0];
+    let comp = createdComponent(result, this.budgetTemplate);
+    if (!comp) {
+      const blob = JSON.stringify(result ?? null);
+      const skip = new Set([this.ownerAccount, this.agentAccount, ...exclude]);
+      const comps = components(blob, skip);
+      comp = comps.length > 0 ? comps[0] : null;
+    }
+    if (!comp) return null;
+    this.component = comp;
     [this.ownerBadge, this.agentBadge] = await this.readBadges();
     return this.component;
   }
@@ -586,21 +657,48 @@ export class OnChainBudget {
    * (≈30 min each), reset lazily on the next payment — so the wall-clock figures are approximate.
    * See `window.ts` for the pure computation.
    */
+  /**
+   * Read live budget state by dry-running `get_info` and decoding its name-keyed `info` event (#1):
+   * `revoked`, `balance`, `perTxCap`, `dailyCap`, `spentInWindow`, `windowStartEpoch`,
+   * `epochsPerWindow` — amount/epoch fields as exact decimal strings. Because fields are keyed by
+   * NAME, a same-type field swap in the component struct is caught here (the positional read cannot
+   * see it). The dry run charges no real fee. Mirrors the Python SDK's `read_info`.
+   */
+  async readInfo(): Promise<BudgetInfo> {
+    if (!this.component) throw new ChainError("budget component is not set");
+    const manifest = 'fn main() {\n    let budget = var!["budget"];\n    budget.get_info();\n}\n';
+    const r = await this.client.dryRun(manifest, { budget: this.component });
+    const payload = infoEventPayload(r);
+    if (!payload) throw new ChainError("get_info dry-run did not expose an info event");
+    return parseInfoPayload(payload);
+  }
+
   async readWindow(): Promise<WindowStatus> {
     if (!this.component) throw new ChainError("budget component is not set");
-    const [sub, currentEpoch] = await Promise.all([
-      this.client.getSubstate(this.component),
-      this.client.currentEpoch(),
-    ]);
-    const state = findComponentState(sub);
-    if (!state) throw new ChainError("could not read the budget component state");
-    // The leading entries (vault + two badge resources) are CBOR-tagged objects; the next scalar
-    // fields are plain integers in struct order: per_tx_cap, daily_cap, spent_in_window,
-    // window_start_epoch, epochs_per_window. Take the first five numbers at the top level.
-    const nums = state.filter((x) => typeof x === "number") as number[];
-    if (nums.length < 5) throw new ChainError("unexpected budget component layout");
-    const [, dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow] = nums;
-    return windowStatus({ dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow, currentEpoch });
+    const currentEpoch = await this.client.currentEpoch();
+    // Prefer the name-keyed info-event read (catches a same-type field swap, #1); fall back to the
+    // positional component-state read if the event is unavailable (older template / changed shape).
+    try {
+      const info = await this.readInfo();
+      return windowStatus({
+        dailyCap: Number(info.dailyCap),
+        spentInWindow: Number(info.spentInWindow),
+        windowStartEpoch: Number(info.windowStartEpoch),
+        epochsPerWindow: Number(info.epochsPerWindow),
+        currentEpoch,
+      });
+    } catch {
+      const sub = await this.client.getSubstate(this.component);
+      const state = findComponentState(sub);
+      if (!state) throw new ChainError("could not read the budget component state");
+      // The leading entries (vault + two badge resources) are CBOR-tagged objects; the next scalar
+      // fields are plain integers in struct order: per_tx_cap, daily_cap, spent_in_window,
+      // window_start_epoch, epochs_per_window. Take the first five numbers at the top level.
+      const nums = state.filter((x) => typeof x === "number") as number[];
+      if (nums.length < 5) throw new ChainError("unexpected budget component layout");
+      const [, dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow] = nums;
+      return windowStatus({ dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow, currentEpoch });
+    }
   }
 
   // -- events / ledger -------------------------------------------------------------

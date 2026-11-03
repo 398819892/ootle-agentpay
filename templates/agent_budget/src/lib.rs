@@ -470,11 +470,28 @@ mod agent_budget {
         }
 
         /// Returns `(revoked, balance, per_tx_cap, daily_cap, spent_in_window, window_start_epoch)`.
-        /// Readable by anyone.
+        /// Readable by anyone. Also emits an `info` event carrying the same fields **by name**, so an
+        /// off-chain reader can dry-run this call and decode a typed, name-keyed view of the budget's
+        /// limits/spend. The chain does not return method return values over RPC, but dry-run event
+        /// payloads ARE exposed in the result — and a name-keyed read catches a same-type field swap
+        /// that the positional component-state read cannot. See `docs/audit-notes.md` #1.
         pub fn get_info(&self) -> (bool, Amount, Amount, Amount, Amount, u64) {
+            let balance = self.vault.balance();
+            emit_event(
+                "info",
+                metadata![
+                    "revoked" => self.revoked.to_string(),
+                    "balance" => balance.to_string(),
+                    "per_tx_cap" => self.per_tx_cap.to_string(),
+                    "daily_cap" => self.daily_cap.to_string(),
+                    "spent_in_window" => self.spent_in_window.to_string(),
+                    "window_start_epoch" => self.window_start_epoch.to_string(),
+                    "epochs_per_window" => self.epochs_per_window.to_string(),
+                ],
+            );
             (
                 self.revoked,
-                self.vault.balance(),
+                balance,
                 self.per_tx_cap,
                 self.daily_cap,
                 self.spent_in_window,

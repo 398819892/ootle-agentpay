@@ -645,6 +645,60 @@ def _parse_budget_state(state: Any) -> dict:
     }
 
 
+def _created_component(result: Any, template: str) -> str | None:
+    """The component this tx CREATED from ``template``, read from the engine's ``std.component.created``
+    event (its ``template_address`` identifies the creating template) — authoritative, rather than
+    guessing "the first unknown ``component_…`` address" in the result blob. ``template`` is a
+    ``template_<hex>`` address; the event carries the bare hex, so compare on that. (#2)"""
+    tmpl_hex = template.split("_", 1)[-1]
+    for ev in _iter_events(result):
+        topic = ev.get("topic")
+        leaf = topic.rsplit(".", 1)[-1] if isinstance(topic, str) else None
+        sid = ev.get("substate_id")
+        if (leaf == "created" and isinstance(sid, str) and sid.startswith("component_")
+                and ev.get("template_address") == tmpl_hex):
+            return sid
+    return None
+
+
+def _info_event_payload(result: Any) -> dict | None:
+    """The payload of the ``info`` event emitted by ``AgentBudget::get_info`` (namespaced topic
+    ``AgentBudget.info``) — a NAME-keyed map of the budget's fields, or ``None`` if absent."""
+    for ev in _iter_events(result):
+        topic = ev.get("topic")
+        if isinstance(topic, str) and topic.rsplit(".", 1)[-1] == "info":
+            p = ev.get("payload")
+            return p if isinstance(p, dict) else None
+    return None
+
+
+def _parse_info_payload(p: dict) -> dict:
+    """Decode the name-keyed ``info`` payload (every value is a string) into typed fields. Because the
+    read is keyed by NAME, a same-type field swap in the component struct is caught here — the thing
+    the positional reader cannot see (#1). Raises ``ValueError`` on a missing/mistyped field so a
+    caller can fall back to the positional read."""
+    def _int(name: str) -> int:
+        v = p.get(name)
+        if not isinstance(v, str):
+            raise ValueError(f"info event field {name!r} missing or not a string: {v!r}")
+        try:
+            return int(v)
+        except ValueError as e:
+            raise ValueError(f"info event field {name!r} is not an integer: {v!r}") from e
+    revoked = p.get("revoked")
+    if revoked not in ("true", "false"):
+        raise ValueError(f"info event field 'revoked' is not a boolean: {revoked!r}")
+    return {
+        "revoked": revoked == "true",
+        "balance": _int("balance"),
+        "per_tx_cap": _int("per_tx_cap"),
+        "daily_cap": _int("daily_cap"),
+        "spent_in_window": _int("spent_in_window"),
+        "window_start_epoch": _int("window_start_epoch"),
+        "epochs_per_window": _int("epochs_per_window"),
+    }
+
+
 @dataclass
 class LedgerEntry:
     merchant: str
@@ -721,12 +775,18 @@ class OnChainBudget:
             '}\n'
         )
         res = self.client.run(manifest, {"owner": self.owner_account})
-        blob = json.dumps(res)
-        comps = _components(blob, {self.owner_account, self.agent_account, *whitelist})
-        badges = _badge_resources(blob)
-        if not comps or len(badges) < 2:
-            raise ChainError("could not locate the new budget component / badges in the result")
-        self.component = comps[0]
+        # Locate the new component from the engine's `std.component.created` event (its template
+        # address identifies it), not by scanning for "the first unknown component address" in the
+        # result blob. Fall back to that scan only if the event is ever absent, so discovery never
+        # regresses to failing. (#2)
+        comp = _created_component(res, self.budget_template)
+        if comp is None:
+            blob = json.dumps(res)
+            cands = _components(blob, {self.owner_account, self.agent_account, *whitelist})
+            comp = cands[0] if cands else None
+        if comp is None:
+            raise ChainError("could not locate the new budget component in the result")
+        self.component = comp
         # Resolve which badge is which from the component's on-chain state, NOT from address sort
         # order. The owner and agent badges are two distinct non-fungible resources; `pay` asserts
         # the *agent* badge resource specifically, so proving the wrong one is rejected on chain
@@ -745,19 +805,43 @@ class OnChainBudget:
             raise ChainError("budget component state did not expose the owner and agent badges")
         return resources[0], resources[1]  # struct order: owner_badge, agent_badge
 
-    def read_onchain_state(self) -> dict:
-        """Authoritatively read this budget's LIVE state from its on-chain component substate:
-        ``per_tx_cap``, ``daily_cap``, ``spent_in_window`` (the chain's own running total — it reflects
-        spends by EVERY session of this budget, not just this process), ``window_start_epoch``,
-        ``epochs_per_window`` and ``revoked``. Read-only. Raises ``ChainError`` (no component yet or
-        walletd unreachable) or ``ValueError`` (unexpected component layout). Mirrors the web
-        reconciler and closes the MCP status local-estimate gap (#16)."""
+    def read_info(self) -> dict:
+        """Read this budget's live state by DRY-RUNNING ``get_info`` and decoding its name-keyed
+        ``info`` event payload: ``revoked``, ``balance``, ``per_tx_cap``, ``daily_cap``,
+        ``spent_in_window``, ``window_start_epoch``, ``epochs_per_window``. Because the fields are
+        keyed by NAME (not position), a same-type field swap in the component struct is caught here —
+        the gap the positional component-state read cannot see (#1). The dry run charges no real fee.
+        Raises ``ChainError`` (no component / walletd unreachable / no info event) or ``ValueError``
+        (the payload is missing or mistyped a field)."""
         if not self.component:
             raise ChainError("budget has no on-chain component yet")
-        state = _find_component_state(self.client.get_substate(self.component))
-        if state is None:
-            raise ChainError("could not read the budget component state from chain")
-        return _parse_budget_state(state)
+        manifest = 'fn main() {\n    let budget = var!["budget"];\n    budget.get_info();\n}\n'
+        r = self.client.dry_run(manifest, {"budget": self.component})
+        payload = _info_event_payload(r)
+        if payload is None:
+            raise ChainError("get_info dry-run did not expose an info event")
+        return _parse_info_payload(payload)
+
+    def read_onchain_state(self) -> dict:
+        """Authoritatively read this budget's LIVE state: ``per_tx_cap``, ``daily_cap``,
+        ``spent_in_window`` (the chain's own running total — it reflects spends by EVERY session of
+        this budget, not just this process), ``window_start_epoch``, ``epochs_per_window`` and
+        ``revoked``. Read-only.
+
+        Prefers the name-keyed ``get_info`` ``info`` event (``read_info`` — catches a same-type field
+        swap, #1); falls back to the positional component-state read (``_parse_budget_state``,
+        1:1 with the web reconciler, #16) if the event is unavailable (older template or a changed
+        event shape). Raises ``ChainError`` (no component yet / walletd unreachable) or ``ValueError``
+        (both reads found an unexpected shape)."""
+        if not self.component:
+            raise ChainError("budget has no on-chain component yet")
+        try:
+            return self.read_info()
+        except (ChainError, ValueError):
+            state = _find_component_state(self.client.get_substate(self.component))
+            if state is None:
+                raise ChainError("could not read the budget component state from chain")
+            return _parse_budget_state(state)
 
     def revoke(self) -> None:
         self._owner_call("revoke()")

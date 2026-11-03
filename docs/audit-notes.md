@@ -529,10 +529,14 @@ Followed up on the fifth review's deferred server items.
   `web/server/substate.test.js`. The same strict positional read is now **ported to the Python SDK**
   (`agentpay.onchain._parse_budget_state` + `OnChainBudget.read_onchain_state`, tests in
   `sdk/tests/test_substate.py`) and consumed by MCP `status()`, so `spent_in_window` is a live chain
-  read there too — not a local estimate — closing the #15 live-spend gap. *Remaining:* a fully
-  type-safe read (template `get_info` via dry-run, decoding a typed return) still wants validation
-  against the live walletd result shape — tracked; it would also catch a same-type field swap, which
-  the positional read cannot.
+  read there too — not a local estimate — closing the #15 live-spend gap. **Done (2026-11-03):** the
+  fully type-safe read is implemented. The chain does NOT return a method's return value over RPC
+  (verified on the 0.49 walletd — a dry-run exposes only the finalize diff + events, never the typed
+  return value), so decoding `get_info`'s return was impossible. Instead `get_info` now EMITS an `info`
+  event whose payload is a NAME-keyed map; a dry-run of it exposes that payload, and `OnChainBudget.read_info`
+  (Python + TS) decodes it by field name — so it DOES catch a same-type field swap the positional read
+  cannot. `read_onchain_state` / web `readChainBudget` prefer it and fall back to the positional read.
+  Verified on the 0.49 swarm (agent_budget `template_8857330b…`); unit tests Python 53 / TS 39 / web 123.
 
 ### Design / SDK pass
 - **SDK `payEvents` topic + dedup (fixed).** It identified events by "payload has merchant+memo",
@@ -563,8 +567,10 @@ Followed up on the fifth review's deferred server items.
   (`Substate nft_…_str_key-bot1:0 already exists`). The template's "re-issue clears the revocation"
   path therefore only applies after the old badge was burned. The API maps a re-enabled key to the
   next generation label (`key-<id>.2`, …) instead; the dashboard keeps refusing a duplicate label.
-- **SDK `open()` component discovery** — still finds the new component by "first unknown address";
-  the robust fix decodes the `new` return value, same live-walletd-shape validation as #16's typed read.
+- ~~**SDK `open()` component discovery**~~ **done 2026-11-03.** `open()` (Python + TS, and the web
+  dashboard's `attachFromOpenResult`) now locates the new component from the engine's
+  `std.component.created` event (matched on the creating template's address) instead of guessing "the
+  first unknown component address". Verified on the 0.49 swarm; the regex scan stays as a fallback.
 - **Licence unified to BSD-3-Clause (done).** The TS client was MIT; it is now BSD-3-Clause, matching
   the SDK and templates. All three templates' `Cargo.toml` now also declare `license = "BSD-3-Clause"`
   explicitly (not just the SPDX header).

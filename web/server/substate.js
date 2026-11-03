@@ -6,9 +6,9 @@
  * struct field order ever changed. This version reads by EXPLICIT index and asserts each slot's type,
  * so a layout drift throws a clear error instead of reporting bad numbers as if they were real.
  *
- * NOTE: a fully type-safe read would call the template's `get_info` via a dry-run and decode a typed
- * return; that needs the live walletd result shape to validate against, so it is tracked as the
- * remaining part of #16 in docs/audit-notes.md. This strict positional read is the loud-failure
+ * NOTE: the name-keyed `get_info` info-event read (`OnChainBudget.readInfo` in the TS client, #1) now
+ * gives a fully type-safe read that DOES catch a same-type field swap; `readChainBudget` prefers it
+ * and falls back to this positional parse. This strict positional read stays the loud-failure
  * stopgap: it cannot catch a same-type field swap, but it ends the "silently wrong" failure mode.
  *
  * Struct order (templates/agent_budget/src/lib.rs, see docs/custody.md §state-model):

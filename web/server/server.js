@@ -729,10 +729,41 @@ function vaultBalanceFromSubstate(sub) {
  */
 async function readChainBudget(component) {
   const c = await walletd();
-  const [sub, currentEpoch] = await Promise.all([c.getSubstate(component), c.currentEpoch()]);
+  const currentEpoch = await c.currentEpoch();
+  // Prefer the name-keyed `get_info` info-event read (OnChainBudget.readInfo, #1): it decodes the
+  // caps/spend/revoked/balance BY NAME, so a same-type field swap in the component struct is caught —
+  // the gap the positional parse below cannot see. Fall back to the positional parse if the info event
+  // is unavailable (older template / changed shape). The whitelist is always read positionally (it is
+  // the only list field — no same-type-swap risk).
+  let info = null;
+  try {
+    const b = new OnChainBudget(c, BUDGET_TEMPLATE, ownerAddr);
+    b.component = component;
+    info = await b.readInfo();
+  } catch (_e) {
+    /* fall back to the positional parse below */
+  }
+  const sub = await c.getSubstate(component);
   const state = findComponentState(sub);
   if (!state) throw new Error("could not read the budget component state");
-  // Strict, position-pinned parse (throws on layout drift; see substate.js / audit #16).
+  if (info) {
+    const wlRaw = Array.isArray(state[8]) ? state[8] : [];
+    const whitelist = wlRaw.map((e) => (cborHex(e) ? "component_" + cborHex(e) : null)).filter(Boolean);
+    const window = windowStatus({
+      dailyCap: Number(info.dailyCap), spentInWindow: Number(info.spentInWindow),
+      windowStartEpoch: Number(info.windowStartEpoch), epochsPerWindow: Number(info.epochsPerWindow), currentEpoch,
+    });
+    return {
+      perTxCap: info.perTxCap, // exact decimal strings (the event payload is strings — no lossy JS number)
+      dailyCap: info.dailyCap,
+      spentInWindow: String(window.spentInWindow), // effective (0 once the window has lazily elapsed)
+      whitelist,
+      revoked: info.revoked,
+      vaultBalance: info.balance, // vault.balance() from the info event — no separate vault read needed
+      window,
+    };
+  }
+  // Fallback: strict, position-pinned parse (throws on layout drift; see substate.js / audit #16).
   const { perTxCap, dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow, revoked, whitelistRaw, vaultHex } =
     parseBudgetState(state);
   const whitelist = whitelistRaw.map((e) => (cborHex(e) ? "component_" + cborHex(e) : null)).filter(Boolean);

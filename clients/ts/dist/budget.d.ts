@@ -16,6 +16,17 @@ export interface LedgerEntry {
     memo: string;
     txKind: "pay" | "pay_via_escrow";
 }
+/** Live budget state decoded from the name-keyed `AgentBudget.info` event (#1). Amount/epoch fields
+ * are kept as exact decimal strings (the event payload is strings — no lossy JS-number round-trip). */
+export interface BudgetInfo {
+    revoked: boolean;
+    balance: string;
+    perTxCap: string;
+    dailyCap: string;
+    spentInWindow: string;
+    windowStartEpoch: string;
+    epochsPerWindow: string;
+}
 export interface OnChainBudgetOptions {
     /** Defaults to `ownerAccount` (devnet: one account acts as both owner and agent). */
     agentAccount?: string;
@@ -174,6 +185,14 @@ export declare class OnChainBudget {
      * (≈30 min each), reset lazily on the next payment — so the wall-clock figures are approximate.
      * See `window.ts` for the pure computation.
      */
+    /**
+     * Read live budget state by dry-running `get_info` and decoding its name-keyed `info` event (#1):
+     * `revoked`, `balance`, `perTxCap`, `dailyCap`, `spentInWindow`, `windowStartEpoch`,
+     * `epochsPerWindow` — amount/epoch fields as exact decimal strings. Because fields are keyed by
+     * NAME, a same-type field swap in the component struct is caught here (the positional read cannot
+     * see it). The dry run charges no real fee. Mirrors the Python SDK's `read_info`.
+     */
+    readInfo(): Promise<BudgetInfo>;
     readWindow(): Promise<WindowStatus>;
     /**
      * Extract the AgentBudget `pay` events (payload: merchant/amount/memo/spent_in_window) from a
