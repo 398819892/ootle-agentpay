@@ -96,3 +96,18 @@ test("a dry run IS still re-minted & retried when an internally-minted token exp
   const dryCalls = calls.filter((b) => b.method === SUBMIT && b.params.dry_run);
   assert.equal(dryCalls.length, 2, "an expired-token dry run is re-minted and retried once");
 });
+
+test("getResult treats a terminal InvalidTransaction (no FinalizeResult) as a reject (D-12)", async () => {
+  installFetch({ [GETRES]: { result: { result: null, status: "InvalidTransaction", transaction_id: "t" } } });
+  const c = new WalletdClient("http://fake", { token: "t" });
+  assert.equal((await c.getResult("t")).status, "reject");
+});
+
+test("run throws chainRejected on an InvalidTransaction, never polling it as pending (D-12)", async () => {
+  installFetch({
+    [SUBMIT]: { result: { transaction_id: "txI" } },
+    [GETRES]: { result: { result: null, status: "InvalidTransaction", transaction_id: "txI" } },
+  });
+  const c = new WalletdClient("http://fake", { token: "t", finalizeTries: 2, finalizeDelayMs: 1 });
+  await assert.rejects(() => c.run("m", {}), (e: any) => e.chainRejected === true && !e.pending);
+});

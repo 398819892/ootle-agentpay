@@ -382,6 +382,13 @@ class WalletdClient:
                 e = ChainError(reason)
                 e.chain_rejected = True
                 raise e
+            # A consensus-level terminal failure (InvalidTransaction / Rejected) has a top-level status
+            # but no FinalizeResult — also a definitive reject (the tx never executed). (D-12)
+            st = res.get("status") if isinstance(res, dict) else None
+            if st in _TERMINAL_FAILURE_STATUSES:
+                e = ChainError(f"transaction {tx_id} rejected at consensus ({st})")
+                e.chain_rejected = True
+                raise e
             time.sleep(1.5)
         # Did not finalize in the window: SUBMITTED but unknown. Carry pending + tx_id so the caller
         # records it unknown and reconciles by tx id — never a hard failure. (D-1)
@@ -396,9 +403,14 @@ class WalletdClient:
         reconciler uses to settle a previously-submitted tx id against the chain's verdict. (D-1)"""
         res = self._rpc("transactions.get_result", {"transaction_id": tx_id}).get("result")
         outcome = _finalized_outcome(res)
-        if outcome is None:
-            return ("pending", None)
-        return outcome
+        if outcome is not None:
+            return outcome
+        # A consensus-level terminal failure (InvalidTransaction / Rejected) has a top-level status
+        # but no FinalizeResult, so _finalized_outcome misses it — a definitive reject, not pending. (D-12)
+        st = res.get("status") if isinstance(res, dict) else None
+        if st in _TERMINAL_FAILURE_STATUSES:
+            return ("reject", f"transaction {st}")
+        return ("pending", None)
 
 
 # --- structured transaction-result handling -------------------------------------------------
@@ -409,6 +421,11 @@ class WalletdClient:
 # and RejectReason = { "ExecutionFailure": { code, message } } | { "<Variant>": "<message>" } | "<Variant>".
 
 _TX_RESULT_VARIANTS = ("Accept", "Reject", "AcceptFeeRejectRest")
+
+# Wallet-daemon TransactionStatus values that are TERMINAL failures carrying NO FinalizeResult (the
+# typed result tree is null), so `_finalized_outcome` can't see them — only the top-level `status`
+# reveals them. Without this, such a tx is polled as "pending" forever and never reconciles. (D-12)
+_TERMINAL_FAILURE_STATUSES = ("InvalidTransaction", "Rejected")
 
 
 def _transaction_result(rpc_result: Any) -> dict | None:

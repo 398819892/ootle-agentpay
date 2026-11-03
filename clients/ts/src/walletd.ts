@@ -45,6 +45,12 @@ function sleep(ms: number): Promise<void> {
 //   RejectReason      = { ExecutionFailure: { code, message } } | { "<Variant>": "<message>" } | "<Variant>"
 const TX_RESULT_VARIANTS = ["Accept", "Reject", "AcceptFeeRejectRest"] as const;
 
+// Wallet-daemon TransactionStatus values that are TERMINAL failures carrying NO FinalizeResult (the
+// typed result tree is null), so they can't be read from the result variants above — only from the
+// top-level `status`. Without this, such a tx is polled as "pending" forever and never reconciles,
+// wedging the in-flight guard. (D-12)
+const TERMINAL_FAILURE_STATUSES = new Set(["InvalidTransaction", "Rejected"]);
+
 /**
  * Locate the typed TransactionResult inside a walletd result, across both nesting shapes:
  * `transactions.get_result` nests it at `result.result`; a dry run (`submit_manifest`) nests it at
@@ -345,10 +351,19 @@ export class WalletdClient {
   async getResult(transactionId: string): Promise<TxResult> {
     const got = await this.rpc("transactions.get_result", { transaction_id: transactionId });
     const outcome = finalizedOutcome(got.result);
-    if (!outcome) return { status: "pending", reason: null, result: got.result ?? null };
-    return outcome[0] === "accept"
-      ? { status: "accept", reason: null, result: got.result }
-      : { status: "reject", reason: outcome[1], result: got.result };
+    if (outcome) {
+      return outcome[0] === "accept"
+        ? { status: "accept", reason: null, result: got.result }
+        : { status: "reject", reason: outcome[1], result: got.result };
+    }
+    // D-12: a tx rejected at consensus (InvalidTransaction / Rejected) has a terminal top-level
+    // `status` but no FinalizeResult body, so finalizedOutcome returns null. Settle it as a definitive
+    // reject rather than polling it as "pending" forever (which wedges the in-flight guard).
+    const st = (got.result as any)?.status;
+    if (typeof st === "string" && TERMINAL_FAILURE_STATUSES.has(st)) {
+      return { status: "reject", reason: `transaction ${st}`, result: got.result ?? null };
+    }
+    return { status: "pending", reason: null, result: got.result ?? null };
   }
 
   /**

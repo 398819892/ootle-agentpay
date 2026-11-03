@@ -116,3 +116,20 @@ def test_rpc_wraps_raw_transport_errors(monkeypatch):
     c._token = "t"
     with pytest.raises(ChainError):
         c._rpc("settings.get", {})
+
+
+# --- D-12: a consensus-level terminal failure (status but no FinalizeResult) is a reject ---------
+
+def test_invalid_transaction_status_is_reject_not_pending():
+    c = RpcFake({GETRES: {"result": {"result": None, "status": "InvalidTransaction", "transaction_id": "t"}}})
+    assert c.get_result("t") == ("reject", "transaction InvalidTransaction")
+
+
+def test_run_invalid_transaction_raises_chain_rejected(monkeypatch):
+    monkeypatch.setattr("agentpay.onchain.time.sleep", lambda _s: None)
+    seq = {SUBMIT: {"result": {"transaction_id": "txI"}},
+           GETRES: {"result": {"result": None, "status": "InvalidTransaction", "transaction_id": "txI"}}}
+    with pytest.raises(ChainError) as ei:
+        RpcFake(seq).run("m", {})
+    assert getattr(ei.value, "chain_rejected", False) is True
+    assert getattr(ei.value, "pending", False) is False
