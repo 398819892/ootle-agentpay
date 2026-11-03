@@ -995,12 +995,24 @@ async function runChainOp(key, opName, component, params, submitFn, fpParams) {
   } catch (e) {
     clearInterval(txIdWatcher);
     const txId = (e && e.txId) || submittedTxId();
-    if (e && e.pending) {
-      // Submitted, but not confirmed within the window → UNKNOWN (never success). Reconciled later.
-      const record = txlog.settle(key, { status: "unknown", txId, reason: "submitted; not confirmed within the window" });
+    const chainRejected = !!(e && e.chainRejected);
+    // A record may be settled to the TERMINAL "rejected" only when that is provably safe:
+    //   • the chain finalized a Reject (e.chainRejected) — the tx moved no funds; or
+    //   • nothing was ever submitted (no txId, not flagged pending) — a pre-submit failure.
+    // ANY other post-submit fault is ambiguous and must be UNKNOWN: e.pending (submitted, not
+    // confirmed within the window), OR an unflagged throw AFTER a tx was submitted — a transport blip
+    // during the confirm poll, or a throw while reading badges / parsing the event once the chain had
+    // already Accepted. Such a tx may have landed, even succeeded, so recording it "rejected" (which
+    // reconcileAll never re-checks, and a caller reads as "safe to retry") would invite a double-spend.
+    // We settle it UNKNOWN and reconcile by tx id instead. (S-1)
+    if (!chainRejected && ((e && e.pending) || txId)) {
+      const reason = (e && e.pending)
+        ? "submitted; not confirmed within the window"
+        : "submitted; outcome unknown after a post-submit fault — reconcile by tx id";
+      const record = txlog.settle(key, { status: "unknown", txId, reason });
       return { outcome: "unknown", record };
     }
-    // Finalized reject (or a submit fault): record and surface the chain's reason.
+    // Finalized chain reject, or a pre-submit fault (no tx reached the chain): record and surface it.
     txlog.settle(key, { status: "rejected", txId, reason: chainMessage(e) });
     throw e;
   }

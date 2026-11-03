@@ -42,6 +42,12 @@ export interface WalletdClientOptions {
 export declare class WalletdClient {
     readonly url: string;
     private token;
+    /**
+     * True when `token` was supplied out-of-band (constructor / env), i.e. the non-custodial path.
+     * Such a token is NEVER silently re-minted: `connect()` would mint a fresh one with the configured
+     * `permissions` (default `Admin`), escalating a least-privilege agent token. (D-5)
+     */
+    private readonly tokenIsExternal;
     private readonly permissions;
     private readonly credentials;
     readonly finalizeTries: number;

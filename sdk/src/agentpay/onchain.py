@@ -248,9 +248,17 @@ class WalletdClient:
                 f"walletd HTTP {e.code} for {method}" + (f": {snippet}" if snippet else "")
             ) from e
         except urllib.error.URLError as e:
-            # Connection refused / DNS / socket timeout: the daemon was unreachable. For a real submit
-            # this is handled one level up (a transient marker → `pending`, never a blind resubmit).
+            # Connection refused / DNS / socket timeout: the daemon was unreachable. The real-submit
+            # path promotes a thrown transport error to `pending` (never a blind resubmit).
             raise ChainError(f"could not reach walletd at {self.url} for {method}: {e.reason}") from e
+        except (TimeoutError, OSError) as e:
+            # A read timeout, a reset mid-read (RemoteDisconnected), or another socket error NOT wrapped
+            # as URLError. Surface as a ChainError so no caller ever sees a raw socket error; the
+            # real-submit path promotes it to `pending` (submitted-but-unknown), never a resubmit. (D-1)
+            raise ChainError(f"walletd call {method} failed (transport): {e}") from e
+        except json.JSONDecodeError as e:
+            # walletd answered with a truncated / non-JSON body — a transport-level fault too. (D-1)
+            raise ChainError(f"walletd call {method} returned an unreadable response: {e}") from e
 
     def connect(self) -> "WalletdClient":
         """Obtain a token. If one was supplied (a least-privilege token minted out-of-band for this
@@ -321,7 +329,15 @@ class WalletdClient:
                     return last
                 time.sleep(self._submit_retry_delay)
             return last
-        resp = self._rpc("transactions.submit_manifest", params)
+        try:
+            resp = self._rpc("transactions.submit_manifest", params)
+        except Exception as e:
+            # A THROWN error on a REAL submit (transport drop, read timeout, HTTP 5xx) is ambiguous:
+            # the manifest may already have reached the node and created a tx while only the response
+            # was lost. Surface as pending (unknown) — reconcile by tx id, never blind-resubmit. (D-1)
+            pe = e if isinstance(e, ChainError) else ChainError(str(e))
+            pe.pending = True  # unknown: reconcile, never auto-resubmit (H5)
+            raise pe from e
         err = resp.get("error")
         if err and _is_transient(err.get("message", "")):
             e = ChainError(
@@ -343,7 +359,15 @@ class WalletdClient:
             raise ChainError(r["error"]["message"])
         tx_id = r["result"].get("transaction_id") or r["result"].get("hash")
         for _ in range(120):   # esmeralda finalization can be slow under congestion
-            res = self._rpc("transactions.get_result", {"transaction_id": tx_id}).get("result")
+            try:
+                res = self._rpc("transactions.get_result", {"transaction_id": tx_id}).get("result")
+            except Exception as e:
+                # Transport blip AFTER a successful submit: the tx is on chain, we just can't read its
+                # verdict right now. UNKNOWN, not failed — carry tx_id so the caller reconciles. (D-1)
+                pe = e if isinstance(e, ChainError) else ChainError(str(e))
+                pe.pending = True
+                pe.tx_id = tx_id
+                raise pe from e
             # Decide accept/reject from the structured TransactionResult, not by searching the JSON
             # blob for "Accept"/"Reject": the `AcceptFeeRejectRest` variant (fee taken, rest rejected)
             # contains the substring "Accept" yet is a FAILURE, and reject reasons are now objects
@@ -353,9 +377,28 @@ class WalletdClient:
                 kind, reason = outcome
                 if kind == "accept":
                     return res
-                raise ChainError(reason)
+                # Finalized chain Reject — a DEFINITIVE verdict (the tx moved no funds). Flag it so a
+                # caller (and the MCP layer) tell it apart from a pending/unknown outcome. (D-1)
+                e = ChainError(reason)
+                e.chain_rejected = True
+                raise e
             time.sleep(1.5)
-        raise ChainError(f"transaction {tx_id} did not finalize in time")
+        # Did not finalize in the window: SUBMITTED but unknown. Carry pending + tx_id so the caller
+        # records it unknown and reconciles by tx id — never a hard failure. (D-1)
+        e = ChainError(f"transaction {tx_id} did not finalize in time")
+        e.pending = True
+        e.tx_id = tx_id
+        raise e
+
+    def get_result(self, tx_id: str) -> tuple[str, str | None]:
+        """Resolve a transaction id to ``("accept"|"reject"|"pending", reason)`` with a single
+        read-only ``get_result`` call. Never submits or signs — this is what a status probe /
+        reconciler uses to settle a previously-submitted tx id against the chain's verdict. (D-1)"""
+        res = self._rpc("transactions.get_result", {"transaction_id": tx_id}).get("result")
+        outcome = _finalized_outcome(res)
+        if outcome is None:
+            return ("pending", None)
+        return outcome
 
 
 # --- structured transaction-result handling -------------------------------------------------

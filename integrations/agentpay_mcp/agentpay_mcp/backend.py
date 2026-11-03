@@ -59,12 +59,16 @@ DEFAULT_TEMPLATE = os.environ.get(
 
 @dataclass
 class PayResult:
-    ok: bool
+    # ok: True = accepted; False = definitively rejected (no funds moved); None = PENDING/UNKNOWN —
+    # submitted but the outcome is not yet known (the tx may have landed), so NEVER retry blindly.
+    ok: bool | None
     merchant: str
     amount: int
     memo: str = ""
     reason: str | None = None       # the validator's rejection reason, when ok is False
     spent_in_window: int | None = None
+    status: str = "accepted"        # "accepted" | "rejected" | "pending"
+    tx_id: str | None = None        # set when known, so the agent can call get_payment_status
 
 
 @dataclass
@@ -99,12 +103,20 @@ class AgentWallet:
         try:
             res = self.budget.pay(merchant, amount, memo=memo)
         except ChainError as e:                      # race: chain state changed between dry-run and submit
-            return PayResult(False, merchant, amount, memo, reason=str(e))
+            if getattr(e, "pending", False):
+                # Submitted, but the on-chain outcome is UNKNOWN (transport blip / timeout). The tx may
+                # have landed. Return the THIRD state — never ok=False — so the agent does not blindly
+                # re-pay (which would pay the merchant twice). Resolve it with get_payment_status. (D-1)
+                return PayResult(None, merchant, amount, memo, reason=str(e),
+                                 status="pending", tx_id=getattr(e, "tx_id", None))
+            # A definitive failure: a finalized chain Reject, or a pre-submit error — either way no
+            # funds moved, so it is safe to report as rejected.
+            return PayResult(False, merchant, amount, memo, reason=str(e), status="rejected")
         events = OnChainBudget.pay_events(res)
         spent_in_window = None
         if events:
             spent_in_window = int(events[0].get("spent_in_window", self.budget.spent))
-        return PayResult(True, merchant, amount, memo, spent_in_window=spent_in_window)
+        return PayResult(True, merchant, amount, memo, spent_in_window=spent_in_window, status="accepted")
 
     def status(self) -> dict[str, Any]:
         """What the agent is allowed to know about its own budget.
@@ -133,6 +145,14 @@ class AgentWallet:
             "revoked": revoked,
             "enforced_by": "Tari Ootle validator (AgentBudget on-chain template)",
         }
+
+    def payment_status(self, tx_id: str) -> dict[str, Any]:
+        """Resolve a previously-submitted payment by its tx id — the read-only follow-up to a PENDING
+        pay_merchant result, so the agent can learn the outcome instead of retrying (and risk
+        double-paying). Returns ``{"status": "accepted"|"rejected"|"pending", "reason": ...}``. (D-1)"""
+        kind, reason = self.budget.client.get_result(tx_id)
+        status = {"accept": "accepted", "reject": "rejected", "pending": "pending"}[kind]
+        return {"status": status, "tx_id": tx_id, "reason": reason}
 
     def list_merchants(self) -> list[str]:
         return list(self.whitelist)

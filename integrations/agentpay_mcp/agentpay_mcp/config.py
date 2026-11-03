@@ -84,6 +84,8 @@ class ServerConfig:
     # Default FALSE = ATTACH (non-custodial: the agent holds only the agent badge); provision is
     # opt-in for local demos. Must agree with the env default in from_env() (audit #9 / #15).
     auto_provision: bool = False
+    # Amounts below are in BASE UNITS (µT; 1 XTR = 1,000,000 µT) — the unit the manifest/chain use.
+    # The defaults are tiny demo values (1_000 µT = 0.001 XTR), NOT whole XTR. (D-6)
     per_tx_cap: int = 1_000
     daily_cap: int = 1_500
     fund: int = 10_000

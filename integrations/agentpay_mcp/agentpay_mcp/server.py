@@ -137,14 +137,21 @@ def pay_merchant(merchant: str, amount: int, memo: str = "") -> dict:
     The payment is adjudicated by the Tari Ootle validator against the budget's on-chain rules
     (per-transaction cap, daily cap, merchant whitelist, revocation). Outcomes:
 
-      * accepted  -> ``{"ok": true, "spent_in_window": <int>, ...}``
-      * rejected  -> ``{"ok": false, "reason": "<validator's reason>", "rejected_by": ...}``
+      * accepted -> ``{"ok": true, "status": "accepted", "spent_in_window": <int>, ...}``
+      * rejected -> ``{"ok": false, "status": "rejected", "reason": "<validator's reason>", ...}``
         (a normal, expected outcome — the agent cannot override it)
+      * PENDING  -> ``{"ok": null, "status": "pending", "tx_id": <str|null>, "action_required": ...}``
+        The payment was SUBMITTED but its on-chain outcome is not yet known (a network blip or a slow
+        finalization); the transaction MAY have gone through. **Do NOT call pay_merchant again for
+        this payment — that can pay the merchant twice.** Call ``get_payment_status(tx_id)`` to learn
+        the real outcome (or, if tx_id is null, wait and check ``get_budget_status`` / ask a human
+        before any retry).
       * setup/chain problem -> ``{"ok": false, "error_type": ..., "error": ..., "hint": ...}``
 
     Args:
         merchant: the merchant's account component address (see ``list_merchants``).
-        amount:   amount to pay, in XTR (integer).
+        amount:   amount to pay, in BASE UNITS (µT; 1 XTR = 1,000,000 µT). Integer — so one whole XTR
+                  is ``1000000``, not ``1``. The per-tx and daily caps use the same base units.
         memo:     optional note / invoice reference carried on chain with the payment.
     """
     w, err = _wallet_or_error()
@@ -154,13 +161,42 @@ def pay_merchant(merchant: str, amount: int, memo: str = "") -> dict:
         r = w.pay_merchant(merchant, amount, memo)
     except Exception as exc:  # defensive: never surface a raw traceback to the agent
         return _error("chain_error", f"payment failed unexpectedly: {exc}", _walletd_hint())
-    out = {"ok": r.ok, "merchant": r.merchant, "amount": r.amount, "memo": r.memo}
-    if r.ok:
+    out = {"ok": r.ok, "status": r.status, "merchant": r.merchant, "amount": r.amount, "memo": r.memo}
+    if r.status == "pending":
+        # Submitted, outcome UNKNOWN. Never retry this payment — resolve it with get_payment_status.
+        out["tx_id"] = r.tx_id
+        out["reason"] = r.reason
+        out["action_required"] = (
+            "The payment was submitted but its on-chain outcome is UNKNOWN. Do NOT call pay_merchant "
+            "again for this payment — it may already have paid the merchant. "
+            + (f"Call get_payment_status('{r.tx_id}') to resolve it."
+               if r.tx_id else
+               "No tx id is available; wait, then check get_budget_status, and ask a human before any retry.")
+        )
+    elif r.ok:
         out["spent_in_window"] = r.spent_in_window
     else:
         out["reason"] = r.reason
         out["rejected_by"] = "Tari Ootle validator (on-chain budget rule)"
     return out
+
+
+@mcp.tool()
+def get_payment_status(tx_id: str) -> dict:
+    """Resolve the on-chain outcome of a previously submitted payment by its transaction id.
+
+    Use this when ``pay_merchant`` returned a PENDING result (``ok: null``) to learn whether the
+    payment was accepted or rejected — instead of retrying the payment, which could pay the merchant
+    twice. Returns ``{"ok": true, "status": "accepted"|"rejected"|"pending", "reason": ...}``; the
+    status may still be ``pending`` if the chain has not finalized it yet (wait and call again)."""
+    w, err = _wallet_or_error()
+    if err:
+        return err
+    try:
+        st = w.payment_status(tx_id)
+    except Exception as exc:
+        return _error("chain_error", f"could not read transaction status: {exc}", _walletd_hint())
+    return {"ok": True, **st}
 
 
 @mcp.tool()

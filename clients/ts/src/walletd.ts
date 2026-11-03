@@ -136,6 +136,12 @@ export interface WalletdClientOptions {
 export class WalletdClient {
   readonly url: string;
   private token: string | null = null;
+  /**
+   * True when `token` was supplied out-of-band (constructor / env), i.e. the non-custodial path.
+   * Such a token is NEVER silently re-minted: `connect()` would mint a fresh one with the configured
+   * `permissions` (default `Admin`), escalating a least-privilege agent token. (D-5)
+   */
+  private readonly tokenIsExternal: boolean;
   private readonly permissions: string[];
   private readonly credentials: string;
   readonly finalizeTries: number;
@@ -153,6 +159,7 @@ export class WalletdClient {
     this.finalizeDelayMs = opts.finalizeDelayMs ?? 1_500;
     const envToken = (typeof process !== "undefined" && process.env && process.env.OOTLE_WALLETD_TOKEN) || undefined;
     this.token = opts.token ?? envToken ?? null;
+    this.tokenIsExternal = this.token !== null;
     this.permissions = opts.permissions ?? ["Admin"];
     this.credentials = opts.credentials ?? "None";
   }
@@ -176,7 +183,18 @@ export class WalletdClient {
     }
     // If a previously-minted token has expired, re-mint it once and retry the call transparently,
     // so a long-lived client (the dashboard server) doesn't fail every op until it's restarted.
-    if (!retriedAuth && this.token && method !== "auth.request" && isAuthError(out.error?.message)) {
+    // Two exclusions (D-5):
+    //  • a REAL (state-changing) `submit_manifest`: its error may merely *look* like an auth failure
+    //    — the engine's template "Access denied"/"Unauthorized" shares the substring — while the tx
+    //    has already landed, so resubmitting it would double-spend (H5). Surface it instead.
+    //  • an externally-supplied token: re-minting would escalate a least-privilege token to the
+    //    configured `permissions` (non-custodial). Surface it instead.
+    const isRealSubmit =
+      method === "transactions.submit_manifest" && (params as any)?.dry_run === false;
+    if (
+      !retriedAuth && this.token && !this.tokenIsExternal && !isRealSubmit &&
+      method !== "auth.request" && isAuthError(out.error?.message)
+    ) {
       this.token = null;
       await this.connect();
       return this.rpc(method, params, true);
@@ -350,7 +368,14 @@ export class WalletdClient {
       // FAILURE, and reject reasons are now objects a substring scan can't read.
       const got = await this.getResult(txId);
       if (got.status === "accept") return got.result;
-      if (got.status === "reject") throw new ChainError(got.reason ?? "transaction rejected");
+      if (got.status === "reject") {
+        // A finalized chain Reject is a DEFINITIVE verdict: the tx moved no funds, so the caller may
+        // safely record it as a hard failure. Flag it `chainRejected` so the server can tell a real
+        // chain rejection apart from a post-submit transport blip (which must stay UNKNOWN). (S-1)
+        const err = new ChainError(got.reason ?? "transaction rejected");
+        (err as any).chainRejected = true;
+        throw err;
+      }
       await sleep(this.finalizeDelayMs);
     }
     const err = new ChainError(`transaction ${txId} did not finalize within the confirmation window`);
