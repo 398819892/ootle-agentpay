@@ -195,9 +195,14 @@ need a real shared store with atomic idempotency (DB / Redis) + a distributed lo
    ops) but O(n) write cost and no compaction/rotation. **Recommendation:** append-log or SQLite, with
    archival of terminal records, before sustained high volume. (Already flagged in `docs/custody.md`.)
 
-5. **Amounts above 2^53 lose precision on the chain *read* path.** *(pre-existing, documented)*
-   `readChainBudget` takes caps/spend as JS numbers from the CBOR substate. Treasury is read as an exact
-   string; caps/spend are not. Not exercised at devnet amounts. See `docs/custody.md` §state-model.
+5. **Amounts above 2^53 on the chain *read* path.** *(guarded 2026-11-03; lossless fix post-mainnet)*
+   `readChainBudget` takes caps/spend as JS numbers from the CBOR substate (the walletd RPC response is
+   decoded with `JSON.parse`, lossy above 2^53); treasury is read as an exact string. `substate.js`
+   now **refuses** a cap/spend outside JS safe-integer range (throws → caller falls back to cache) rather
+   than display a silently-rounded value, so the "silently wrong" path is closed. The exact-value fix is
+   a bigint-aware parse at the RPC boundary (`clients/ts/src/walletd.ts` `rpc()`), which needs a dist
+   rebuild + SDK parity — tracked for post-mainnet. Enforcement is chain-side and exact regardless; this
+   is display only, and never trips at realistic cap sizes. See `docs/custody.md` §state-model.
 
 ## Go-live criteria (what must be green before real money)
 

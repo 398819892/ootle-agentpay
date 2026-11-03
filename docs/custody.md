@@ -280,9 +280,12 @@ exercises the same lifecycle, used here for the deliberately-rejected cases.)
       store would plug in.
 - [ ] **On-chain idempotency.** Dedup is server-side; the template does not reject a replayed invoice
       id on chain. A fully compromised/duplicated server could still submit twice.
-- [ ] **Large-value read precision.** Caps/spend read back from the CBOR substate as JS numbers
+- [~] **Large-value read precision.** Caps/spend read back from the CBOR substate as JS numbers
       (precision loss above 2^53 on the read path only); treasury is exact (string). Amounts on the
-      *write* path are already BigInt-exact end to end.
+      *write* path are already BigInt-exact end to end. **Guarded (2026-11-03):** `substate.js` now
+      throws on a cap/spend outside JS safe-integer range (→ cache fallback) instead of showing a
+      silently-rounded number. Remaining for a full fix: a bigint-aware JSON parse at the walletd RPC
+      boundary (`clients/ts/src/walletd.ts`), needing a dist rebuild + SDK parity — post-mainnet.
 
 ---
 

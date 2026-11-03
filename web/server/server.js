@@ -732,8 +732,10 @@ async function readChainBudget(component) {
   }
   const window = windowStatus({ dailyCap, spentInWindow, windowStartEpoch, epochsPerWindow, currentEpoch });
   return {
-    // Note: caps/spend come back as JS numbers from the CBOR substate (a known residual: values
-    // above 2^53 would lose precision on this read path — see docs). Treasury is a string and exact.
+    // Note: caps/spend come back as JS numbers from the CBOR substate. `parseBudgetState` now REFUSES
+    // a value outside JS safe-integer range (throws → we fall back to cache) instead of surfacing a
+    // silently-rounded one; the lossless fix (bigint parse at the RPC boundary) is tracked post-mainnet.
+    // Treasury is a string and exact. See docs/stability.md §5 / custody.md.
     perTxCap: String(perTxCap),
     dailyCap: String(dailyCap),
     spentInWindow: String(window.spentInWindow), // effective (0 once the window has lazily elapsed)

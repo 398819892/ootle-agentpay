@@ -58,6 +58,13 @@ check("throws when field 8 (whitelist) is not an array", throws(() => {
   drifted[8] = 123;
   parseBudgetState(drifted);
 }));
+// A cap/spend above JS's safe-integer range would be silently rounded by the RPC JSON.parse, so a
+// lossy read must THROW (→ caller falls back to cache) rather than report a precise-looking wrong value.
+check("throws when a cap exceeds JS safe-integer precision (lossy read)", throws(() => {
+  const big = validState.slice();
+  big[4] = 2 ** 53; // daily_cap beyond Number.MAX_SAFE_INTEGER (2^53-1)
+  parseBudgetState(big);
+}));
 check("throws when field 0 (vault) is not an address", throws(() => parseBudgetState([1, 2, 3, 4, 5, 6, 7, 8, [], false, []])));
 check("throws on a too-short state", throws(() => parseBudgetState([tag("ab".repeat(32)), 1, 2])));
 check("throws on a non-array", throws(() => parseBudgetState(null)));

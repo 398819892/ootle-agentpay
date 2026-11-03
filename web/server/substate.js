@@ -62,6 +62,15 @@ function parseBudgetState(state) {
     if (typeof v !== "number") {
       throw new Error(`unexpected budget component layout: field ${i} (${name}) is ${typeof v}, expected number`);
     }
+    // The walletd RPC response is decoded with JSON.parse (clients/ts walletd.ts `rpc()`), so these
+    // base-unit Amount / epoch fields arrive as JS numbers — lossy above 2^53. A cap/spend that large
+    // would be silently ROUNDED here; refuse it loudly (the caller falls back to cache) rather than
+    // display a precise-looking but wrong figure. The lossless fix is a bigint-aware parse at the RPC
+    // boundary (tracked post-mainnet: docs/stability.md §5 / custody.md). Realistic caps are tiny, so
+    // this never trips in practice — it only closes the "silently wrong" path, matching #16's intent.
+    if (!Number.isSafeInteger(v)) {
+      throw new Error(`unexpected budget component layout: field ${i} (${name}) = ${v} exceeds JS safe-integer precision (a lossy read; refusing it)`);
+    }
     return v;
   };
   const perTxCap = num(3, "per_tx_cap");
