@@ -5,7 +5,7 @@ exports.OnChainBudget = exports.XTR = void 0;
  * On-chain budget adapter — the phase-2 (on-chain conditions) path.
  *
  * Backs the budget with the **AgentBudget** Ootle template, so the per-transaction cap, the
- * rolling daily cap, the merchant whitelist and the kill switch are all enforced **on chain** by
+ * per-window spending cap (fixed epoch window), the merchant whitelist and the kill switch are all enforced **on chain** by
  * the validator — the agent's client cannot override them. A 1:1 port of `OnChainBudget` in the
  * Python SDK's `agentpay/onchain.py`: identical RPC methods, manifest strings and event parsing.
  */
