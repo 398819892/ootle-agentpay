@@ -28,7 +28,10 @@ const readAmt = (id) => {
 const amtBig = (v) => {
   try { return BigInt(String(v ?? "").trim() || "0"); } catch { return 0n; }
 };
-const UNIT = "XTR";
+// Display ticker for the native budget resource. Devnet/testnet shows tTARI (matches the SDK's
+// balance() default and docs/devnet.md); mainnet branding would be $TARI. Display-only — the
+// on-chain manifest keyword is handled separately in the SDK/client (TARI, with XTR as an alias).
+const UNIT = "tTARI";
 
 /* ============================================================================
    i18n — a tiny, zero-dependency dictionary layer.
