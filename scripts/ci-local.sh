@@ -124,18 +124,15 @@ run_sdk() {
   if [ ! -d "$REPO_ROOT/sdk" ]; then record "sdk (pytest)" FAIL "" "no sdk/"; return; fi
   if ! command -v "$PYTHON" >/dev/null 2>&1; then record "sdk (pytest)" FAIL "" "$PYTHON not found"; return; fi
   local log="$LOGDIR/sdk.log"
-  # test_keys.py imports the native `ootle` pkg (ootle-py, needs Python >=3.13); it's absent on
-  # the dev box, so it fails COLLECTION only. --continue-on-collection-errors lets the ~46 pure
-  # stdlib tests run and still fails the run on any real test failure.
-  ( cd "$REPO_ROOT/sdk" && "$PYTHON" -m pytest -q --continue-on-collection-errors ) >"$log" 2>&1
+  # test_keys.py imports the native `ootle` pkg (ootle-py, needs Python >=3.13); it's absent on the
+  # dev box. Skip it with --ignore (NOT --continue-on-collection-errors, which would also swallow a
+  # REAL collection error elsewhere as green), then gate on pytest's own EXIT CODE — so a genuine
+  # failure or error fails the suite instead of being masked by grepping for "failed". (D-11)
+  ( cd "$REPO_ROOT/sdk" && "$PYTHON" -m pytest -q --ignore=tests/test_keys.py ) >"$log" 2>&1
   local rc=$?
   local passed; passed=$(grep -Eo '[0-9]+ passed' "$log" | tail -1 | grep -Eo '[0-9]+'); passed=${passed:-0}
-  local collerr=""; grep -q "error" "$log" && collerr="$(grep -Eo '[0-9]+ error' "$log" | tail -1)"
-  local note=""
-  [ -n "$collerr" ] && note="($collerr — test_keys needs ootle-py / py≥3.13)"
-  # Pass if pytest reported >0 passed and the only non-pass outcome is the known collection error.
-  if [ "$passed" -gt 0 ] && ! grep -Eq '[0-9]+ failed' "$log"; then
-    record "sdk (pytest)" PASS "$passed" "$note"
+  if [ $rc -eq 0 ]; then
+    record "sdk (pytest)" PASS "$passed" "(test_keys.py skipped — needs ootle-py / py≥3.13)"
     TOTAL_TESTS=$((TOTAL_TESTS + passed))
   else
     record "sdk (pytest)" FAIL "" "pytest failed (rc=$rc)"
@@ -150,12 +147,13 @@ run_mcp() {
   if [ ! -d "$root/tests" ]; then record "mcp (pytest)" SKIP "" "no integrations/agentpay_mcp/tests"; return; fi
   if ! command -v "$PYTHON" >/dev/null 2>&1; then record "mcp (pytest)" FAIL "" "$PYTHON not found"; return; fi
   local log="$LOGDIR/mcp.log"
-  # The backend tests stub the SDK and import only `agentpay_mcp.backend` (no `mcp` framework needed).
-  # --continue-on-collection-errors keeps a missing optional dep from failing the whole run.
-  ( cd "$root" && "$PYTHON" -m pytest -q --continue-on-collection-errors tests ) >"$log" 2>&1
+  # The backend/config tests stub the SDK and import only `agentpay_mcp.{backend,config}` (no `mcp`
+  # framework needed). Gate on pytest's EXIT CODE — a collection error or a real failure must fail the
+  # suite, not slip through a grep-for-"failed" (a collection ERROR prints no "failed" line). (D-11)
+  ( cd "$root" && "$PYTHON" -m pytest -q tests ) >"$log" 2>&1
   local rc=$?
   local passed; passed=$(grep -Eo '[0-9]+ passed' "$log" | tail -1 | grep -Eo '[0-9]+'); passed=${passed:-0}
-  if [ "$passed" -gt 0 ] && ! grep -Eq '[0-9]+ failed' "$log"; then
+  if [ $rc -eq 0 ]; then
     record "mcp (pytest)" PASS "$passed"
     TOTAL_TESTS=$((TOTAL_TESTS + passed))
   else

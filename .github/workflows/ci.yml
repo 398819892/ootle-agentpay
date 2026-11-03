@@ -4,12 +4,13 @@
 #   `ubuntu-latest` runner and mirrors the suites that pass locally (see `make ci` /
 #   scripts/ci-local.sh and docs/ci.md).
 #
-# It runs the same four suites as the local CI, but each in its own job for clear, cached,
+# It runs the same suites as the local CI, but each in its own job for clear, cached,
 # parallel feedback:
 #   1. templates  — cargo test for the three Rust→WASM Tari templates (wasmer, Linux only)
 #   2. sdk        — pytest for the Python SDK (ootle-agentpay)
-#   3. web        — the zero-dependency Node security test suite for the dashboard
-#   4. ts-client  — a clean `tsc` build (type-check) of the zero-dependency TS client
+#   3. mcp        — pytest for the MCP server backend (integrations/agentpay_mcp)
+#   4. web        — every web/server/*.test.js (the dashboard's zero-dependency Node suites)
+#   5. ts-client  — a clean `tsc` build + the TS client's node --test suites
 #
 # Why Linux only: the Tari engine's template test tooling pins wasmer's cranelift backend,
 # which does not compile on Windows/macOS (see docs/devnet.md). Upstream tari-project CI is
@@ -103,6 +104,29 @@ jobs:
         # on a dev box that has ootle-py. All other suites must pass.
         run: python -m pytest -q --ignore=tests/test_keys.py
 
+  # ------------------------------------------------------------------ MCP server
+  mcp:
+    name: mcp (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # The backend/config tests stub the SDK and import only `agentpay_mcp.{backend,config}` plus the
+      # SDK's `agentpay` (resolved via the test's own sys.path to ../../../sdk/src) — no `mcp` framework
+      # and no network needed. pytest's exit code gates the job (no grep-for-"failed" masking).
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: pytest (MCP backend + config)
+        working-directory: integrations/agentpay_mcp
+        run: python -m pytest -q tests
+
   # ------------------------------------------------------------------ web dashboard
   web:
     name: web (node security tests)
@@ -116,27 +140,24 @@ jobs:
           node-version: "20"
 
       # Zero dependencies: each suite boots the real server (Node built-ins only) on a random port
-      # against throwaway state. security = the web-security boundary; xff_proxy = single-hop proxy
-      # keys the throttle on the right-most XFF, not the forgeable left-most (N-2); csrf_noauth = the
-      # cross-site guards (Origin + JSON-only) hold even with no password (N-11); audit = high-risk
-      # audit durability; stepup = the step-up gate; substate = the strict chain-state parse (#16);
-      # concurrency = reads not blocked by an in-flight write (#11); reconcile = an ambiguous
-      # ("unknown") open is recovered and mounted, and a second open is refused meanwhile (#3);
-      # session_reconcile = a reconciled unknown issueSession leaves the key issued (N-1);
-      # apikeys = API key -> on-chain session mapping (role gate / 404 / 409 / key listing). No install.
+      # against throwaway state, landing before any chain call (no walletd needed). We run EVERY
+      # web/server/*.test.js by glob rather than a hand-maintained list, so a newly added suite
+      # (multitenant, xff_proxy, csrf_noauth, session_reconcile, …) can never be silently left out of
+      # CI. Each script exits non-zero on failure; we run them all, then fail if any did. Mirrors
+      # scripts/ci-local.sh run_web.
       - name: node test suites
         working-directory: web
         run: |
-          node server/security.test.js
-          node server/xff_proxy.test.js
-          node server/csrf_noauth.test.js
-          node server/audit.test.js
-          node server/stepup.test.js
-          node server/substate.test.js
-          node server/concurrency.test.js
-          node server/reconcile.test.js
-          node server/session_reconcile.test.js
-          node server/apikeys.test.js
+          failed=0
+          for t in server/*.test.js; do
+            echo "::group::$t"
+            node "$t" || failed=1
+            echo "::endgroup::"
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::one or more web/server test suites failed"
+            exit 1
+          fi
 
   # ------------------------------------------------------------------ TS client
   ts-client:
