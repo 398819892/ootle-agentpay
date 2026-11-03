@@ -382,6 +382,13 @@ const I18N = {
     t_withdrawn: "Withdrawn",
     t_withdrawn_msg: (p) => `${p.amount} ${p.unit} returned to the owner.`,
     t_withdraw_failed: "Withdraw failed",
+    /* submitted-but-unknown (journaled "pending"): the tx MAY have landed — never say "confirmed",
+     * and tell the user not to resubmit (a retry reuses the idempotency key; the server dedups). */
+    t_pending: "Submitted — not yet confirmed",
+    t_pending_pay_msg: (p) => `${p.amount} ${p.unit} to ${p.merchant} was submitted but hasn't confirmed yet. Don't resubmit — it may already be on chain; it will settle on its own.`,
+    t_pending_topup_msg: (p) => `Top-up of ${p.amount} ${p.unit} was submitted but hasn't confirmed yet. Don't resubmit — it may already be on chain.`,
+    t_pending_open_msg: (p) => `Opening the budget (${p.amount} ${p.unit}) was submitted but hasn't confirmed yet. Don't resubmit — it may already be on chain.`,
+    t_pending_withdraw_msg: (p) => `Withdrawal of ${p.amount} ${p.unit} was submitted but hasn't confirmed yet. Don't resubmit — it may already be on chain.`,
 
     /* step-up confirmation */
     stepup_title: "Confirm this action",
@@ -700,6 +707,13 @@ const I18N = {
     t_withdrawn: "已提现",
     t_withdrawn_msg: (p) => `${p.amount} ${p.unit} 已退回给所有者。`,
     t_withdraw_failed: "提现失败",
+    /* 已提交但结果未知(记为 pending):交易可能已经上链——绝不能说“已确认”,并提示用户不要重复提交
+     * (重试会复用同一幂等键,服务端据此去重)。 */
+    t_pending: "已提交——尚未确认",
+    t_pending_pay_msg: (p) => `向 ${p.merchant} 支付 ${p.amount} ${p.unit} 已提交,但尚未确认。请勿重复提交——它可能已经上链,稍后会自动结算。`,
+    t_pending_topup_msg: (p) => `充值 ${p.amount} ${p.unit} 已提交,但尚未确认。请勿重复提交——它可能已经上链。`,
+    t_pending_open_msg: (p) => `开通预算(${p.amount} ${p.unit})已提交,但尚未确认。请勿重复提交——它可能已经上链。`,
+    t_pending_withdraw_msg: (p) => `提现 ${p.amount} ${p.unit} 已提交,但尚未确认。请勿重复提交——它可能已经上链。`,
 
     /* step-up confirmation */
     stepup_title: "确认此操作",
@@ -867,7 +881,11 @@ async function idemPost(path, body, op, sig) {
   if (!_idemSlots[slot]) _idemSlots[slot] = op + ":" + _rid();
   try {
     const r = await api(path, { ...body, idempotencyKey: _idemSlots[slot] });
-    delete _idemSlots[slot]; // success → a later identical submit is a genuinely new op
+    // A journaled "unknown" comes back HTTP 200 with {pending:true}: the tx MAY have landed. That is
+    // the AMBIGUOUS case — keep the key so a manual retry reuses it and the server dedups, instead of
+    // minting a fresh key and paying twice. Only a DEFINITIVE success rotates it. (Once the op resolves,
+    // the next identical submit returns the server's cached result — not pending — and rotates here.) (N-3)
+    if (!(r && r.pending === true)) delete _idemSlots[slot];
     return r;
   } catch (err) {
     // Definitive "it did not happen" statuses let the key rotate, so the user can fix the input and
@@ -2066,7 +2084,7 @@ function wireCreate() {
     if (!gate) return;
     await withPending(el("f-submit"), t("p_opening"), async () => {
       try {
-        S.data = await api("/api/budget", {
+        const r = await api("/api/budget", {
           fund,
           perTxCap,
           dailyCap,
@@ -2074,9 +2092,17 @@ function wireCreate() {
           whitelist: draftWhitelist,
           confirmToken: gate.token,
         });
-        toast("success", t("t_budget_opened"), t("t_budget_opened_msg", { amount: fmt(fund), unit: UNIT }));
-        draftWhitelist = ["shop"];
-        go("overview");
+        S.data = r;
+        if (r && r.pending) {
+          // The open was submitted but hasn't confirmed, so no budget is mounted yet. Stay on the form
+          // with a pending notice rather than navigating to an empty overview that invites a re-open.
+          toast("info", t("t_pending"), t("t_pending_open_msg", { amount: fmt(fund), unit: UNIT }));
+          render();
+        } else {
+          toast("success", t("t_budget_opened"), t("t_budget_opened_msg", { amount: fmt(fund), unit: UNIT }));
+          draftWhitelist = ["shop"];
+          go("overview");
+        }
       } catch (err) {
         toast("error", t("t_open_failed"), err.message);
       }
@@ -2140,7 +2166,12 @@ function wirePay() {
           vals.merchant + "|" + vals.amount + "|" + (vals.memo || ""),
         );
         S.data = r;
-        toast("success", t("t_payment_sent"), t("t_payment_sent_msg", { amount: fmt(vals.amount), unit: UNIT, merchant: esc(vals.merchant) }));
+        if (r && r.pending) {
+          // Submitted but UNKNOWN — do not claim it was paid; the retry path keeps the idem key.
+          toast("info", t("t_pending"), t("t_pending_pay_msg", { amount: fmt(vals.amount), unit: UNIT, merchant: esc(vals.merchant) }));
+        } else {
+          toast("success", t("t_payment_sent"), t("t_payment_sent_msg", { amount: fmt(vals.amount), unit: UNIT, merchant: esc(vals.merchant) }));
+        }
         render();
       } catch (err) {
         if (err.status === 422) {
@@ -2220,9 +2251,11 @@ function wireGovernance() {
       if (!ok) return;
       await withPending(el("g-topup-btn"), t("p_topping"), async () => {
         try {
-          S.data = await idemPost("/api/top-up", { amount }, "topUp", String(amount));
+          const r = await idemPost("/api/top-up", { amount }, "topUp", String(amount));
+          S.data = r;
           render();
-          toast("success", t("t_topped_up"), t("t_topped_up_msg", { amount: fmt(amount), unit: UNIT }));
+          if (r && r.pending) toast("info", t("t_pending"), t("t_pending_topup_msg", { amount: fmt(amount), unit: UNIT }));
+          else toast("success", t("t_topped_up"), t("t_topped_up_msg", { amount: fmt(amount), unit: UNIT }));
         } catch (err) {
           toast("error", t("t_topup_failed"), err.message);
         }
@@ -2271,9 +2304,11 @@ function wireGovernance() {
     if (!res) return;
     await withPending(el("g-withdraw"), t("p_withdrawing"), async () => {
       try {
-        S.data = await api("/api/withdraw", { amount, confirmToken: res.token });
+        const r = await api("/api/withdraw", { amount, confirmToken: res.token });
+        S.data = r;
         render();
-        toast("success", t("t_withdrawn"), t("t_withdrawn_msg", { amount: fmt(amount), unit: UNIT }));
+        if (r && r.pending) toast("info", t("t_pending"), t("t_pending_withdraw_msg", { amount: fmt(amount), unit: UNIT }));
+        else toast("success", t("t_withdrawn"), t("t_withdrawn_msg", { amount: fmt(amount), unit: UNIT }));
       } catch (err) {
         toast("error", t("t_withdraw_failed"), err.message);
       }
