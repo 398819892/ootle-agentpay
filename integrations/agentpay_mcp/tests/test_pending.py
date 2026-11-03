@@ -76,6 +76,16 @@ def test_accept_is_ok():
     assert r.status == "accepted"
 
 
+def test_policy_violation_is_rejected_not_chain_error():
+    # A client-side PolicyViolation from pay() (pre-submit, no funds moved) must surface as a definitive
+    # rejection — ok=False, status="rejected" — not fall through to an "error_type: chain_error". (review)
+    from agentpay.errors import PolicyViolation
+    r = _wallet(exc=PolicyViolation(("amount exceeds the per-transaction cap",))).pay_merchant(MERCHANT, 10)
+    assert r.ok is False
+    assert r.status == "rejected"
+    assert "per-transaction cap" in (r.reason or "")
+
+
 def test_payment_status_maps_three_states():
     w = _wallet()
     w.budget.client = StubClient(("accept", None))

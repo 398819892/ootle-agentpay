@@ -204,8 +204,10 @@ def get_budget_status() -> dict:
     """Report the agent's remaining budget and the rules it must stay within.
 
     The caps and whitelist are the owner's declared policy; the binding copy is enforced on
-    chain. ``spent_in_window`` and ``revoked`` are confirmed against the live chain. On a setup
-    or chain problem, returns a structured error object instead."""
+    chain. ``revoked`` is confirmed against the live chain (a dry-run probe). ``spent_in_window``
+    is this process's last-seen estimate — it resets on restart and does NOT reflect spends by other
+    sessions of the same budget, so treat it as a local estimate, not an authoritative chain read.
+    On a setup or chain problem, returns a structured error object instead."""
     w, err = _wallet_or_error()
     if err:
         return err

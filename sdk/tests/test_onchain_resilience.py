@@ -133,3 +133,28 @@ def test_run_invalid_transaction_raises_chain_rejected(monkeypatch):
         RpcFake(seq).run("m", {})
     assert getattr(ei.value, "chain_rejected", False) is True
     assert getattr(ei.value, "pending", False) is False
+
+
+# --- a definitive auth failure on a real submit is a HARD failure, not pending (review / TS D-13 twin)
+
+def test_real_submit_auth_failure_is_hard_not_pending():
+    # A 401/403 (bad / expired token) is rejected at walletd's auth layer BEFORE the manifest is
+    # dispatched → the tx never landed, so it is a hard failure, never `pending` (which would tell a
+    # caller "it may have landed, reconcile" for a request that was never submitted).
+    def submit(_params):
+        e = ChainError("walletd HTTP 401 for transactions.submit_manifest: Expired token")
+        e.auth_failed = True
+        raise e
+
+    with pytest.raises(ChainError) as ei:
+        RpcFake({SUBMIT: submit}).run("m", {})
+    assert getattr(ei.value, "pending", False) is False
+    assert getattr(ei.value, "auth_failed", False) is True
+
+
+def test_real_submit_without_txid_is_pending_not_polled():
+    # Submit reported success but returned no transaction id: unknown (may have landed) — never a
+    # 120x poll of get_result(None).
+    with pytest.raises(ChainError) as ei:
+        RpcFake({SUBMIT: {"result": {}}}).run("m", {})
+    assert getattr(ei.value, "pending", False) is True

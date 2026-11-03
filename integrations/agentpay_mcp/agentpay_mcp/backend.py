@@ -41,7 +41,7 @@ def _ensure_sdk_on_path() -> None:
 _ensure_sdk_on_path()
 
 try:
-    from agentpay.errors import ChainError  # noqa: E402
+    from agentpay.errors import ChainError, PolicyViolation  # noqa: E402
     from agentpay.onchain import OnChainBudget, WalletdClient  # noqa: E402
 except ImportError as exc:  # pragma: no cover - friendly message when the SDK can't be found
     raise ImportError(
@@ -102,6 +102,11 @@ class AgentWallet:
 
         try:
             res = self.budget.pay(merchant, amount, memo=memo)
+        except PolicyViolation as e:
+            # A client-side policy precheck refused this BEFORE any submit (e.g. a stale daily-window
+            # mirror after the window rolled). No funds moved and it is NOT a chain fault — report it as
+            # a definitive rejection with the broken rule, not an "error_type: chain_error". (review)
+            return PayResult(False, merchant, amount, memo, reason=str(e), status="rejected")
         except ChainError as e:                      # race: chain state changed between dry-run and submit
             if getattr(e, "pending", False):
                 # Submitted, but the on-chain outcome is UNKNOWN (transport blip / timeout). The tx may

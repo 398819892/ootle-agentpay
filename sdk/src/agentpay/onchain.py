@@ -244,9 +244,16 @@ class WalletdClient:
             except Exception:
                 pass
             snippet = raw.decode("utf-8", "replace")[:200].strip()
-            raise ChainError(
+            err = ChainError(
                 f"walletd HTTP {e.code} for {method}" + (f": {snippet}" if snippet else "")
-            ) from e
+            )
+            # 401/403 = the auth layer rejected the request BEFORE dispatch (bad / expired token): the
+            # method never ran, so a REAL submit that hits this definitely did NOT land. Flag it so the
+            # submit path surfaces it as a hard failure, not `pending` (which would wrongly tell a caller
+            # "it may have landed, go reconcile"). Mirrors the TS D-13 guard.
+            if e.code in (401, 403):
+                err.auth_failed = True
+            raise err from e
         except urllib.error.URLError as e:
             # Connection refused / DNS / socket timeout: the daemon was unreachable. The real-submit
             # path promotes a thrown transport error to `pending` (never a blind resubmit).
@@ -336,7 +343,12 @@ class WalletdClient:
             # the manifest may already have reached the node and created a tx while only the response
             # was lost. Surface as pending (unknown) — reconcile by tx id, never blind-resubmit. (D-1)
             pe = e if isinstance(e, ChainError) else ChainError(str(e))
-            pe.pending = True  # unknown: reconcile, never auto-resubmit (H5)
+            # Exception: a DEFINITIVE auth failure (HTTP 401/403 — bad / expired token) is rejected at
+            # the auth layer before dispatch, so the tx never landed. It is a hard failure, NOT pending:
+            # marking it pending would wrongly tell the caller "it may have landed, reconcile" for a
+            # request that was never submitted. (review follow-up; mirrors the TS D-13 guard)
+            if not getattr(e, "auth_failed", False):
+                pe.pending = True  # unknown: reconcile, never auto-resubmit (H5)
             raise pe from e
         err = resp.get("error")
         if err and _is_transient(err.get("message", "")):
@@ -358,6 +370,13 @@ class WalletdClient:
         if "error" in r:
             raise ChainError(r["error"]["message"])
         tx_id = r["result"].get("transaction_id") or r["result"].get("hash")
+        if not tx_id:
+            # Submit reported success but carried no transaction id: we can neither poll nor reconcile
+            # it by id, yet it MAY have landed — so it is UNKNOWN (pending), never a silent 120x poll of
+            # `None`. (review follow-up)
+            e = ChainError("submit returned no transaction id; outcome unknown")
+            e.pending = True
+            raise e
         for _ in range(120):   # esmeralda finalization can be slow under congestion
             try:
                 res = self._rpc("transactions.get_result", {"transaction_id": tx_id}).get("result")

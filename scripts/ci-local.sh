@@ -32,7 +32,7 @@
 #     TEMPLATE_BUILD_DIR   warm ext4 dir holding per-template build caches (default /root/ootle)
 #     TS_BUILD_DIR         warm ext4 dir for the clients/ts tsc build      (default $TEMPLATE_BUILD_DIR/agentpay-ts-build)
 #     PYTHON               python interpreter for the SDK suite            (default python3)
-#     SKIP_TEMPLATES / SKIP_SDK / SKIP_WEB / SKIP_TS = 1   skip that suite
+#     SKIP_TEMPLATES / SKIP_SDK / SKIP_MCP / SKIP_WEB / SKIP_TS = 1   skip that suite
 #     NO_SYNC=1            test the warm dirs as-is, don't rsync repo sources in
 #
 # It never touches a running swarm: no suite here needs the chain (the web test boots its
@@ -143,6 +143,27 @@ run_sdk() {
   fi
 }
 
+# ================================================================ mcp
+run_mcp() {
+  step "MCP server backend — pytest (integrations/agentpay_mcp/tests)"
+  local root="$REPO_ROOT/integrations/agentpay_mcp"
+  if [ ! -d "$root/tests" ]; then record "mcp (pytest)" SKIP "" "no integrations/agentpay_mcp/tests"; return; fi
+  if ! command -v "$PYTHON" >/dev/null 2>&1; then record "mcp (pytest)" FAIL "" "$PYTHON not found"; return; fi
+  local log="$LOGDIR/mcp.log"
+  # The backend tests stub the SDK and import only `agentpay_mcp.backend` (no `mcp` framework needed).
+  # --continue-on-collection-errors keeps a missing optional dep from failing the whole run.
+  ( cd "$root" && "$PYTHON" -m pytest -q --continue-on-collection-errors tests ) >"$log" 2>&1
+  local rc=$?
+  local passed; passed=$(grep -Eo '[0-9]+ passed' "$log" | tail -1 | grep -Eo '[0-9]+'); passed=${passed:-0}
+  if [ "$passed" -gt 0 ] && ! grep -Eq '[0-9]+ failed' "$log"; then
+    record "mcp (pytest)" PASS "$passed"
+    TOTAL_TESTS=$((TOTAL_TESTS + passed))
+  else
+    record "mcp (pytest)" FAIL "" "pytest failed (rc=$rc)"
+    tail -n 25 "$log" | sed 's/^/        /'
+  fi
+}
+
 # ================================================================ web
 run_web() {
   step "Web dashboard — node test suites (web/server/*.test.js)"
@@ -171,12 +192,13 @@ run_web() {
 
 # ================================================================ clients/ts
 run_ts() {
-  step "TypeScript client — tsc build (type-check)"
+  step "TypeScript client — tsc build + node --test"
   local src="$REPO_ROOT/clients/ts"
-  if [ ! -f "$src/tsconfig.json" ]; then record "clients/ts (tsc build)" FAIL "" "no clients/ts"; return; fi
-  if ! command -v node >/dev/null 2>&1; then record "clients/ts (tsc build)" FAIL "" "node not found"; return; fi
-  # clients/ts has no unit tests; its "suite" is a clean tsc compile of the committed sources.
-  # npm install on the /mnt 9p mount corrupts node_modules, so build in a native-ext4 warm dir.
+  if [ ! -f "$src/tsconfig.json" ]; then record "clients/ts" FAIL "" "no clients/ts"; return; fi
+  if ! command -v node >/dev/null 2>&1; then record "clients/ts" FAIL "" "node not found"; return; fi
+  # A clean tsc compile AND the client's unit tests (resilience / four-state / D-5 / D-12 / D-13) —
+  # not just a type-check. npm install on the /mnt 9p mount corrupts node_modules, so build in a
+  # native-ext4 warm dir.
   local work="$TS_BUILD_DIR"
   local log="$LOGDIR/ts.log"
   mkdir -p "$work"
@@ -191,12 +213,22 @@ run_ts() {
     rm -rf dist
     ./node_modules/.bin/tsc -p tsconfig.json || exit 98
     [ -f dist/index.js ] || { echo "tsc produced no dist/index.js"; exit 99; }
+    # Execute the compiled unit tests, if any (node's built-in TAP runner).
+    if ls dist/*.test.js >/dev/null 2>&1; then
+      node --test dist/*.test.js || exit 96
+    fi
   ) >"$log" 2>&1
   local rc=$?
   if [ $rc -eq 0 ]; then
-    record "clients/ts (tsc build)" PASS "build ok"
+    local n; n=$(grep -Eo '^# pass [0-9]+' "$log" | grep -Eo '[0-9]+' | awk '{s+=$1} END{print s+0}'); n=${n:-0}
+    if [ "$n" -gt 0 ]; then
+      record "clients/ts (tsc + node --test)" PASS "$n"
+      TOTAL_TESTS=$((TOTAL_TESTS + n))
+    else
+      record "clients/ts (tsc build)" PASS "build ok"
+    fi
   else
-    record "clients/ts (tsc build)" FAIL "" "tsc build failed (rc=$rc)"
+    record "clients/ts (tsc + tests)" FAIL "" "build or tests failed (rc=$rc)"
     tail -n 25 "$log" | sed 's/^/        /'
   fi
 }
@@ -241,6 +273,7 @@ info "warm dir:  $TEMPLATE_BUILD_DIR"
 
 [ -n "${SKIP_TEMPLATES:-}" ] || run_templates
 [ -n "${SKIP_SDK:-}" ]       || run_sdk
+[ -n "${SKIP_MCP:-}" ]       || run_mcp
 [ -n "${SKIP_WEB:-}" ]       || run_web
 [ -n "${SKIP_TS:-}" ]        || run_ts
 [ -n "${SKIP_E2E:-}" ]       || run_e2e
