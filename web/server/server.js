@@ -268,6 +268,16 @@ function originAllowed(req) {
   if (ref) return hostMatches(ref, host);
   return true; // no Origin/Referer: not a browser cross-site POST
 }
+// A request carries an entity body when it declares a non-zero Content-Length or a chunked encoding.
+function hasRequestBody(req) {
+  return Number(req.headers["content-length"] || 0) > 0 || Boolean(req.headers["transfer-encoding"]);
+}
+// The body (if any) must be JSON. A cross-site <form> or a `no-cors` fetch can only send a "simple"
+// content type (text/plain / x-www-form-urlencoded / multipart) — never application/json without a
+// CORS preflight we never answer — so requiring JSON blocks the forgeable cross-site body vector. (N-11)
+function contentTypeIsJson(req) {
+  return String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase() === "application/json";
+}
 
 // ---- security response headers ---------------------------------------------------------------
 // Applied to EVERY response (static assets and API). The CSP is strict on scripts — `script-src
@@ -2218,16 +2228,27 @@ const server = http.createServer(async (req, res) => {
 
   const key = `${req.method} ${urlPath}`;
 
-  // --- CSRF / cross-origin defense for cookie-authenticated, state-changing requests -----------
-  // Only meaningful when AUTH_ON (a cookie is the ambient credential being abused). Applies to all
-  // POSTs. Login is exempt from the TOKEN check (no session exists yet) but NOT from the Origin check,
-  // so login-CSRF from another origin is still refused. Reads (GET) carry no side effects.
-  if (AUTH_ON && req.method === "POST") {
+  // --- CSRF / cross-origin defense for ALL state-changing requests -----------------------------
+  // UNCONDITIONAL — not gated on AUTH_ON. On a no-password localhost dashboard the network position
+  // itself is the ambient credential: any web page can `fetch("http://127.0.0.1:PORT/api/withdraw")`,
+  // so "no cookie ⇒ nothing to abuse" is false. Two independent guards (N-11):
+  //   1) Origin/Referer must be same-origin. A browser sends Origin on every cross-site POST (no-cors
+  //      and <form> included), so a forged cross-site request is refused outright. A POST with no
+  //      Origin/Referer (a non-browser client) is let through — it is not a CSRF vector.
+  //   2) A POST that carries a body must be application/json (see contentTypeIsJson) — blocks the
+  //      forgeable <form>/no-cors body vector even if an Origin header were somehow absent.
+  // The CSRF *token* is additionally required when a session cookie is present (AUTH_ON). Login is
+  // exempt from the token check (no session yet) but NOT from Origin/Content-Type. Reads (GET) are exempt.
+  if (req.method === "POST") {
     if (!originAllowed(req)) {
       audit.append({ actor: "?", ip: clientIp(req), op: "request", tier: "auth", status: "denied", reason: "bad_origin" });
       return sendJson(res, 403, { error: "Cross-origin request refused." });
     }
-    const session = verifySession(parseCookies(req)[COOKIE_NAME]);
+    if (hasRequestBody(req) && !contentTypeIsJson(req)) {
+      audit.append({ actor: "?", ip: clientIp(req), op: "request", tier: "auth", status: "denied", reason: "bad_content_type" });
+      return sendJson(res, 415, { error: "Content-Type must be application/json." });
+    }
+    const session = AUTH_ON ? verifySession(parseCookies(req)[COOKIE_NAME]) : null;
     if (key !== "POST /api/login" && session && !csrfTokenOk(req, session.sid)) {
       audit.append({
         actor: `op:${session.sid.slice(0, 8)}`,
@@ -2393,7 +2414,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  ├─ walletd ${WALLETD_URL}`);
   console.log(`  ├─ owner   ${OWNER}`);
   console.log(`  ├─ auth    ${AUTH_ON ? "ON (DASHBOARD_PASSWORD set)" : "OFF — local dev mode, do NOT expose"}`);
-  console.log(`  ├─ csrf    ${AUTH_ON ? "ON — Origin check + X-CSRF-Token on every POST" : "OFF (no auth)"}`);
+  console.log(`  ├─ csrf    ${AUTH_ON ? "ON — Origin check + X-CSRF-Token on every POST" : "Origin + JSON-only on every POST (no token: no auth)"}`);
   console.log(
     `  ├─ proxy   ${
       !TRUSTED_PROXY || TRUSTED_PROXY.toLowerCase() === "false"

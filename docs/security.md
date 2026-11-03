@@ -86,18 +86,28 @@ are in **[`custody.md` §4](custody.md)**.
 ### Web-security boundary (beyond login)
 
 A password login with a signed HttpOnly cookie is the *base*; on top of it the dashboard adds the
-systematic web hardening a cookie-authenticated, fund-moving app needs. All of the following are
-active **whenever `DASHBOARD_PASSWORD` is set**; in open local-dev mode (no password) there is no
-ambient credential to abuse, so the CSRF/origin gate is off and the dev experience is unchanged.
+systematic web hardening a fund-moving app needs. The **cross-site guards — Origin/Referer and a
+JSON-only body — run on every state-changing POST regardless of whether a password is set.** On a
+no-password localhost dashboard the *network position itself* is the ambient credential (any web page
+can `fetch("http://127.0.0.1:PORT/api/withdraw")`), so a forged cross-site request must still be
+refused; "no cookie ⇒ nothing to abuse" is false. Only the synchronizer **token** needs a session, so
+it is active just when `DASHBOARD_PASSWORD` is set.
 
-- **CSRF defense (two independent checks on every state-changing POST).**
-  1. **Origin/Referer check** — a cross-site POST (`Origin` present and not matching the Host, or a
-     non-matching `Referer`) is refused with **403** before anything else. The request's own Host is
-     always allowed; `ALLOWED_ORIGINS` adds others for split-origin proxies. A request with *neither*
-     header is a non-browser client (curl, server-to-server), which is not subject to ambient-cookie
-     CSRF and still faces the auth + token checks.
-  2. **Synchronizer token** — a CSRF token bound to the session (`HMAC(SESSION_SECRET, "csrf:"+sid)`)
-     must be echoed in the `X-CSRF-Token` header. The SPA gets it from `/api/login` and
+- **CSRF defense (three checks on every state-changing POST).**
+  1. **Origin/Referer check (always on)** — a cross-site POST (`Origin` present and not matching the
+     Host, or a non-matching `Referer`) is refused with **403** before anything else. The request's own
+     Host is always allowed; `ALLOWED_ORIGINS` adds others for split-origin proxies. A request with
+     *neither* header is a non-browser client (curl, server-to-server), which is not subject to a
+     browser CSRF and is let through to the auth + token checks. A browser sends `Origin` on every
+     cross-site POST — including a `no-cors` `fetch` and a `<form>` submit — so this alone blocks the
+     web-page vector.
+  2. **JSON-only body (always on)** — a POST that carries a body must be `Content-Type: application/json`,
+     else **415**. A cross-site `<form>` or a `no-cors` `fetch` can only send a "simple" content type
+     (`text/plain` / `x-www-form-urlencoded` / `multipart`) — never `application/json` without a CORS
+     preflight the server never answers — so this blocks the forgeable body vector even if an `Origin`
+     header were somehow absent. (N-11)
+  3. **Synchronizer token (auth only)** — a CSRF token bound to the session (`HMAC(SESSION_SECRET,
+     "csrf:"+sid)`) must be echoed in the `X-CSRF-Token` header. The SPA gets it from `/api/login` and
      `/api/session`. It is **not** a readable secret cookie (so it is immune to sibling-subdomain
      cookie injection): a stolen cookie *without* the token — the CSRF case — is refused **403**.
   The session cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` whenever the connection is HTTPS

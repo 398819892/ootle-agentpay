@@ -117,7 +117,8 @@ jobs:
 
       # Zero dependencies: each suite boots the real server (Node built-ins only) on a random port
       # against throwaway state. security = the web-security boundary; xff_proxy = single-hop proxy
-      # keys the throttle on the right-most XFF, not the forgeable left-most (N-2); audit = high-risk
+      # keys the throttle on the right-most XFF, not the forgeable left-most (N-2); csrf_noauth = the
+      # cross-site guards (Origin + JSON-only) hold even with no password (N-11); audit = high-risk
       # audit durability; stepup = the step-up gate; substate = the strict chain-state parse (#16);
       # concurrency = reads not blocked by an in-flight write (#11); reconcile = an ambiguous
       # ("unknown") open is recovered and mounted, and a second open is refused meanwhile (#3);
@@ -128,6 +129,7 @@ jobs:
         run: |
           node server/security.test.js
           node server/xff_proxy.test.js
+          node server/csrf_noauth.test.js
           node server/audit.test.js
           node server/stepup.test.js
           node server/substate.test.js
