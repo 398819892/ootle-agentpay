@@ -18,10 +18,49 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import sys
 import time
 import urllib.error
 import urllib.request
 from typing import Any, Optional
+
+
+# ---- shared config (fill once, every surface reads it) -----------------------------------------
+# A tiny, dependency-free reader for the repo's shared `agentpay.config.json`, so this HTTP example
+# resolves the SAME base URL / API key as the SDK, the MCP server and the dashboard. Precedence:
+# AGENTPAY_* env var > agentpay.config.json > the default passed here. (Mirrors agentpay.config.)
+def _shared_config() -> dict:
+    path = os.environ.get("AGENTPAY_CONFIG")
+    if not path:
+        local = os.path.join(os.getcwd(), "agentpay.config.json")
+        if os.path.isfile(local):
+            path = local
+        else:
+            if sys.platform.startswith("win"):
+                base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+            elif sys.platform == "darwin":
+                base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+            else:
+                base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+            user = os.path.join(base, "agentpay", "agentpay.config.json")
+            path = user if os.path.isfile(user) else None
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def resolve(env_name: str, file_key: str, default: str = "") -> str:
+    """One shared-config scalar: AGENTPAY_* env var > agentpay.config.json[file_key] > default."""
+    v = os.environ.get(env_name)
+    if v:
+        return v
+    fv = _shared_config().get(file_key)
+    return str(fv) if fv not in (None, "") else default
 
 
 class AgentPayApiError(Exception):
@@ -154,10 +193,10 @@ class AgentPayApi:
 
 if __name__ == "__main__":
     # A copy-paste runnable flow: read budget → pay → poll → idempotent retry.
-    base = os.environ.get("AGENTPAY_URL", "http://localhost:8787")
-    key = os.environ.get("AGENTPAY_API_KEY")
+    base = resolve("AGENTPAY_URL", "api_url", "http://localhost:8787")
+    key = resolve("AGENTPAY_API_KEY", "api_key")
     if not key:
-        raise SystemExit("Set AGENTPAY_API_KEY (an agent key issued by the service owner).")
+        raise SystemExit("Set AGENTPAY_API_KEY (or api_key in agentpay.config.json) — an agent key issued by the service owner.")
     api = AgentPayApi(base, key)
 
     bud = api.budget()

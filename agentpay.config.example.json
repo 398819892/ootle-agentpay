@@ -1,0 +1,17 @@
+{
+  "_comment": "Shared AgentPay config — copy to 'agentpay.config.json' (gitignored) and fill in. Read by the SDK, the MCP server AND the HTTP server with identical precedence: AGENTPAY_* env var > this file > defaults.json (templates) > built-in default. Put the file in the working directory, or at the OS user-config dir (%APPDATA%\\agentpay\\ on Windows, ~/Library/Application Support/agentpay/ on macOS, ~/.config/agentpay/ on Linux), or point AGENTPAY_CONFIG at any path. Every key is optional; omit what a given surface does not need. Keys map 1:1 to AGENTPAY_* env names (prefix dropped, lowercased).",
+
+  "network": "local",
+  "walletd_url": "http://127.0.0.1:12010/json_rpc",
+  "walletd_token": "",
+
+  "budget_template": "",
+  "owner_account": "default",
+  "component": "",
+  "agent_account": "",
+  "agent_badge": "",
+  "proof_windows": true,
+
+  "api_url": "http://localhost:8787",
+  "api_key": ""
+}

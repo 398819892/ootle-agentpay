@@ -259,20 +259,32 @@ def main() -> None:
     if getattr(CONFIG, "_print_config", False):
         print(json.dumps(CONFIG.public_dict(), indent=2))
         return
-    if getattr(CONFIG, "_emit_claude", False):
-        # Ready-to-paste Claude Desktop / Cursor block for this config — no hand-written JSON.
-        print(json.dumps({"mcpServers": {"agentpay": CONFIG.claude_entry()}}, indent=2, ensure_ascii=False))
+    emit_host = getattr(CONFIG, "_emit_host", None)
+    if emit_host:
+        # Ready-to-paste wiring for this config — no hand-written JSON. Host selects the shape:
+        # claude/cursor/generic (MCP) or http-json/http-env (an HTTP-API consumer like OpenClaw).
+        if emit_host not in config.ServerConfig.EMIT_HOSTS:
+            sys.stderr.write(f"Unknown --host {emit_host!r}; choose from {', '.join(config.ServerConfig.EMIT_HOSTS)}.\n")
+            sys.exit(2)
+        print(CONFIG.emit(emit_host))
         return
-    if getattr(CONFIG, "_install_claude", False):
+    install_host = getattr(CONFIG, "_install_host", None)
+    if install_host:
+        if install_host not in config.ServerConfig.INSTALL_HOSTS:
+            sys.stderr.write(
+                f"--install writes a file only for {', '.join(config.ServerConfig.INSTALL_HOSTS)} "
+                f"(got --host {install_host!r}). For other targets use --emit-config.\n"
+            )
+            sys.exit(2)
         from . import claude_install
-        res = claude_install.install(CONFIG.claude_entry())
+        res = claude_install.install(
+            CONFIG.mcp_entry(), host=install_host, project=getattr(CONFIG, "_install_project", False),
+        )
         print(json.dumps(res, indent=2, ensure_ascii=False))
         if not res.get("ok"):
             sys.exit(1)
-        sys.stderr.write(
-            f"\nAdded the 'agentpay' server to {res['path']}. "
-            "Restart Claude Desktop to load it.\n"
-        )
+        label = "Cursor" if install_host == "cursor" else "Claude Desktop"
+        sys.stderr.write(f"\nAdded the 'agentpay' server to {res['path']}. Restart {label} to load it.\n")
         return
     if getattr(CONFIG, "_selftest", False):
         built = _build_wallet()

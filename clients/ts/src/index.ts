@@ -21,3 +21,11 @@ export { AgentPayError, PolicyViolation, ChainError, InvoiceError } from "./erro
 // the owner's hosted HTTP service with an API key and never touch walletd. See api.ts / docs/api.md.
 export { AgentPayApiClient, AgentPayApiError } from "./api";
 export type { Receipt, Merchant, Budget, PayParams, ApiRole, AgentPayApiOptions } from "./api";
+
+// Shared configuration source (agentpay.config.json / AGENTPAY_* env) + convenience factories, so a
+// user configures once and the SDK, the MCP server and the HTTP server all resolve the same values.
+export {
+  FIELDS, configPath, loadConfig, getConfig, getConfigBool,
+  walletdFromConfig, budgetFromConfig, apiClientFromConfig,
+} from "./config";
+export type { ConfigKey, GetOptions } from "./config";

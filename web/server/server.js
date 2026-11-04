@@ -48,23 +48,17 @@ const PORT = Number(process.env.PORT || 8787);
 // Windows' localhost forwarding still reaches a 127.0.0.1-bound server in WSL, so the default needs
 // no override for local dev (verified: Windows `localhost:8787` → WSL `127.0.0.1`).
 const HOST = process.env.HOST || "127.0.0.1";
-const WALLETD_URL = process.env.AGENTPAY_WALLETD_URL || "http://127.0.0.1:12010/json_rpc";
-// Fallback template addresses live in the repo-root defaults.json (single source of truth, shared
-// with the Python scripts), so a republished template is updated once. The env var still wins.
-const DEFAULT_TEMPLATES = (() => {
-  try {
-    return JSON.parse(
-      fs.readFileSync(path.resolve(__dirname, "..", "..", "defaults.json"), "utf8"),
-    ).templates || {};
-  } catch {
-    return {};
-  }
-})();
-const BUDGET_TEMPLATE =
-  process.env.AGENTPAY_BUDGET_TEMPLATE ||
-  DEFAULT_TEMPLATES.agent_budget ||
-  "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f";
-const OWNER = process.env.AGENTPAY_OWNER_ACCOUNT || "default";
+// Chain/identity config resolves through the shared source (agentpay.config.json), so the wallet
+// daemon URL / budget template / owner account are configured ONCE and shared with the MCP server
+// and the SDK. Precedence: AGENTPAY_* env var -> agentpay.config.json -> defaults.json -> the literal
+// fallback here. (defaults.json stays the single source of truth for a republished local template.)
+const sharedConfig = require("./config");
+const WALLETD_URL = sharedConfig.get("walletd_url", { default: "http://127.0.0.1:12010/json_rpc" });
+const BUDGET_TEMPLATE = sharedConfig.get("budget_template", {
+  templateName: "agent_budget",
+  default: "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
+});
+const OWNER = sharedConfig.get("owner_account", { default: "default" });
 // Display ticker for the native token, surfaced to the dashboard. Defaults to the testnet tTARI;
 // set AGENTPAY_TOKEN_SYMBOL (e.g. "TARI") — or AGENTPAY_NETWORK=mainnet — for mainnet, so going live
 // is a config change, not a code edit. Display-only; the on-chain manifest keyword is unaffected.

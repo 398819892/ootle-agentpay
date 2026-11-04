@@ -17,13 +17,46 @@
  *     node examples/node_agent.mjs shop 250
  */
 
-const BASE = (process.env.AGENTPAY_URL || "http://localhost:8787").replace(/\/+$/, "");
-const KEY = process.env.AGENTPAY_API_KEY;
+// Shared config: resolve the same base URL / API key as the SDK, MCP server and dashboard.
+// Precedence: AGENTPAY_* env var > agentpay.config.json > default. (Mirrors agentpay.config.)
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+
+function sharedConfig() {
+  let p = process.env.AGENTPAY_CONFIG;
+  if (!p) {
+    const local = path.join(process.cwd(), "agentpay.config.json");
+    if (fs.existsSync(local)) p = local;
+    else {
+      const base =
+        process.platform === "win32"
+          ? process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming")
+          : process.platform === "darwin"
+            ? path.join(os.homedir(), "Library", "Application Support")
+            : process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+      const user = path.join(base, "agentpay", "agentpay.config.json");
+      if (fs.existsSync(user)) p = user;
+    }
+  }
+  if (!p) return {};
+  try {
+    const d = JSON.parse(fs.readFileSync(p, "utf8"));
+    return d && typeof d === "object" ? d : {};
+  } catch {
+    return {};
+  }
+}
+const CFG = sharedConfig();
+const resolve = (envName, fileKey, dflt = "") => process.env[envName] || CFG[fileKey] || dflt;
+
+const BASE = resolve("AGENTPAY_URL", "api_url", "http://localhost:8787").replace(/\/+$/, "");
+const KEY = resolve("AGENTPAY_API_KEY", "api_key");
 const merchant = process.argv[2] || "shop";
 const amount = process.argv[3] || "100";
 
 if (!KEY) {
-  console.error("Set AGENTPAY_API_KEY (an agent key issued by the service owner).");
+  console.error("Set AGENTPAY_API_KEY (or api_key in agentpay.config.json) — an agent key issued by the service owner.");
   process.exit(1);
 }
 

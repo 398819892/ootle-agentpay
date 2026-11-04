@@ -128,3 +128,64 @@ def test_install_rejects_malformed_existing(tmp_path):
     target.write_text("{ not valid json", encoding="utf-8")
     res = claude_install.install({"command": "agentpay-mcp"}, path=target)
     assert res["ok"] is False and "parse" in res["error"]
+
+
+# --- host-agnostic generator (claude / cursor / generic / http-*) -----------------------
+def test_emit_cursor_wraps_mcpservers(monkeypatch):
+    monkeypatch.setenv("AGENTPAY_COMPONENT", COMP)
+    block = json.loads(config.load([]).emit("cursor"))
+    assert block["mcpServers"]["agentpay"]["command"] == "agentpay-mcp"
+    assert block["mcpServers"]["agentpay"]["env"]["AGENTPAY_COMPONENT"] == COMP
+
+
+def test_emit_generic_is_the_bare_entry(monkeypatch):
+    monkeypatch.setenv("AGENTPAY_COMPONENT", COMP)
+    block = json.loads(config.load([]).emit("generic"))
+    assert "mcpServers" not in block
+    assert block["command"] == "agentpay-mcp"
+    assert block["env"]["AGENTPAY_COMPONENT"] == COMP
+
+
+def test_emit_http_env_and_json(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTPAY_CONFIG", str(tmp_path / "none.json"))  # isolate from any cwd config file
+    monkeypatch.setenv("AGENTPAY_URL", "https://pay.example.com")
+    monkeypatch.setenv("AGENTPAY_API_KEY", "sk_agent_xyz")
+    cfg = config.load([])
+    env_text = cfg.emit("http-env")
+    assert "AGENTPAY_URL=https://pay.example.com" in env_text
+    assert "AGENTPAY_API_KEY=sk_agent_xyz" in env_text
+    block = json.loads(cfg.emit("http-json"))
+    assert block == {"baseUrl": "https://pay.example.com", "apiKey": "sk_agent_xyz"}
+
+
+def test_emit_http_env_omits_absent_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTPAY_CONFIG", str(tmp_path / "none.json"))  # isolate from any cwd config file
+    # no AGENTPAY_API_KEY set → only the URL line, never a blank key
+    text = config.load([]).emit("http-env")
+    assert text.startswith("AGENTPAY_URL=")
+    assert "AGENTPAY_API_KEY" not in text
+
+
+def test_install_cursor_path_and_host(tmp_path):
+    target = tmp_path / "mcp.json"
+    res = claude_install.install({"command": "agentpay-mcp"}, path=target, host="cursor")
+    assert res["ok"] and res["host"] == "cursor"
+    doc = json.loads(target.read_text(encoding="utf-8"))
+    assert doc["mcpServers"]["agentpay"] == {"command": "agentpay-mcp"}
+
+
+def test_host_config_path_rejects_unknown():
+    with pytest.raises(ValueError):
+        claude_install.host_config_path("notahost")
+
+
+def test_install_hosts_are_a_subset_of_emit_hosts():
+    assert set(config.ServerConfig.INSTALL_HOSTS) <= set(config.ServerConfig.EMIT_HOSTS)
+    assert "http-env" in config.ServerConfig.EMIT_HOSTS
+    assert "http-env" not in config.ServerConfig.INSTALL_HOSTS
+
+
+def test_claude_entry_is_alias_of_mcp_entry(monkeypatch):
+    monkeypatch.setenv("AGENTPAY_COMPONENT", COMP)
+    cfg = config.load([])
+    assert cfg.claude_entry() == cfg.mcp_entry()

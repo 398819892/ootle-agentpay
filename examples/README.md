@@ -19,6 +19,12 @@ export AGENTPAY_URL=http://localhost:8787      # the hosted service
 export AGENTPAY_API_KEY=sk_agent_xxxxxxxxxxxx  # your agent key
 ```
 
+Or put them in the shared `agentpay.config.json` as `api_url` / `api_key` — every example below reads
+it (env still wins). This is the same file the SDK and the server read, so you configure once; see
+[`../docs/configuration.md`](../docs/configuration.md). An agent framework (e.g. **OpenClaw**) that
+calls `/api/v1` the same way can have the owner generate its two env lines with
+`agentpay-mcp --emit-config --host http-env`.
+
 ---
 
 ## curl

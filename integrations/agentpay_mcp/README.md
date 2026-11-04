@@ -61,26 +61,38 @@ agentpay-mcp --print-config            # resolved (non-secret) config
 agentpay-mcp --selftest                # connect to walletd + open/attach a budget, then exit
 ```
 
-### One-command Claude Desktop setup
+### One-command setup (Claude Desktop, Cursor, or any host)
 
-Instead of hand-editing `claude_desktop_config.json`, let the server write (or print) the entry for
-you — set the few env vars for your budget, then:
+Instead of hand-editing a host's JSON, let the server write (or print) the entry for you. One flag
+pair serves every host — `--host` picks the shape:
 
 ```bash
-# print a ready-to-paste mcpServers block for the current config:
-AGENTPAY_COMPONENT=component_... agentpay-mcp --emit-claude-config
+# print a ready-to-paste block for the current config (default host: claude):
+AGENTPAY_COMPONENT=component_... agentpay-mcp --emit-config --host claude
+AGENTPAY_COMPONENT=component_... agentpay-mcp --emit-config --host cursor
+AGENTPAY_COMPONENT=component_... agentpay-mcp --emit-config --host generic   # bare stdio {command,env}
 
-# or merge the 'agentpay' entry straight into Claude Desktop's config (keeps your other servers,
-# backs the file up to *.bak first), then restart Claude Desktop:
-AGENTPAY_COMPONENT=component_... agentpay-mcp --install-claude
+# merge the 'agentpay' entry straight into a host's config file (keeps your other servers, backs the
+# file up to *.bak first), then restart the host:
+AGENTPAY_COMPONENT=component_... agentpay-mcp --install --host claude
+AGENTPAY_COMPONENT=component_... agentpay-mcp --install --host cursor        # ~/.cursor/mcp.json (+ --project for .cursor/mcp.json)
 ```
 
-`--install-claude` finds the config file for your OS (Windows `%APPDATA%\Claude\…`, macOS
-`~/Library/Application Support/Claude/…`, Linux `~/.config/Claude/…`). The emitted block keeps only
-the values that differ from the network preset, so it stays short. For **attach mode you now only
-need `AGENTPAY_COMPONENT`**: the agent badge is derived from the component on chain, and the agent
-account defaults to the owner account (pass `AGENTPAY_AGENT_ACCOUNT` / `AGENTPAY_AGENT_BADGE` only to
-override).
+`--install` finds the host's config file for your OS (Claude: Windows `%APPDATA%\Claude\…`, macOS
+`~/Library/Application Support/Claude/…`, Linux `~/.config/Claude/…`; Cursor: `~/.cursor/mcp.json`).
+The emitted block keeps only the values that differ from the network preset, so it stays short.
+(`--emit-claude-config` / `--install-claude` remain as aliases for `--host claude`.)
+
+For a **non-MCP framework** (e.g. OpenClaw) that calls the hosted `/api/v1` with an API key instead,
+`--emit-config --host http-env` prints the two `AGENTPAY_URL` / `AGENTPAY_API_KEY` lines to drop into
+its environment (`--host http-json` prints `{ baseUrl, apiKey }`).
+
+For **attach mode you now only need `AGENTPAY_COMPONENT`**: the agent badge is derived from the
+component on chain, and the agent account defaults to the owner account (pass
+`AGENTPAY_AGENT_ACCOUNT` / `AGENTPAY_AGENT_BADGE` only to override).
+
+All of these values can also come from the shared [`agentpay.config.json`](../../docs/configuration.md)
+(the same file the SDK and the HTTP server read), so you configure once and every surface agrees.
 
 ## Configure
 
@@ -197,7 +209,7 @@ agent badge; no `AGENTPAY_AUTO_PROVISION` needed):
 That is the whole attach config — the agent badge is derived from the component on chain and the
 agent account defaults to the owner. Add `AGENTPAY_AGENT_ACCOUNT` / `AGENTPAY_AGENT_BADGE` only to
 override, or `AGENTPAY_PER_TX_CAP` / `AGENTPAY_DAILY_CAP` / `AGENTPAY_WHITELIST` to set the *display*
-copy (the binding copy is on chain). `agentpay-mcp --install-claude` writes this block for you.
+copy (the binding copy is on chain). `agentpay-mcp --install --host claude` writes this block for you.
 
 > If `agentpay-mcp` is not on Claude Desktop's `PATH`, use the venv's absolute path as `command`
 > (e.g. `F:\\oolte\\integrations\\agentpay_mcp\\.venv\\Scripts\\agentpay-mcp.exe`), or
@@ -206,8 +218,8 @@ copy (the binding copy is on chain). `agentpay-mcp --install-claude` writes this
 
 ## Add to Cursor
 
-Cursor reads MCP servers from `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (per-project).
-Same shape as above:
+`agentpay-mcp --install --host cursor` writes this for you (global `~/.cursor/mcp.json`; add
+`--project` for a per-project `.cursor/mcp.json`). Cursor uses the same shape as above:
 
 ```json
 {

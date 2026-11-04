@@ -137,7 +137,8 @@ export interface WalletdClientOptions {
   /**
    * A pre-minted bearer token. Pass this in a **non-custodial** deployment: the agent holds its own
    * walletd and a least-privilege token minted for it out-of-band, so this client uses the token
-   * as-is and never requests `Admin`. Defaults to `OOTLE_WALLETD_TOKEN` from the environment.
+   * as-is and never requests `Admin`. Defaults to `AGENTPAY_WALLETD_TOKEN` from the environment
+   * (the deprecated `OOTLE_WALLETD_TOKEN` is still honored as a fallback for back-compat).
    */
   token?: string;
   /**
@@ -174,7 +175,10 @@ export class WalletdClient {
     this.url = url;
     this.finalizeTries = opts.finalizeTries ?? 120;
     this.finalizeDelayMs = opts.finalizeDelayMs ?? 1_500;
-    const envToken = (typeof process !== "undefined" && process.env && process.env.OOTLE_WALLETD_TOKEN) || undefined;
+    // Canonical AGENTPAY_WALLETD_TOKEN (shared with the Python SDK); OOTLE_WALLETD_TOKEN is the
+    // deprecated name, still honored so a mixed setup keeps working.
+    const env = (typeof process !== "undefined" && process.env) || ({} as Record<string, string | undefined>);
+    const envToken = env.AGENTPAY_WALLETD_TOKEN || env.OOTLE_WALLETD_TOKEN || undefined;
     this.token = opts.token ?? envToken ?? null;
     this.tokenIsExternal = this.token !== null;
     this.permissions = opts.permissions ?? ["Admin"];

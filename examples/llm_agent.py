@@ -31,7 +31,7 @@ import sys
 
 # Reuse the tiny, dependency-free HTTP client that lives next to this file.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from agentpay_api import AgentPayApi, AgentPayApiError  # noqa: E402
+from agentpay_api import AgentPayApi, AgentPayApiError, resolve  # noqa: E402
 
 MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
 
@@ -110,10 +110,10 @@ def main() -> None:
     except ImportError:
         raise SystemExit("pip install anthropic (this example needs the Anthropic SDK).")
 
-    base = os.environ.get("AGENTPAY_URL", "http://localhost:8787")
-    key = os.environ.get("AGENTPAY_API_KEY")
+    base = resolve("AGENTPAY_URL", "api_url", "http://localhost:8787")
+    key = resolve("AGENTPAY_API_KEY", "api_key")
     if not key:
-        raise SystemExit("Set AGENTPAY_API_KEY (an agent key issued by the service owner).")
+        raise SystemExit("Set AGENTPAY_API_KEY (or api_key in agentpay.config.json) — an agent key issued by the service owner.")
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise SystemExit("Set ANTHROPIC_API_KEY (drives the model).")
 

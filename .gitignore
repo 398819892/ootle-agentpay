@@ -76,3 +76,6 @@ docs/Ootle_*.md
 
 # Claude desktop app preview launcher (machine-specific)
 .claude/launch.json
+
+# Shared AgentPay config — real deployment values (templates: agentpay.config.example.json is tracked)
+agentpay.config.json

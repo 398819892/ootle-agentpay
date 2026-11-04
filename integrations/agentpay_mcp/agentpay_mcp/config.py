@@ -29,6 +29,7 @@ Two running modes, chosen automatically:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from dataclasses import dataclass, field
 
@@ -156,13 +157,54 @@ class ServerConfig:
             env["AGENTPAY_WHITELIST"] = ",".join(self.whitelist)
         return env
 
-    def claude_entry(self) -> dict:
-        """The ``mcpServers["agentpay"]`` entry for a Claude Desktop / Cursor config file."""
+    def mcp_entry(self) -> dict:
+        """The ``mcpServers["agentpay"]`` entry (``{command, env?}``) for any MCP host that uses the
+        mcpServers schema (Claude Desktop, Cursor) or a bare stdio host."""
         entry: dict = {"command": "agentpay-mcp"}
         env = self.claude_env()
         if env:
             entry["env"] = env
         return entry
+
+    # Back-compat alias (the method was Claude-specific before the host-agnostic generator).
+    claude_entry = mcp_entry
+
+    def http_env(self) -> dict[str, str]:
+        """The HTTP-consumer env (``AGENTPAY_URL`` / ``AGENTPAY_API_KEY``) resolved from the shared
+        config — for a non-MCP framework (e.g. OpenClaw) that calls the hosted ``/api/v1`` with a
+        capped API key and never touches walletd. The key is included only if the shared config has
+        one (it is a secret the owner issues out of band)."""
+        env = {"AGENTPAY_URL": _defaults.get("api_url", default="http://localhost:8787")}
+        key = _defaults.get("api_key")
+        if key:
+            env["AGENTPAY_API_KEY"] = key
+        return env
+
+    def emit(self, host: str) -> str:
+        """Render the wiring for ``host`` as text to print:
+
+        - ``claude`` / ``cursor`` → ``{"mcpServers": {"agentpay": {command, env?}}}`` (JSON)
+        - ``generic`` → the bare stdio entry ``{command, env?}`` for any other MCP host (JSON)
+        - ``http-json`` → ``{"baseUrl", "apiKey"?}`` for an HTTP-API consumer (JSON)
+        - ``http-env`` → ``AGENTPAY_URL=… / AGENTPAY_API_KEY=…`` dotenv lines (plain text)
+        """
+        if host in ("claude", "cursor"):
+            return json.dumps({"mcpServers": {"agentpay": self.mcp_entry()}}, indent=2, ensure_ascii=False)
+        if host == "generic":
+            return json.dumps(self.mcp_entry(), indent=2, ensure_ascii=False)
+        if host == "http-json":
+            env = self.http_env()
+            block = {"baseUrl": env["AGENTPAY_URL"]}
+            if "AGENTPAY_API_KEY" in env:
+                block["apiKey"] = env["AGENTPAY_API_KEY"]
+            return json.dumps(block, indent=2, ensure_ascii=False)
+        if host == "http-env":
+            return "\n".join(f"{k}={v}" for k, v in self.http_env().items())
+        raise ValueError(f"unknown --host {host!r}")
+
+    #: Hosts ``--emit-config`` understands, and the subset ``--install`` can write a file for.
+    EMIT_HOSTS = ("claude", "cursor", "generic", "http-json", "http-env")
+    INSTALL_HOSTS = ("claude", "cursor")
 
     def public_dict(self) -> dict:
         """Non-secret view of the config, safe to return from the ``get_server_info`` tool."""
@@ -190,10 +232,14 @@ def load(argv: list[str] | None = None) -> ServerConfig:
     #    built-in preset (notably "mainnet", whose real addresses must never be hardcoded here) is
     #    allowed ONLY when the operator points the server at it explicitly with AGENTPAY_WALLETD_URL;
     #    the template/owner should be given too, or provisioning fails honestly later.
-    network = os.environ.get("AGENTPAY_NETWORK", DEFAULT_NETWORK).strip().lower()
+    # Chain/identity values resolve through the shared config source (agentpay.config.json), so they
+    # are configured ONCE and shared with the HTTP server and the SDK. Precedence inside _defaults.get:
+    # AGENTPAY_* env var -> agentpay.config.json -> (the preset default passed here). The preset still
+    # selects walletd/template/owner for a known network, and the file/env override it.
+    network = _defaults.get("network", default=DEFAULT_NETWORK).strip().lower()
     if network in PRESETS:
         preset = PRESETS[network]
-    elif os.environ.get("AGENTPAY_WALLETD_URL"):
+    elif _defaults.get("walletd_url"):
         preset = {"walletd_url": "", "budget_template": "", "owner_account": ""}
     else:
         raise SystemExit(
@@ -205,12 +251,12 @@ def load(argv: list[str] | None = None) -> ServerConfig:
 
     cfg = ServerConfig(
         network=network,  # keep the real name — never silently coerce an unknown network to "local"
-        walletd_url=os.environ.get("AGENTPAY_WALLETD_URL", preset["walletd_url"]),
-        budget_template=os.environ.get("AGENTPAY_BUDGET_TEMPLATE", preset["budget_template"]),
-        owner_account=os.environ.get("AGENTPAY_OWNER_ACCOUNT", preset["owner_account"]),
-        component=os.environ.get("AGENTPAY_COMPONENT") or None,
-        agent_badge=os.environ.get("AGENTPAY_AGENT_BADGE") or None,
-        agent_account=os.environ.get("AGENTPAY_AGENT_ACCOUNT") or None,
+        walletd_url=_defaults.get("walletd_url", default=preset["walletd_url"]),
+        budget_template=_defaults.get("budget_template", default=preset["budget_template"]),
+        owner_account=_defaults.get("owner_account", default=preset["owner_account"]),
+        component=_defaults.get("component") or None,
+        agent_badge=_defaults.get("agent_badge") or None,
+        agent_account=_defaults.get("agent_account") or None,
         # #15: default to ATTACH (non-custodial): the MCP/agent process attaches to a budget the
         # OWNER already opened (component + agent badge + agent account), so it holds only the agent
         # badge — not the owner key. Auto-provision (the agent process opening a budget with the owner
@@ -232,12 +278,12 @@ def load(argv: list[str] | None = None) -> ServerConfig:
     if args.network:
         cfg.network = args.network
         p = PRESETS[args.network]
-        # Re-apply preset defaults only where the env did not already set a value.
-        if "AGENTPAY_WALLETD_URL" not in os.environ:
+        # Re-apply preset defaults only where neither the env nor the shared config file set a value.
+        if not _defaults.get("walletd_url"):
             cfg.walletd_url = p["walletd_url"]
-        if "AGENTPAY_BUDGET_TEMPLATE" not in os.environ:
+        if not _defaults.get("budget_template"):
             cfg.budget_template = p["budget_template"]
-        if "AGENTPAY_OWNER_ACCOUNT" not in os.environ:
+        if not _defaults.get("owner_account"):
             cfg.owner_account = p["owner_account"]
     if args.walletd_url:
         cfg.walletd_url = args.walletd_url
@@ -270,8 +316,15 @@ def load(argv: list[str] | None = None) -> ServerConfig:
 
     cfg._print_config = args.print_config  # type: ignore[attr-defined]
     cfg._selftest = args.selftest  # type: ignore[attr-defined]
-    cfg._emit_claude = args.emit_claude_config  # type: ignore[attr-defined]
-    cfg._install_claude = args.install_claude  # type: ignore[attr-defined]
+    # Host-agnostic generator: --emit-config / --install take --host (default claude); the old
+    # --emit-claude-config / --install-claude are aliases for --host claude.
+    cfg._emit_host = (  # type: ignore[attr-defined]
+        (args.host or "claude") if args.emit_config else ("claude" if args.emit_claude_config else None)
+    )
+    cfg._install_host = (  # type: ignore[attr-defined]
+        (args.host or "claude") if args.install else ("claude" if args.install_claude else None)
+    )
+    cfg._install_project = args.project  # type: ignore[attr-defined]
     return cfg
 
 
@@ -299,8 +352,17 @@ def _parser() -> argparse.ArgumentParser:
                    help="print the resolved (non-secret) config as JSON and exit")
     p.add_argument("--selftest", action="store_true",
                    help="run an in-process check against walletd (connect + budget) and exit")
+    p.add_argument("--emit-config", dest="emit_config", action="store_true",
+                   help="print the wiring for --host (claude|cursor|generic|http-json|http-env) and exit")
+    p.add_argument("--install", dest="install", action="store_true",
+                   help="merge the 'agentpay' entry into --host's config file (claude|cursor; keeps other servers) and exit")
+    p.add_argument("--host", choices=list(ServerConfig.EMIT_HOSTS),
+                   help="target host for --emit-config / --install (default: claude)")
+    p.add_argument("--project", action="store_true",
+                   help="with --install --host cursor: write the project-local .cursor/mcp.json instead of the global one")
+    # Back-compat aliases (pre-dating the host-agnostic generator); equivalent to --host claude.
     p.add_argument("--emit-claude-config", dest="emit_claude_config", action="store_true",
-                   help="print a ready-to-paste Claude Desktop / Cursor mcpServers block for this config and exit")
+                   help="alias for --emit-config --host claude")
     p.add_argument("--install-claude", dest="install_claude", action="store_true",
-                   help="merge the 'agentpay' entry into Claude Desktop's config file (keeps other servers) and exit")
+                   help="alias for --install --host claude")
     return p

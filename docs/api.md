@@ -60,6 +60,12 @@ environment variable `AGENTPAY_API_KEYS`, comma- or newline-separated, each `rol
 AGENTPAY_API_KEYS="agent:bot1:sk_agent_<32+hex>, admin:ops:sk_admin_<32+hex>"
 ```
 
+A **consumer** of this API needs only a base URL and a key (`AGENTPAY_URL` / `AGENTPAY_API_KEY`, or
+`api_url` / `api_key` in the shared `agentpay.config.json` — see
+[configuration.md](configuration.md)). An agent framework such as OpenClaw integrates here: it holds
+only the capped key, never the wallet. (`AGENTPAY_API_KEYS` itself is a server-side secret and is
+**not** part of the shared config file.)
+
 - `role` — `agent` or `admin` (drives tiered access, below).
 - `id` — a short, **non-secret** label (`[A-Za-z0-9_.-]`, ≤48). It appears in the audit log; the
   secret never does.

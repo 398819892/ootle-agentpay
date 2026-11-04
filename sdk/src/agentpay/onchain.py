@@ -238,6 +238,19 @@ class WalletdClient:
             else _env_float("AGENTPAY_SUBMIT_RETRY_DELAY", _SUBMIT_RETRY_DELAY)
         )
 
+    @classmethod
+    def from_config(cls, *, url: str | None = None, token: str | None = None, **kwargs: Any) -> "WalletdClient":
+        """Build a client from the shared config source (``agentpay.config.json`` / ``AGENTPAY_*``),
+        with any explicit argument winning. Resolves ``walletd_url`` and ``walletd_token`` (the latter
+        also accepts the deprecated ``OOTLE_WALLETD_TOKEN``); other options keep their defaults."""
+        from . import config as _config
+        resolved_token = _config.get("walletd_token", explicit=token) or None
+        return cls(
+            _config.get("walletd_url", default="http://127.0.0.1:12010/json_rpc", explicit=url),
+            token=resolved_token,
+            **kwargs,
+        )
+
     def _rpc(self, method: str, params: Any) -> dict:
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
         req = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"})
@@ -762,6 +775,28 @@ class OnChainBudget:
         # True when `proof_windows` is the defaulted guess, not an explicit env choice — see
         # `_run_owner` / `_dialect_hint` (P1-3: don't fail silently on a guessed dialect).
         self._proof_windows_guessed = not _proof_windows_env_set()
+
+    @classmethod
+    def from_config(cls, client: "WalletdClient", *, budget_template: str | None = None,
+                    owner_account: str | None = None, agent_account: str | None = None,
+                    component: str | None = None, agent_badge: str | None = None,
+                    **kwargs: Any) -> "OnChainBudget":
+        """Build a budget from the shared config source (``agentpay.config.json`` / ``AGENTPAY_*``),
+        with any explicit argument winning. ``budget_template`` layers through ``defaults.json``'s
+        ``agent_budget`` (re-derived on each swarm reset); the other identity fields resolve from the
+        config file / env. The ``client`` is passed in so the caller controls the walletd connection
+        (use :meth:`WalletdClient.from_config` for that). Caps/whitelist stay caller-supplied."""
+        from . import config as _config
+        kwargs.setdefault("proof_windows", _config.get_bool("proof_windows", _proof_windows_default()))
+        return cls(
+            client=client,
+            budget_template=_config.get("budget_template", explicit=budget_template, template_name="agent_budget"),
+            owner_account=_config.get("owner_account", default="default", explicit=owner_account),
+            agent_account=_config.get("agent_account", explicit=agent_account) or None,
+            component=_config.get("component", explicit=component) or None,
+            agent_badge=_config.get("agent_badge", explicit=agent_badge) or None,
+            **kwargs,
+        )
 
     def _resource_arg(self) -> str:
         """Manifest expression for the budget's resource: the ``XTR`` keyword for the native token,

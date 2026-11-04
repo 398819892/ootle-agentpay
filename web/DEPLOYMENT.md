@@ -43,7 +43,11 @@ daemon** (`walletd`) that **holds private keys**. That makes two things non-nego
 
 ## 2. Configuration
 
-All via environment variables.
+All via environment variables. The chain/identity ones (`AGENTPAY_WALLETD_URL`,
+`AGENTPAY_BUDGET_TEMPLATE`, `AGENTPAY_OWNER_ACCOUNT`) can instead come from the shared
+`agentpay.config.json` the SDK and MCP server also read — env still wins. See
+[`../docs/configuration.md`](../docs/configuration.md). The operational knobs below (passwords,
+session, API keys, file paths) stay env-only.
 
 | Variable | Required | Meaning |
 |---|---|---|
