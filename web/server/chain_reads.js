@@ -9,6 +9,67 @@
 const { big } = require("./http_util");
 const { findComponentState, cborHex, parseBudgetState } = require("./substate");
 
+// ---- chain-discovered payment ledger (pure helpers) --------------------------------------------
+// journalLedger (below) only knows the pays THIS dashboard made (its own journal). A pay made
+// against the same budget through the MCP / SDK / another dashboard leaves no journal row here, so
+// it is invisible ("money moved, no row") even though the chain recorded it. These helpers rebuild
+// the FULL pay history for a component straight from the account's transaction list, so the feed
+// reflects the chain, not just local activity. Pure + exported so they can be unit-tested.
+
+/** Walk a finalize tree, yielding every object that carries a string `topic` (an event). */
+function* iterEvents(node) {
+  if (!node || typeof node !== "object") return;
+  if (typeof node.topic === "string") yield node;
+  if (Array.isArray(node)) {
+    for (const v of node) yield* iterEvents(v);
+    return;
+  }
+  for (const v of Object.values(node)) yield* iterEvents(v);
+}
+
+/** Parse a walletd `last_update_time` ("YYYY-MM-DD HH:MM:SS.s") to epoch ms, or 0 if unparseable. */
+function parseWalletdTime(s) {
+  if (typeof s !== "string") return 0;
+  const t = Date.parse(s.replace(" ", "T"));
+  return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * Reconstruct a component's payments from the account's transaction list: EVERY AgentBudget `pay`
+ * event for `component`, whichever client submitted the tx. Returns `{ rows, tsByTxId }` — rows
+ * oldest→newest (the UI slices the tail as "recent"), and a txId→timestamp map so the caller can
+ * also time-order the journal rows it merges in. Mirrors OnChainBudget.payEvents' topic/dedup rules
+ * (leaf topic === "pay" excludes pay_fee / pay_via_escrow; de-dup the event's duplicated copy
+ * within one tx by the strictly-increasing spent_in_window), and additionally scopes to this
+ * component by the event's substate_id.
+ */
+function extractChainPays(txs, component) {
+  const rows = [];
+  const tsByTxId = new Map();
+  for (const tx of Array.isArray(txs) ? txs : []) {
+    if (!tx || typeof tx !== "object") continue;
+    const txId = tx.id != null ? String(tx.id) : null;
+    const ts = parseWalletdTime(tx.last_update_time);
+    if (txId) tsByTxId.set(txId, ts);
+    if (tx.is_dry_run) continue; // a dry run moved nothing — never a ledger row
+    const seen = new Set();
+    for (const ev of iterEvents(tx.finalize)) {
+      const topic = typeof ev.topic === "string" ? ev.topic : "";
+      const leaf = topic.includes(".") ? topic.slice(topic.lastIndexOf(".") + 1) : topic;
+      if (leaf !== "pay") continue; // excludes pay_fee / pay_via_escrow
+      if (ev.substate_id !== component) continue; // scope to THIS budget component
+      const p = ev.payload;
+      if (!p || typeof p !== "object" || !("merchant" in p) || !("memo" in p)) continue;
+      const key = String(p.spent_in_window); // two COPIES of one event share it; two real pays differ
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ merchant: p.merchant, amount: String(p.amount), memo: p.memo, txId, ts });
+    }
+  }
+  rows.reverse(); // transactions.list is newest-first; the ledger is oldest→newest
+  return { rows, tsByTxId };
+}
+
 function createChainReads({ store, walletd, conn, txlog, OnChainBudget, windowStatus, budgetTemplate: BUDGET_TEMPLATE }) {
   /** Rebuild a live OnChainBudget from the persisted snapshot (or null if none open). */
   async function liveBudget() {
@@ -171,7 +232,30 @@ function createChainReads({ store, walletd, conn, txlog, OnChainBudget, windowSt
     return { merchant: p.merchant, amount: String(p.amount), memo: p.memo };
   }
 
-  return { liveBudget, vaultBalanceFromSubstate, readChainBudget, journalTotals, journalLedger, firstPayEvent };
+  // ---- chain-discovered payment ledger (reads the account's whole tx history) ------------------
+  // Heavy (the full history), so the scan is cached briefly; dashboardState merges the result with
+  // the journal and falls back to the journal alone on any failure. Turn it off with
+  // AGENTPAY_CHAIN_LEDGER=0 (then the feed is journal-only, the pre-feature behaviour); tune the
+  // cache with AGENTPAY_CHAIN_LEDGER_TTL_MS (default 15s).
+  const CHAIN_LEDGER_ON = process.env.AGENTPAY_CHAIN_LEDGER !== "0";
+  const CHAIN_LEDGER_TTL_MS = Number(process.env.AGENTPAY_CHAIN_LEDGER_TTL_MS || 15000);
+  const chainPayCache = new Map(); // component -> { at, value }
+  /** Cached `{ rows, tsByTxId }` for a component, or null when disabled. Throws on a walletd failure. */
+  async function chainPayScan(component) {
+    if (!CHAIN_LEDGER_ON) return null;
+    const hit = chainPayCache.get(component);
+    if (hit && Date.now() - hit.at < CHAIN_LEDGER_TTL_MS) return hit.value;
+    const c = await walletd();
+    const txs = await c.listTransactions({ offset: 0, limit: 1000 });
+    const value = extractChainPays(txs, component);
+    chainPayCache.set(component, { at: Date.now(), value });
+    return value;
+  }
+
+  return {
+    liveBudget, vaultBalanceFromSubstate, readChainBudget, journalTotals, journalLedger,
+    firstPayEvent, chainPayScan,
+  };
 }
 
-module.exports = { createChainReads };
+module.exports = { createChainReads, extractChainPays, parseWalletdTime };

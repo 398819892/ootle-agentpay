@@ -248,6 +248,21 @@ class WalletdClient {
             throw new errors_1.ChainError(r.error.message ?? "substates.get failed");
         return r.result;
     }
+    /**
+     * List the wallet account's transactions (read-only), each carrying its finalized `events`. The
+     * dashboard uses this to rebuild the payment ledger from the CHAIN — every AgentBudget `pay`
+     * event, including pays made by OTHER clients (the MCP / SDK / another dashboard) that left no
+     * local-journal row here. The list is newest-first; `limit` is advisory (some walletd builds
+     * return the full history regardless). Dry-run entries are included — the caller filters them out
+     * via each entry's `is_dry_run`.
+     */
+    async listTransactions(opts = {}) {
+        const r = await this.rpc("transactions.list", { offset: opts.offset ?? 0, limit: opts.limit ?? 1000 });
+        if (r.error)
+            throw new errors_1.ChainError(r.error.message ?? "transactions.list failed");
+        const txs = r.result?.transactions;
+        return Array.isArray(txs) ? txs : [];
+    }
     // -- transactions ---------------------------------------------------------------
     async submitManifest(manifest, variables, maxFee, dryRun) {
         const params = { manifest, variables, max_fee: maxFee, dry_run: dryRun };

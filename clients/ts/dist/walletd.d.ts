@@ -80,6 +80,18 @@ export declare class WalletdClient {
     currentEpoch(): Promise<number>;
     /** Fetch a substate (component / resource / vault) by its address. Read-only. */
     getSubstate(substateId: string): Promise<any>;
+    /**
+     * List the wallet account's transactions (read-only), each carrying its finalized `events`. The
+     * dashboard uses this to rebuild the payment ledger from the CHAIN — every AgentBudget `pay`
+     * event, including pays made by OTHER clients (the MCP / SDK / another dashboard) that left no
+     * local-journal row here. The list is newest-first; `limit` is advisory (some walletd builds
+     * return the full history regardless). Dry-run entries are included — the caller filters them out
+     * via each entry's `is_dry_run`.
+     */
+    listTransactions(opts?: {
+        offset?: number;
+        limit?: number;
+    }): Promise<any[]>;
     private submitManifest;
     dryRun(manifest: string, variables: Record<string, string>, maxFee?: number): Promise<RpcResponse>;
     /**

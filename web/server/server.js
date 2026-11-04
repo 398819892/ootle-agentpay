@@ -167,7 +167,7 @@ const { conn, walletd, serialize, chainMessage } = createChainConn({
 const { resolveMerchant, lookupMerchant } = createMerchants({
   store, saveStore, nameByAddr, walletd, autoCreate: AUTO_CREATE_MERCHANTS, ChainError,
 });
-const { liveBudget, readChainBudget, journalTotals, journalLedger, firstPayEvent } = createChainReads({
+const { liveBudget, readChainBudget, journalTotals, journalLedger, firstPayEvent, chainPayScan } = createChainReads({
   store, walletd, conn, txlog, OnChainBudget, windowStatus, budgetTemplate: BUDGET_TEMPLATE,
 });
 const { idemKey, reconcileRecord, runChainOp, reconcileAll } = createChainOps({
@@ -175,7 +175,7 @@ const { idemKey, reconcileRecord, runChainOp, reconcileAll } = createChainOps({
   budgetTemplate: BUDGET_TEMPLATE, firstPayEvent, chainMessage,
 });
 const { dashboardState, pendingResult } = createDashboard({
-  store, nameByAddr, apiKeys, conn, txlog, readChainBudget, journalTotals, journalLedger,
+  store, nameByAddr, apiKeys, conn, txlog, readChainBudget, journalTotals, journalLedger, chainPayScan,
   walletdUrl: WALLETD_URL, budgetTemplate: BUDGET_TEMPLATE, owner: OWNER, tokenSymbol: TOKEN_SYMBOL, network: NETWORK,
   stepUpOn: STEP_UP_ON,
 });
