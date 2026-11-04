@@ -8,6 +8,20 @@ templates, driven from Python. Limits are enforced **on chain by the validator**
 
 ---
 
+> **⚠ Status — testnet only. Do NOT custody real / mainnet funds with the hosted dashboard yet.**
+> The chain-enforced AgentBudget limits (per-tx cap, per-window cap, whitelist, kill switch) are
+> production-grade. The `web/` dashboard, however, is a **custodial** service: it drives walletd, which
+> holds the keys, so whoever compromises the backend can **withdraw the whole treasury** — the chain's
+> agent caps do not constrain the owner side. A standalone signing / approval service is the
+> prerequisite before this holds real value. See [`docs/custody.md`](docs/custody.md).
+>
+> **⚠ 定位 —— 仅测试网。托管式仪表盘尚不可托管真实 / 主网资金。** 链上 AgentBudget 限额（单笔上限、
+> 每窗口上限、白名单、紧急停止）是生产级的；但 `web/` 仪表盘是**托管**服务：它通过 walletd 签名、
+> walletd 持私钥，后端一旦被攻破即可**提走整个金库**——链上代理限额约束不到所有者侧。承载真实价值的前提
+> 是独立的签名 / 审批服务。见 [`docs/custody.md`](docs/custody.md)。
+
+---
+
 ## English
 
 ### What's here
