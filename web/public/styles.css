@@ -507,10 +507,30 @@ button {
 .grid--equal {
   align-items: stretch;
 }
-/* the Pay activity list scrolls inside its card instead of growing the page off-screen;
-   the column headers stay pinned so they're readable while scrolling */
+/* Pay row: the form card (left) sets the height; the activity card (right) fills that
+   height and scrolls its list internally — so the form never gets stretched with dead
+   space below it, and a long activity list never grows the page off-screen.
+   The cell holds only the absolutely-filled card, so the grid row is sized by the form. */
+.pay-activity-cell {
+  position: relative;
+  min-height: 100%;
+}
+.pay-activity {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pay-activity > .card__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 .pay-activity .table-wrap {
-  max-height: calc(100vh - 285px);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 .pay-activity thead th {
@@ -519,9 +539,18 @@ button {
   background: var(--surface);
   z-index: 1;
 }
+/* single column on narrow screens: drop the absolute fill, cap the list by viewport */
 @media (max-width: 860px) {
+  .pay-activity-cell {
+    position: static;
+    min-height: 0;
+  }
+  .pay-activity {
+    position: static;
+  }
   .pay-activity .table-wrap {
     max-height: 65vh;
+    flex: none;
   }
 }
 

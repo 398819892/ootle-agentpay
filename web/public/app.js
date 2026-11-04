@@ -1529,17 +1529,19 @@ function viewPay() {
           </div>
         </div>
       </div>
-      <div class="card pay-activity">
-        <div class="card__head"><h3>${esc(t("activity"))}</h3><span class="sub">${esc(t("activity_sub", { n: fmt(b.ledger.length) }))}</span></div>
-        <div class="card__body" style="padding:6px 0">
-          ${
-            ledger
-              ? `<div class="table-wrap"><table class="ledger">
-                  <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th></tr></thead>
-                  <tbody>${ledger}</tbody></table></div>`
-              : `<div class="empty" style="padding:40px"><div class="empty__icon">${icon("activity", 26)}</div>
-                 <h3>${esc(t("pay_no_payments_title"))}</h3><p>${t("pay_no_payments_body")}</p></div>`
-          }
+      <div class="pay-activity-cell">
+        <div class="card pay-activity">
+          <div class="card__head"><h3>${esc(t("activity"))}</h3><span class="sub">${esc(t("activity_sub", { n: fmt(b.ledger.length) }))}</span></div>
+          <div class="card__body" style="padding:6px 0">
+            ${
+              ledger
+                ? `<div class="table-wrap"><table class="ledger">
+                    <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th></tr></thead>
+                    <tbody>${ledger}</tbody></table></div>`
+                : `<div class="empty" style="padding:40px"><div class="empty__icon">${icon("activity", 26)}</div>
+                   <h3>${esc(t("pay_no_payments_title"))}</h3><p>${t("pay_no_payments_body")}</p></div>`
+            }
+          </div>
         </div>
       </div>
     </div>`
