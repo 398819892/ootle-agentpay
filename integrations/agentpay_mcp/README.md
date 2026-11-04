@@ -61,6 +61,27 @@ agentpay-mcp --print-config            # resolved (non-secret) config
 agentpay-mcp --selftest                # connect to walletd + open/attach a budget, then exit
 ```
 
+### One-command Claude Desktop setup
+
+Instead of hand-editing `claude_desktop_config.json`, let the server write (or print) the entry for
+you — set the few env vars for your budget, then:
+
+```bash
+# print a ready-to-paste mcpServers block for the current config:
+AGENTPAY_COMPONENT=component_... agentpay-mcp --emit-claude-config
+
+# or merge the 'agentpay' entry straight into Claude Desktop's config (keeps your other servers,
+# backs the file up to *.bak first), then restart Claude Desktop:
+AGENTPAY_COMPONENT=component_... agentpay-mcp --install-claude
+```
+
+`--install-claude` finds the config file for your OS (Windows `%APPDATA%\Claude\…`, macOS
+`~/Library/Application Support/Claude/…`, Linux `~/.config/Claude/…`). The emitted block keeps only
+the values that differ from the network preset, so it stays short. For **attach mode you now only
+need `AGENTPAY_COMPONENT`**: the agent badge is derived from the component on chain, and the agent
+account defaults to the owner account (pass `AGENTPAY_AGENT_ACCOUNT` / `AGENTPAY_AGENT_BADGE` only to
+override).
+
 ## Configure
 
 Everything is set through environment variables (what an MCP client passes under `"env"`), each
@@ -77,8 +98,8 @@ overridable by a CLI flag. **Defaults target a local swarm, so a dev usually set
 | `AGENTPAY_WHITELIST` | `--whitelist` | *(empty)* | comma-separated merchant account addresses |
 | `AGENTPAY_FUND` | `--fund` | `10000` | amount to fund a provisioned budget |
 | `AGENTPAY_COMPONENT` | `--component` | *(unset)* | **attach mode:** an already-open budget component |
-| `AGENTPAY_AGENT_BADGE` | `--agent-badge` | *(unset)* | **attach mode:** the agent badge resource |
-| `AGENTPAY_AGENT_ACCOUNT` | `--agent-account` | *(unset)* | **attach mode:** the agent's account |
+| `AGENTPAY_AGENT_BADGE` | `--agent-badge` | *(derived)* | **attach mode:** the agent badge resource — **optional**, derived from the component's on-chain state when omitted |
+| `AGENTPAY_AGENT_ACCOUNT` | `--agent-account` | *(owner account)* | **attach mode:** the agent's account — defaults to the owner account |
 | `AGENTPAY_AUTO_PROVISION` | `--no-provision` (forces off) | `false` | open a budget automatically when none is given. Default **off** (attach / non-custodial); set `true` for local demos |
 
 **esmeralda preset:** walletd `http://127.0.0.1:5100/json_rpc`, owner `dev` (or whichever funded
@@ -89,11 +110,12 @@ See [`../../docs/esmeralda.md`](../../docs/esmeralda.md).
 
 ### Two modes (chosen automatically)
 
-* **Attach** (the default, production-shaped). Set `AGENTPAY_COMPONENT` + `AGENTPAY_AGENT_BADGE` +
-  `AGENTPAY_AGENT_ACCOUNT` → the server attaches to a budget the owner opened out of band,
-  holding **only the agent badge**. It can pay but can never raise its caps or revoke itself.
-  With no component configured and provisioning off, every tool returns a structured
-  `not_configured` error telling you what to set.
+* **Attach** (the default, production-shaped). Set **`AGENTPAY_COMPONENT`** → the server attaches to
+  a budget the owner opened out of band, holding **only the agent badge** (derived from the
+  component's on-chain state; override with `AGENTPAY_AGENT_BADGE`). The agent account defaults to
+  the owner account (`AGENTPAY_AGENT_ACCOUNT` to override). It can pay but can never raise its caps
+  or revoke itself. With no component configured and provisioning off, every tool returns a
+  structured `not_configured` error telling you what to set.
 * **Provision** (opt-in: `AGENTPAY_AUTO_PROVISION=true`; local demos only). No `AGENTPAY_COMPONENT`
   given → the server opens a fresh on-chain budget from the owner account on first tool call, using
   the caps / whitelist / fund above. Convenient, but the agent process then runs with the **owner
@@ -165,17 +187,17 @@ agent badge; no `AGENTPAY_AUTO_PROVISION` needed):
       "command": "agentpay-mcp",
       "env": {
         "AGENTPAY_NETWORK": "local",
-        "AGENTPAY_COMPONENT": "component_...the open budget...",
-        "AGENTPAY_AGENT_BADGE": "resource_...the agent badge...",
-        "AGENTPAY_AGENT_ACCOUNT": "component_...the agent account...",
-        "AGENTPAY_PER_TX_CAP": "1000",
-        "AGENTPAY_DAILY_CAP": "1500",
-        "AGENTPAY_WHITELIST": "component_...shop..."
+        "AGENTPAY_COMPONENT": "component_...the open budget..."
       }
     }
   }
 }
 ```
+
+That is the whole attach config — the agent badge is derived from the component on chain and the
+agent account defaults to the owner. Add `AGENTPAY_AGENT_ACCOUNT` / `AGENTPAY_AGENT_BADGE` only to
+override, or `AGENTPAY_PER_TX_CAP` / `AGENTPAY_DAILY_CAP` / `AGENTPAY_WHITELIST` to set the *display*
+copy (the binding copy is on chain). `agentpay-mcp --install-claude` writes this block for you.
 
 > If `agentpay-mcp` is not on Claude Desktop's `PATH`, use the venv's absolute path as `command`
 > (e.g. `F:\\oolte\\integrations\\agentpay_mcp\\.venv\\Scripts\\agentpay-mcp.exe`), or

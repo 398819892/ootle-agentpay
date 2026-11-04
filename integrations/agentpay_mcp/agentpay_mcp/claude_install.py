@@ -1,0 +1,73 @@
+"""Write the ``agentpay`` entry into Claude Desktop's config file — so a future user runs one
+command instead of hand-editing JSON and copying 64-hex addresses.
+
+``--install-claude`` (in ``server.main``) calls :func:`install` with the entry built from the
+resolved config (``ServerConfig.claude_entry``). The merge is non-destructive: it keeps any other
+MCP servers already configured, creates the file/``mcpServers`` map if absent, and backs up an
+existing file to ``*.bak`` first. Pure stdlib; touches only the local config file.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+
+def claude_config_path() -> Path:
+    """The platform's Claude Desktop config file location."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(base) / "Claude" / "claude_desktop_config.json"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+    # Linux / other (Claude Desktop is unofficial here, but honour XDG for completeness).
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "Claude" / "claude_desktop_config.json"
+
+
+def install(entry: dict, *, name: str = "agentpay", path: Path | None = None) -> dict:
+    """Merge ``{mcpServers: {name: entry}}`` into the Claude Desktop config at ``path`` (default:
+    the platform location). Returns a structured result dict; never raises on a bad existing file.
+
+    Non-destructive: existing servers are preserved, an existing file is backed up to ``*.bak``,
+    and a missing file (or ``mcpServers`` map) is created."""
+    p = path or claude_config_path()
+    existed = p.exists()
+    existing: dict = {}
+    if existed:
+        try:
+            existing = json.loads(p.read_text(encoding="utf-8") or "{}")
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "path": str(p), "error": f"could not read/parse existing config: {exc}"}
+        if not isinstance(existing, dict):
+            return {"ok": False, "path": str(p), "error": "existing config is not a JSON object"}
+
+    servers = existing.get("mcpServers")
+    if servers is None:
+        servers = existing["mcpServers"] = {}
+    elif not isinstance(servers, dict):
+        return {"ok": False, "path": str(p), "error": "existing 'mcpServers' is not a JSON object"}
+
+    replaced = name in servers
+
+    backup: str | None = None
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if existed:
+            backup = str(p.with_suffix(p.suffix + ".bak"))
+            shutil.copyfile(p, backup)
+        servers[name] = entry
+        p.write_text(json.dumps(existing, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError as exc:
+        return {"ok": False, "path": str(p), "error": f"could not write config: {exc}"}
+
+    return {
+        "ok": True,
+        "path": str(p),
+        "server": name,
+        "replaced": replaced,
+        "created_file": not existed,
+        "backup": backup,
+    }

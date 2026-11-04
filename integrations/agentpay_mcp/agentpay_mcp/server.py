@@ -259,6 +259,21 @@ def main() -> None:
     if getattr(CONFIG, "_print_config", False):
         print(json.dumps(CONFIG.public_dict(), indent=2))
         return
+    if getattr(CONFIG, "_emit_claude", False):
+        # Ready-to-paste Claude Desktop / Cursor block for this config — no hand-written JSON.
+        print(json.dumps({"mcpServers": {"agentpay": CONFIG.claude_entry()}}, indent=2, ensure_ascii=False))
+        return
+    if getattr(CONFIG, "_install_claude", False):
+        from . import claude_install
+        res = claude_install.install(CONFIG.claude_entry())
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+        if not res.get("ok"):
+            sys.exit(1)
+        sys.stderr.write(
+            f"\nAdded the 'agentpay' server to {res['path']}. "
+            "Restart Claude Desktop to load it.\n"
+        )
+        return
     if getattr(CONFIG, "_selftest", False):
         built = _build_wallet()
         if isinstance(built, dict):

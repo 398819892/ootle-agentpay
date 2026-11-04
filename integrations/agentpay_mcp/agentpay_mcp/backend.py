@@ -230,7 +230,7 @@ def attach_wallet(
     client: WalletdClient,
     *,
     component: str,
-    agent_badge: str,
+    agent_badge: str | None = None,
     agent_account: str,
     per_tx_cap: int,
     daily_cap: int,
@@ -241,12 +241,19 @@ def attach_wallet(
 
     The per_tx_cap / daily_cap / whitelist passed here are for *display*; the binding copy
     is on chain. Note we do NOT pass the owner badge — the agent cannot revoke or withdraw.
+
+    ``agent_badge`` is optional: when omitted it is DERIVED from the component's on-chain state
+    (the struct lays its two badge resources out as owner_badge, agent_badge), so an operator need
+    only supply the component address — not copy a second 64-hex resource by hand.
     """
     budget = OnChainBudget(
         client, template, owner_account=agent_account, agent_account=agent_account,
         component=component, agent_badge=agent_badge,
         per_tx_cap=per_tx_cap, daily_cap=daily_cap, whitelist=list(whitelist),
     )
+    if not agent_badge:
+        # Read [owner_badge, agent_badge] authoritatively from the component; take the agent one.
+        _owner_badge, budget.agent_badge = budget._read_badges()
     return AgentWallet(budget, per_tx_cap=per_tx_cap, daily_cap=daily_cap, whitelist=list(whitelist))
 
 

@@ -118,11 +118,51 @@ class ServerConfig:
         return "attach" if self.component else ("provision" if self.auto_provision else "unconfigured")
 
     def missing_attach_vars(self) -> list[str]:
-        """In attach mode, the badge + agent account are required alongside the component."""
+        """In attach mode only the agent account is required alongside the component — and it
+        defaults to the owner account (see load()), so in practice a bare AGENTPAY_COMPONENT is
+        enough. The agent badge is no longer required: it is derived from the component's on-chain
+        state (struct order owner_badge, agent_badge) when not given, so an operator need not copy
+        that 64-hex resource by hand. Pass AGENTPAY_AGENT_BADGE only to pin it explicitly."""
         if not self.component:
             return []
-        return [n for n, v in (("AGENTPAY_AGENT_BADGE", self.agent_badge),
-                               ("AGENTPAY_AGENT_ACCOUNT", self.agent_account)) if not v]
+        return [n for n, v in (("AGENTPAY_AGENT_ACCOUNT", self.agent_account),) if not v]
+
+    def claude_env(self) -> dict[str, str]:
+        """The minimal ``env`` block a Claude Desktop / Cursor entry needs to reproduce THIS
+        resolved config — only values that differ from the active network preset, so the generated
+        block stays short. Used by ``--emit-claude-config`` / ``--install-claude``."""
+        preset = PRESETS.get(self.network, {})
+        env: dict[str, str] = {}
+        if self.network != DEFAULT_NETWORK:
+            env["AGENTPAY_NETWORK"] = self.network
+        if self.walletd_url and self.walletd_url != preset.get("walletd_url"):
+            env["AGENTPAY_WALLETD_URL"] = self.walletd_url
+        if self.budget_template and self.budget_template != preset.get("budget_template"):
+            env["AGENTPAY_BUDGET_TEMPLATE"] = self.budget_template
+        if self.component:  # attach mode
+            env["AGENTPAY_COMPONENT"] = self.component
+            # agent account only when it is NOT the owner-account default; badge only if pinned
+            # (otherwise it is derived from the component on chain).
+            if self.agent_account and self.agent_account != self.owner_account:
+                env["AGENTPAY_AGENT_ACCOUNT"] = self.agent_account
+            if self.agent_badge:
+                env["AGENTPAY_AGENT_BADGE"] = self.agent_badge
+        else:  # provision mode
+            if self.auto_provision:
+                env["AGENTPAY_AUTO_PROVISION"] = "true"
+            if self.owner_account and self.owner_account != preset.get("owner_account"):
+                env["AGENTPAY_OWNER_ACCOUNT"] = self.owner_account
+        if self.whitelist:
+            env["AGENTPAY_WHITELIST"] = ",".join(self.whitelist)
+        return env
+
+    def claude_entry(self) -> dict:
+        """The ``mcpServers["agentpay"]`` entry for a Claude Desktop / Cursor config file."""
+        entry: dict = {"command": "agentpay-mcp"}
+        env = self.claude_env()
+        if env:
+            entry["env"] = env
+        return entry
 
     def public_dict(self) -> dict:
         """Non-secret view of the config, safe to return from the ``get_server_info`` tool."""
@@ -230,6 +270,8 @@ def load(argv: list[str] | None = None) -> ServerConfig:
 
     cfg._print_config = args.print_config  # type: ignore[attr-defined]
     cfg._selftest = args.selftest  # type: ignore[attr-defined]
+    cfg._emit_claude = args.emit_claude_config  # type: ignore[attr-defined]
+    cfg._install_claude = args.install_claude  # type: ignore[attr-defined]
     return cfg
 
 
@@ -257,4 +299,8 @@ def _parser() -> argparse.ArgumentParser:
                    help="print the resolved (non-secret) config as JSON and exit")
     p.add_argument("--selftest", action="store_true",
                    help="run an in-process check against walletd (connect + budget) and exit")
+    p.add_argument("--emit-claude-config", dest="emit_claude_config", action="store_true",
+                   help="print a ready-to-paste Claude Desktop / Cursor mcpServers block for this config and exit")
+    p.add_argument("--install-claude", dest="install_claude", action="store_true",
+                   help="merge the 'agentpay' entry into Claude Desktop's config file (keeps other servers) and exit")
     return p
