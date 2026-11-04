@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AgentPayApiError = exports.AgentPayApiClient = exports.InvoiceError = exports.ChainError = exports.PolicyViolation = exports.AgentPayError = exports.MAX_MEMO_BYTES = exports.MEMO_PREFIX = exports.newInvoiceId = exports.encodeMemo = exports.EPOCH_MINUTES = exports.formatEta = exports.windowStatus = exports.XTR = exports.OnChainBudget = exports.rejectReason = exports.DEFAULT_WALLETD_URL = exports.WalletdClient = void 0;
+exports.apiClientFromConfig = exports.budgetFromConfig = exports.walletdFromConfig = exports.getConfigBool = exports.getConfig = exports.loadConfig = exports.configPath = exports.FIELDS = exports.AgentPayApiError = exports.AgentPayApiClient = exports.InvoiceError = exports.ChainError = exports.PolicyViolation = exports.AgentPayError = exports.MAX_MEMO_BYTES = exports.MEMO_PREFIX = exports.newInvoiceId = exports.encodeMemo = exports.EPOCH_MINUTES = exports.formatEta = exports.windowStatus = exports.XTR = exports.OnChainBudget = exports.rejectReason = exports.DEFAULT_WALLETD_URL = exports.WalletdClient = void 0;
 /**
  * @agentpay/client — TypeScript/JS client for AgentPay on Tari Ootle.
  *
@@ -37,3 +37,14 @@ Object.defineProperty(exports, "InvoiceError", { enumerable: true, get: function
 var api_1 = require("./api");
 Object.defineProperty(exports, "AgentPayApiClient", { enumerable: true, get: function () { return api_1.AgentPayApiClient; } });
 Object.defineProperty(exports, "AgentPayApiError", { enumerable: true, get: function () { return api_1.AgentPayApiError; } });
+// Shared configuration source (agentpay.config.json / AGENTPAY_* env) + convenience factories, so a
+// user configures once and the SDK, the MCP server and the HTTP server all resolve the same values.
+var config_1 = require("./config");
+Object.defineProperty(exports, "FIELDS", { enumerable: true, get: function () { return config_1.FIELDS; } });
+Object.defineProperty(exports, "configPath", { enumerable: true, get: function () { return config_1.configPath; } });
+Object.defineProperty(exports, "loadConfig", { enumerable: true, get: function () { return config_1.loadConfig; } });
+Object.defineProperty(exports, "getConfig", { enumerable: true, get: function () { return config_1.getConfig; } });
+Object.defineProperty(exports, "getConfigBool", { enumerable: true, get: function () { return config_1.getConfigBool; } });
+Object.defineProperty(exports, "walletdFromConfig", { enumerable: true, get: function () { return config_1.walletdFromConfig; } });
+Object.defineProperty(exports, "budgetFromConfig", { enumerable: true, get: function () { return config_1.budgetFromConfig; } });
+Object.defineProperty(exports, "apiClientFromConfig", { enumerable: true, get: function () { return config_1.apiClientFromConfig; } });

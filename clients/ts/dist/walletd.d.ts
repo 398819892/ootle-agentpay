@@ -27,7 +27,8 @@ export interface WalletdClientOptions {
     /**
      * A pre-minted bearer token. Pass this in a **non-custodial** deployment: the agent holds its own
      * walletd and a least-privilege token minted for it out-of-band, so this client uses the token
-     * as-is and never requests `Admin`. Defaults to `OOTLE_WALLETD_TOKEN` from the environment.
+     * as-is and never requests `Admin`. Defaults to `AGENTPAY_WALLETD_TOKEN` from the environment
+     * (the deprecated `OOTLE_WALLETD_TOKEN` is still honored as a fallback for back-compat).
      */
     token?: string;
     /**

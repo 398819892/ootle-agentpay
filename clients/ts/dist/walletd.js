@@ -129,7 +129,10 @@ class WalletdClient {
         this.url = url;
         this.finalizeTries = opts.finalizeTries ?? 120;
         this.finalizeDelayMs = opts.finalizeDelayMs ?? 1500;
-        const envToken = (typeof process !== "undefined" && process.env && process.env.OOTLE_WALLETD_TOKEN) || undefined;
+        // Canonical AGENTPAY_WALLETD_TOKEN (shared with the Python SDK); OOTLE_WALLETD_TOKEN is the
+        // deprecated name, still honored so a mixed setup keeps working.
+        const env = (typeof process !== "undefined" && process.env) || {};
+        const envToken = env.AGENTPAY_WALLETD_TOKEN || env.OOTLE_WALLETD_TOKEN || undefined;
         this.token = opts.token ?? envToken ?? null;
         this.tokenIsExternal = this.token !== null;
         this.permissions = opts.permissions ?? ["Admin"];

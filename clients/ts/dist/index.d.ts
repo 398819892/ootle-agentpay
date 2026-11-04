@@ -18,3 +18,5 @@ export { encodeMemo, newInvoiceId, MEMO_PREFIX, MAX_MEMO_BYTES } from "./invoice
 export { AgentPayError, PolicyViolation, ChainError, InvoiceError } from "./errors";
 export { AgentPayApiClient, AgentPayApiError } from "./api";
 export type { Receipt, Merchant, Budget, PayParams, ApiRole, AgentPayApiOptions } from "./api";
+export { FIELDS, configPath, loadConfig, getConfig, getConfigBool, walletdFromConfig, budgetFromConfig, apiClientFromConfig, } from "./config";
+export type { ConfigKey, GetOptions } from "./config";
