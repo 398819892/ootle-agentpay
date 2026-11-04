@@ -1511,7 +1511,7 @@ function viewPay() {
             </div>
             <div class="field">
               <label class="field__label" for="p-amount">${esc(t("amount"))}</label>
-              <div class="input-affix"><input class="input" id="p-amount" type="number" min="1" value="700"/><span class="affix">${UNIT}</span></div>
+              <div class="input-affix"><input class="input" id="p-amount" type="number" min="1" placeholder="0" autocomplete="off"/><span class="affix">${UNIT}</span></div>
               <div class="field__err">${esc(t("amount_err"))}</div>
             </div>
             <div class="field">
