@@ -59,6 +59,9 @@ const BUDGET_TEMPLATE = sharedConfig.get("budget_template", {
   default: "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
 });
 const OWNER = sharedConfig.get("owner_account", { default: "default" });
+// Network name (preset selector). Surfaced to the dashboard's Connect panel so it can emit a block
+// that targets the right network; the shared source resolves it (env > agentpay.config.json > local).
+const NETWORK = sharedConfig.get("network", { default: "local" });
 // Display ticker for the native token, surfaced to the dashboard. Defaults to the testnet tTARI;
 // set AGENTPAY_TOKEN_SYMBOL (e.g. "TARI") — or AGENTPAY_NETWORK=mainnet — for mainnet, so going live
 // is a config change, not a code edit. Display-only; the on-chain manifest keyword is unaffected.
@@ -1163,7 +1166,13 @@ async function dashboardState() {
   const names = nameByAddr();
   const label = (addr) => names[addr] || null;
   const base = {
-    config: { walletdUrl: WALLETD_URL, template: BUDGET_TEMPLATE, ownerAccount: OWNER, tokenSymbol: TOKEN_SYMBOL },
+    config: { walletdUrl: WALLETD_URL, template: BUDGET_TEMPLATE, ownerAccount: OWNER, tokenSymbol: TOKEN_SYMBOL, network: NETWORK },
+    // Integration-API status for the Connect panel: whether /api/v1 is enabled, and the (non-secret)
+    // ids of the configured agent keys. Secrets are never exposed — only ids/roles (apikeys.list()).
+    api: {
+      enabled: apiKeys.configured(),
+      agentKeys: apiKeys.list().filter((k) => k.role === "agent" && !k.revoked).map((k) => k.id),
+    },
     connected: Boolean(wd),
     owner: ownerAddr,
     merchants: Object.entries(store.merchants).map(([name, address]) => ({ name, address })),

@@ -129,6 +129,24 @@ const I18N = {
     merchants_sub: "The on-chain whitelist of merchants this agent is allowed to pay.",
     merchants_nobudget_sub: "Open a budget first, then manage its merchant whitelist here.",
 
+    /* connect */
+    nav_connect: "Connect AI",
+    connect_sub: "Copy a ready-made config and paste it into your AI — Claude Desktop, Cursor, any MCP host, or an HTTP framework like OpenClaw.",
+    connect_no_budget: "No budget is open yet, so the block below uses a placeholder component. Open a budget (Manage) to fill in the real one.",
+    connect_mcp_title: "MCP host — Claude Desktop / Cursor",
+    connect_mcp_how: "Paste this into Claude Desktop's claude_desktop_config.json (under mcpServers), then restart Claude Desktop.",
+    connect_cursor_how: "Cursor: paste the same block into ~/.cursor/mcp.json (or a project .cursor/mcp.json), then enable \"agentpay\" in Settings → MCP.",
+    connect_generic_title: "Any other MCP host",
+    connect_generic_how: "A bare stdio entry for any MCP client that takes a command + env.",
+    connect_http_title: "HTTP — OpenClaw or any framework",
+    connect_http_how: "For an agent that calls the hosted /api/v1 with an API key (it never touches the wallet). Drop these into the framework's environment.",
+    connect_http_keyph: "<paste your agent key>",
+    connect_http_keys: (p) => `/api/v1 is enabled. Use the secret of one of your agent keys: ${p.ids} (the server never shows the secret).`,
+    connect_http_nokeys: "/api/v1 is enabled but no agent key is configured yet. Add one to AGENTPAY_API_KEYS (role \"agent\").",
+    connect_http_disabled: "/api/v1 is not enabled on this server. Set AGENTPAY_API_KEYS to turn it on, then an agent key here will work.",
+    connect_cli_hint: "Or run this once instead",
+    connect_copy: "Copy config",
+
     /* overview */
     overview_sub: "A live view of your agent's on-chain spending budget.",
     nobudget_title: "No budget yet",
@@ -466,6 +484,24 @@ const I18N = {
     manage_sub: "所有者控制——资金、支出限额、代理会话与紧急停止。",
     merchants_sub: "代理被允许支付的链上商户白名单。",
     merchants_nobudget_sub: "请先创建预算，再在此管理商户白名单。",
+
+    /* connect */
+    nav_connect: "接入",
+    connect_sub: "复制一份现成配置，直接粘贴到你的 AI —— Claude Desktop、Cursor、任意 MCP 宿主，或 OpenClaw 这类 HTTP 框架。",
+    connect_no_budget: "当前还没有开预算，下面的配置用的是占位组件地址。到「管理」开一个预算后，这里会自动填入真实地址。",
+    connect_mcp_title: "MCP 宿主 —— Claude Desktop / Cursor",
+    connect_mcp_how: "粘贴到 Claude Desktop 的 claude_desktop_config.json（放在 mcpServers 下），然后重启 Claude Desktop。",
+    connect_cursor_how: "Cursor：把同一段粘贴到 ~/.cursor/mcp.json（或项目里的 .cursor/mcp.json），再到 设置 → MCP 启用 “agentpay”。",
+    connect_generic_title: "其他 MCP 宿主",
+    connect_generic_how: "适用于任何接受 command + env 的 MCP 客户端的裸 stdio 配置。",
+    connect_http_title: "HTTP —— OpenClaw 或任意框架",
+    connect_http_how: "给用 API key 调用托管 /api/v1 的代理（它不碰钱包）。把这两行丢进框架的环境变量即可。",
+    connect_http_keyph: "<粘贴你的 agent key>",
+    connect_http_keys: (p) => `/api/v1 已启用。用你某个 agent key 的密钥：${p.ids}（密钥由你保管，服务端从不显示）。`,
+    connect_http_nokeys: "/api/v1 已启用，但还没有配置 agent key。在 AGENTPAY_API_KEYS 里加一个（角色 “agent”）。",
+    connect_http_disabled: "本服务端未启用 /api/v1。设置 AGENTPAY_API_KEYS 开启后，这里的 agent key 就能用了。",
+    connect_cli_hint: "或者改成跑一次这条命令",
+    connect_copy: "复制配置",
 
     /* overview */
     overview_sub: "实时查看代理的链上消费预算。",
@@ -808,6 +844,7 @@ const P = {
   activity: '<path d="M3 12h4l3 8 4-16 3 8h4"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v4h-4"/>',
   trend: '<path d="M3 17l6-6 4 4 7-7"/><path d="M21 8v5h-5"/>',
+  plug: '<path d="M9 2v6M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0V8Z"/><path d="M12 17v4"/>',
 };
 function icon(name, size = 18) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ""}</svg>`;
@@ -1098,6 +1135,7 @@ const NAV = [
   { id: "manage", key: "nav_manage", icon: "shield" },
   { id: "pay", key: "nav_pay", icon: "send" },
   { id: "merchants", key: "nav_merchants", icon: "store" },
+  { id: "connect", key: "nav_connect", icon: "plug" },
 ];
 
 function go(view) {
@@ -1866,11 +1904,94 @@ function render() {
     case "merchants":
       body = viewMerchants();
       break;
+    case "connect":
+      body = viewConnect();
+      break;
     default:
       body = viewOverview();
   }
   app.innerHTML = sidebar() + `<main class="main">${frozenBanner()}${body}</main>`;
   wire();
+}
+
+/* ---- views: CONNECT ------------------------------------------------------- */
+// "Connect your AI" — ready-to-paste wiring for each target, assembled from the live budget. The
+// agent attaches to the on-chain budget (component); it never gets the owner key. Mirrors the CLI
+// `agentpay-mcp --emit-config --host …` so copy-paste here == the generated config there.
+function viewConnect() {
+  const d = S.data || {};
+  const cfg = d.config || {};
+  const comp = d.budget ? d.budget.component : null;
+  const origin = window.location.origin;
+  const network = cfg.network || "local";
+  const isLocal = network === "local";
+
+  // Attach-mode env: just the component on local (the target's preset supplies the rest); explicit
+  // network/walletd/template otherwise so a non-local block is self-contained.
+  const env = { AGENTPAY_COMPONENT: comp || "component_… (open a budget first)" };
+  if (!isLocal) {
+    env.AGENTPAY_NETWORK = network;
+    if (cfg.walletdUrl) env.AGENTPAY_WALLETD_URL = cfg.walletdUrl;
+    if (cfg.template) env.AGENTPAY_BUDGET_TEMPLATE = cfg.template;
+  }
+  const mcpBlock = JSON.stringify({ mcpServers: { agentpay: { command: "agentpay-mcp", env } } }, null, 2);
+  const genericBlock = JSON.stringify({ command: "agentpay-mcp", env }, null, 2);
+  const httpBlock = `AGENTPAY_URL=${origin}\nAGENTPAY_API_KEY=${t("connect_http_keyph")}`;
+
+  const block = (label, text) => `
+    <div class="codeblock">
+      <div class="codeblock__head">
+        <span class="codeblock__label">${esc(label)}</span>
+        <button class="icon-btn" data-copy="${esc(text)}" title="${esc(t("copy"))}" aria-label="${esc(t("connect_copy"))}">${icon("copy", 15)}</button>
+      </div>
+      <pre class="codeblock__body"><code>${esc(text)}</code></pre>
+    </div>`;
+  const cliHint = (cmd) => `
+    <div class="codeblock codeblock--cli">
+      <div class="codeblock__head">
+        <span class="codeblock__label">${esc(t("connect_cli_hint"))}</span>
+        <button class="icon-btn" data-copy="${esc(cmd)}" title="${esc(t("copy"))}">${icon("copy", 15)}</button>
+      </div>
+      <pre class="codeblock__body"><code>${esc(cmd)}</code></pre>
+    </div>`;
+
+  const needBudget = comp
+    ? ""
+    : `<div class="callout">${icon("info", 18)}<div>${esc(t("connect_no_budget"))}</div></div>`;
+
+  const api = d.api || {};
+  let httpNote;
+  if (!api.enabled) {
+    httpNote = `<div class="callout">${icon("info", 18)}<div>${esc(t("connect_http_disabled"))}</div></div>`;
+  } else if (api.agentKeys && api.agentKeys.length) {
+    httpNote = `<div class="callout">${icon("info", 18)}<div>${esc(t("connect_http_keys", { ids: api.agentKeys.join(", ") }))}</div></div>`;
+  } else {
+    httpNote = `<div class="callout">${icon("info", 18)}<div>${esc(t("connect_http_nokeys"))}</div></div>`;
+  }
+
+  return (
+    pageHead(t("nav_connect"), t("connect_sub")) +
+    needBudget +
+    `<div class="card connect-card">
+       <div class="connect-card__head">${icon("shield", 18)}<h3>${esc(t("connect_mcp_title"))}</h3></div>
+       <p class="connect-card__how">${esc(t("connect_mcp_how"))}</p>
+       ${block("mcpServers", mcpBlock)}
+       <p class="connect-card__how sm">${esc(t("connect_cursor_how"))}</p>
+       ${cliHint("agentpay-mcp --install --host claude")}
+     </div>` +
+    `<div class="card connect-card">
+       <div class="connect-card__head">${icon("plug", 18)}<h3>${esc(t("connect_generic_title"))}</h3></div>
+       <p class="connect-card__how">${esc(t("connect_generic_how"))}</p>
+       ${block("stdio", genericBlock)}
+     </div>` +
+    `<div class="card connect-card">
+       <div class="connect-card__head">${icon("send", 18)}<h3>${esc(t("connect_http_title"))}</h3></div>
+       <p class="connect-card__how">${esc(t("connect_http_how"))}</p>
+       ${block(".env", httpBlock)}
+       ${httpNote}
+       ${cliHint("agentpay-mcp --emit-config --host http-env")}
+     </div>`
+  );
 }
 
 /* ---- wiring (event delegation + per-view listeners) ----------------------- */
