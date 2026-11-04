@@ -157,6 +157,7 @@ def test_read_onchain_state_prefers_info_event():
     assert st["per_tx_cap"] == 1000
     assert st["epochs_per_window"] == 100
     assert st["balance"] == 5000            # only the info path exposes balance
+    assert st["daily_cap_worst_case"] == 2 * st["daily_cap"] == 3000  # fixed-window ~2x ceiling
 
 
 def test_read_onchain_state_falls_back_to_positional():
@@ -166,6 +167,7 @@ def test_read_onchain_state_falls_back_to_positional():
     st = b.read_onchain_state()
     assert st["spent_in_window"] == 500     # the positional value
     assert "balance" not in st              # the positional path has no balance field
+    assert st["daily_cap_worst_case"] == 2 * st["daily_cap"] == 6000  # fixed-window ~2x ceiling
 
 
 def test_read_onchain_state_without_component_raises():

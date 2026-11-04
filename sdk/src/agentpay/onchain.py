@@ -828,6 +828,12 @@ class OnChainBudget:
         this budget, not just this process), ``window_start_epoch``, ``epochs_per_window`` and
         ``revoked``. Read-only.
 
+        Also derives ``daily_cap_worst_case`` = ``2 * daily_cap``: ``daily_cap`` guards spend within
+        each FIXED epoch window, not over any trailing 24h, so an agent can spend the full cap in the
+        last epoch of one window and again in the first epoch of the next — the real ceiling across a
+        boundary is ~2x (templates/agent_budget/src/lib.rs). It is surfaced here so a caller never has
+        to double the number itself. Present only when ``daily_cap`` read as an int.
+
         Prefers the name-keyed ``get_info`` ``info`` event (``read_info`` — catches a same-type field
         swap, #1); falls back to the positional component-state read (``_parse_budget_state``,
         1:1 with the web reconciler, #16) if the event is unavailable (older template or a changed
@@ -836,12 +842,16 @@ class OnChainBudget:
         if not self.component:
             raise ChainError("budget has no on-chain component yet")
         try:
-            return self.read_info()
+            state = self.read_info()
         except (ChainError, ValueError):
-            state = _find_component_state(self.client.get_substate(self.component))
-            if state is None:
+            raw = _find_component_state(self.client.get_substate(self.component))
+            if raw is None:
                 raise ChainError("could not read the budget component state from chain")
-            return _parse_budget_state(state)
+            state = _parse_budget_state(raw)
+        daily_cap = state.get("daily_cap")
+        if isinstance(daily_cap, int) and not isinstance(daily_cap, bool):
+            state["daily_cap_worst_case"] = daily_cap * 2
+        return state
 
     def revoke(self) -> None:
         self._owner_call("revoke()")
