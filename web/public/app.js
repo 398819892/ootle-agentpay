@@ -1529,7 +1529,7 @@ function viewPay() {
           </div>
         </div>
       </div>
-      <div class="card">
+      <div class="card pay-activity">
         <div class="card__head"><h3>${esc(t("activity"))}</h3><span class="sub">${esc(t("activity_sub", { n: fmt(b.ledger.length) }))}</span></div>
         <div class="card__body" style="padding:6px 0">
           ${

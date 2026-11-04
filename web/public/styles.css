@@ -507,6 +507,23 @@ button {
 .grid--equal {
   align-items: stretch;
 }
+/* the Pay activity list scrolls inside its card instead of growing the page off-screen;
+   the column headers stay pinned so they're readable while scrolling */
+.pay-activity .table-wrap {
+  max-height: calc(100vh - 285px);
+  overflow-y: auto;
+}
+.pay-activity thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+@media (max-width: 860px) {
+  .pay-activity .table-wrap {
+    max-height: 65vh;
+  }
+}
 
 /* ---- governance page ------------------------------------------------------ */
 /* Balanced two-column top row: the treasury card (balance + top-up + withdraw)
