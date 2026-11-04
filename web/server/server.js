@@ -823,6 +823,7 @@ function journalLedger(component, label) {
           merchantName: label(e.merchant),
           amount: String(e.amount),
           memo: e.memo,
+          onchainMemo: e.memo,
           txKind: e.txKind || "pay",
           status: "confirmed",
           txId: null,
@@ -831,11 +832,15 @@ function journalLedger(component, label) {
       }
     }
     if (r.op === "pay" && r.status === "confirmed" && r.event) {
+      // Show the caller's free-text memo (what they typed) in the list; fall back to the
+      // on-chain codec memo (ap1|<invoiceId>|<agentTag>) when no free text was given. The
+      // codec memo is kept as `onchainMemo` so the UI can still surface the provable value.
       out.push({
         merchant: r.event.merchant,
         merchantName: label(r.event.merchant),
         amount: String(r.event.amount),
-        memo: r.event.memo,
+        memo: (r.params && r.params.memo) || r.event.memo,
+        onchainMemo: r.event.memo,
         txKind: "pay",
         status: "confirmed",
         txId: r.txId,

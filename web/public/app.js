@@ -225,7 +225,7 @@ const I18N = {
     amount_err: "Enter a positive amount.",
     memo_label: "Invoice / memo",
     optional: "(optional)",
-    memo_placeholder: "ap1|ff7a27259e5232a7|agent",
+    memo_placeholder: "invoice-042",
     check_on_chain: "Check on chain",
     pay: "Pay",
     pay_callout_title: "“Check on chain”",
@@ -557,7 +557,7 @@ const I18N = {
     amount_err: "请输入大于零的金额。",
     memo_label: "发票 / 备注",
     optional: "(选填)",
-    memo_placeholder: "ap1|ff7a27259e5232a7|agent",
+    memo_placeholder: "例如 invoice-042",
     check_on_chain: "链上预检",
     pay: "付款",
     pay_callout_title: "「链上预检」",
@@ -1357,7 +1357,7 @@ function ledgerRow(e) {
         <div class="muted" style="font-size:12px;font-family:var(--mono)">${esc(shorten(e.merchant, 8, 5))}</div></div>
     </div></td>
     <td class="amount">−${fmt(e.amount)} <span class="muted" style="font-weight:500">${UNIT}</span></td>
-    <td><span class="memo" title="${esc(e.memo)}">${esc(e.memo || "—")}</span></td>
+    <td><span class="memo" title="${esc(e.onchainMemo || e.memo)}">${esc(e.memo || "—")}</span></td>
   </tr>`;
 }
 
@@ -1556,7 +1556,7 @@ function fullLedgerRow(e) {
       <div class="muted" style="font-size:12px;font-family:var(--mono)">${esc(shorten(e.merchant, 8, 5))}</div></div>
     </div></td>
     <td class="amount">−${fmt(e.amount)} <span class="muted" style="font-weight:500">${UNIT}</span></td>
-    <td><span class="memo" title="${esc(e.memo)}">${esc(e.memo || "—")}</span></td>
+    <td><span class="memo" title="${esc(e.onchainMemo || e.memo)}">${esc(e.memo || "—")}</span></td>
   </tr>`;
 }
 
