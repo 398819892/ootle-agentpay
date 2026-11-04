@@ -203,6 +203,19 @@ badges) and the epoch-window explainer.
 ```
 web/
 ├─ server/server.js     # zero-dep Node backend: auth + static files + /api, drives the chain via clients/ts/dist
+├─ server/settings.js   # every env / shared-config knob in one place (bind, auth, cookies, proxy, step-up)
+├─ server/session.js    # signed session cookies + logout revocation
+├─ server/csrf.js       # Origin/Referer check + session-bound CSRF token
+├─ server/stepup.js     # single-use confirm tokens bound to the funding parameters of ONE action
+├─ server/throttle.js   # per-IP login lockout + trusted-proxy client-IP policy
+├─ server/security_headers.js, http_util.js, static.js   # CSP headers; JSON/body/cookie helpers; SPA static files
+├─ server/store.js      # persisted reference/config store (open budget, badges, merchant aliases, kill switch)
+├─ server/chain_conn.js, merchants.js, chain_reads.js   # walletd connection + mutex; merchant resolution; chain-authoritative reads
+├─ server/chain_ops.js  # idempotent op runner + reconciler (pending → confirmed | rejected | unknown)
+├─ server/dashboard.js, ops.js, key_sessions.js   # dashboard projection; the restricted OPS registry; API-key sessions
+├─ server/api_v1.js     # the machine-to-machine /api/v1 surface (API-key authenticated)
+├─ server/authorizer.js, audit.js, txlog.js, claims.js, apikeys.js, idempotency.js, substate.js, config.js
+│                       # custody hardening: tiered authz, durable audit, tx journal, double-spend claims, API keys…
 ├─ server/state.json    # runtime state (git-ignored): the open budget + known merchants
 ├─ public/
 │  ├─ index.html

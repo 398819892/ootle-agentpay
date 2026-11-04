@@ -27,7 +27,7 @@ re-implement any chain logic — it reuses the same internals the browser dashbo
 | --- | --- | --- |
 | The single audited exit to the chain | restricted **authorizer** (whitelist / kill switch / rate-limit / step-up) | `web/server/authorizer.js` |
 | Payment lifecycle + idempotency | **tx journal** (`pending → confirmed \| rejected \| unknown`) | `web/server/txlog.js` |
-| Balances / caps / spend | **chain-authoritative reads** | `readChainBudget` in `web/server/server.js` |
+| Balances / caps / spend | **chain-authoritative reads** | `readChainBudget` in `web/server/chain_reads.js` |
 | Operator trail | **append-only audit log** | `web/server/audit.js` |
 
 The browser dashboard (session cookie + CSRF) and the API (bearer key) coexist and don't interfere:

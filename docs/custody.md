@@ -76,7 +76,7 @@ request handler ─► authz.execute("withdraw", args, ctx) ─► [whitelist][k
 All of the following is zero-dependency Node (`node:*` only), enabled without breaking local dev.
 
 ### 3.1 Restricted authorizer — the single, audited chain exit
-`web/server/authorizer.js` + the `OPS` registry in `server.js`.
+`web/server/authorizer.js` + the `OPS` registry in `web/server/ops.js`.
 
 - Every chain-touching mutation is a **named operation in a fixed registry**: `createBudget`, `pay`,
   `addMerchant`, `withdraw`, `topUp`, `revoke`, `issueSession`, `revokeSession`, `resetLocal`,
@@ -183,7 +183,7 @@ on failure — a request could succeed while its state was never written.
 server asked the chain to do and what it last heard back. It is **never** the source of truth for
 balances. Money state is read **live from chain** every time.
 
-### 4.1 Chain-authoritative reads (`readChainBudget` in `web/server/server.js`)
+### 4.1 Chain-authoritative reads (`readChainBudget` in `web/server/chain_reads.js`)
 
 On every `/api/state`, the displayed figures are derived from chain, not accumulated locally:
 

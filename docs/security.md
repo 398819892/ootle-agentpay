@@ -155,7 +155,7 @@ stability passes above). Each item has an automated test.
   amount, a different payee) is **rejected with HTTP 409 `idempotencyConflict`** and never silently
   returns the prior receipt — closing a hole where a key collision (or a replayed key) could mask a
   second, different payment. Concurrent same-key/same-params requests still execute exactly once.
-  `web/server/idempotency.js`; enforced in `runChainOp` (`web/server/server.js`). Proven by
+  `web/server/idempotency.js`; enforced in `runChainOp` (`web/server/chain_ops.js`). Proven by
   `scripts/stability/idempotency.js` (same key + different amount/payee → 409, no new submit; same
   params → replay).
 - **Loopback bind by default; exposing requires a password (refuses to start otherwise).** `HOST`
@@ -171,7 +171,7 @@ stability passes above). Each item has an automated test.
   **actual** arguments and rejects a mismatch. So a token minted to confirm "withdraw 100" cannot be
   replayed to withdraw 900, redirected to a different payee, or reused after the budget was reset (a
   new budget has a different component id, which voids old tokens). `issueConfirmToken` /
-  `verifyConfirmToken` / `confirmParams` in `web/server/server.js`; the authorizer passes the op args
+  `verifyConfirmToken` / `confirmParams` in `web/server/stepup.js`; the authorizer passes the op args
   to `stepUp.verify`. Proven by `web/server/stepup.test.js` (10 checks: mismatch/expired/reused/
   cross-op all rejected, matching passes).
 - **High-risk audit records are durable, and a write failure fails the operation.** For a high-risk
