@@ -2451,6 +2451,25 @@ if (!isLoopbackHost(HOST) && AUTH_ON && ADMIN_PASSWORD === DASHBOARD_PASSWORD) {
   process.exit(1);
 }
 
+// Single-instance security state: the login/op throttle, the logout token-revocation list and the
+// step-up confirm tokens all live in THIS process's memory, and the double-spend guard coordinates
+// through a local claims dir — none of it is shared across replicas. Running several instances would
+// silently weaken the per-IP lockout and rate limits and make logout non-global. Until a shared store
+// exists, refuse to start when the operator has explicitly asked for multiple instances, rather than
+// degrade those protections silently. See docs/security.md "Operational assumptions".
+const MULTI_INSTANCE = /^(1|true|yes|on)$/i.test(String(process.env.AGENTPAY_MULTI_INSTANCE || ""));
+if (MULTI_INSTANCE) {
+  console.error(
+    `\nRefusing to start: AGENTPAY_MULTI_INSTANCE is set, but this build keeps the rate limits, logout\n` +
+      `revocation and step-up tokens IN-MEMORY (single-instance) and coordinates the double-spend guard\n` +
+      `through a local claims dir — none of it is shared across replicas, so multiple instances weaken\n` +
+      `those protections silently.\n` +
+      `Fix: run a SINGLE instance, or put a shared session/rate store + a shared claims volume in front\n` +
+      `first (and enforce rate limits at the proxy/WAF). See docs/security.md "Operational assumptions".\n`,
+  );
+  process.exit(1);
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`\n  AgentPay dashboard`);
   console.log(`  ├─ UI      http://localhost:${PORT}`);
