@@ -36,6 +36,16 @@ function proofWindowsDefault(): boolean {
 }
 
 /**
+ * Whether the dialect was an explicit operator choice (`AGENTPAY_PROOF_WINDOWS` set) rather than the
+ * defaulted guess. Read at instantiation, not import, so a late env change is respected. Used only to
+ * decide whether an owner-call failure carries the "maybe a dialect mismatch" hint — walletd exposes
+ * no version RPC here, so we cannot auto-detect, only avoid failing on a SILENT guess. (P1-3) */
+function proofWindowsEnvSet(): boolean {
+  const v = (typeof process !== "undefined" && process.env && process.env.AGENTPAY_PROOF_WINDOWS) || "";
+  return v.trim() !== "";
+}
+
+/**
  * A base-unit amount. Accepted as a `bigint`, a decimal-integer `string`, or a `number` — but a
  * `number` is only safe below 2^53, so anything that large must be passed as a string/bigint.
  * Base-unit amounts are integers and can exceed JS's safe-integer range, so they are carried as
@@ -284,6 +294,12 @@ export class OnChainBudget {
   readonly agentAccount: string;
   /** Open an `authorize!` window around owner-badge calls (0.49+ dialect) or not (0.47). */
   readonly proofWindows: boolean;
+  /**
+   * True when `proofWindows` was a DEFAULTED guess (neither `{ proofWindows }` nor
+   * `AGENTPAY_PROOF_WINDOWS` was set), so an owner-call failure should carry the dialect hint — we
+   * cannot auto-detect the walletd version, only avoid failing on a silent guess. (P1-3)
+   */
+  readonly proofWindowsGuessed: boolean;
 
   component: string | null = null;
   ownerBadge: string | null = null;
@@ -327,6 +343,9 @@ export class OnChainBudget {
     this.ownerAccount = ownerAccount;
     this.agentAccount = opts.agentAccount ?? ownerAccount;
     this.proofWindows = opts.proofWindows ?? proofWindowsDefault();
+    // A guess only when the caller gave neither an explicit option nor the env var — an explicit
+    // choice is never second-guessed with a hint. (P1-3)
+    this.proofWindowsGuessed = opts.proofWindows === undefined && !proofWindowsEnvSet();
   }
 
   // -- owner -----------------------------------------------------------------------
@@ -434,7 +453,7 @@ export class OnChainBudget {
       "    owner.deposit(coins);\n" +
       this.ownerProofClose() +
       "}\n";
-    await this.client.run(manifest, { owner: this.ownerAccount, budget: this.component! });
+    await this.runOwner(manifest, { owner: this.ownerAccount, budget: this.component! });
   }
 
   async addMerchant(merchant: string): Promise<void> {
@@ -547,6 +566,41 @@ export class OnChainBudget {
     return (this.proofWindows ? "    drop_authorize!(proof);\n" : "") + "    drop_all_proofs!();\n";
   }
 
+  /**
+   * A remediation hint appended to an owner-call failure when the manifest dialect was a DEFAULTED
+   * guess (walletd exposes no version RPC to auto-detect it). Owner-badge manifests use
+   * `authorize!`/`drop_authorize!` on the 0.49 dialect and omit them on 0.47; a parser that does not
+   * know the macro rejects the whole manifest, and even when it parses, the wrong dialect leaves the
+   * authorization window unopened — both otherwise hard to attribute. Mirrors the Python SDK's
+   * `_dialect_hint`. (P1-3)
+   */
+  private dialectHint(): string {
+    const assumed = this.proofWindows ? "0.49 (proof-window)" : "0.47 (pre-window)";
+    const flip = this.proofWindows ? "0" : "1";
+    return (
+      ` [owner-badge manifests assume the ${assumed} walletd dialect, DEFAULTED and not verified ` +
+      `against the daemon version; if walletd rejected this as a manifest-parse/authorization ` +
+      `mismatch, set AGENTPAY_PROOF_WINDOWS=${flip} to match your walletd.]`
+    );
+  }
+
+  /**
+   * Submit an owner-badge manifest, enriching a failure with the dialect hint when the dialect was a
+   * silent default — so a 0.47/0.49 mismatch is attributable instead of a bare rejection. A clean
+   * transport/token auth failure (`authFailed`) is left untouched; its cause is not the manifest
+   * dialect. Mirrors the Python SDK's `_run_owner`. (P1-3)
+   */
+  private async runOwner(manifest: string, variables: Record<string, string>): Promise<any> {
+    try {
+      return await this.client.run(manifest, variables);
+    } catch (e) {
+      if (this.proofWindowsGuessed && e instanceof Error && !(e as any).authFailed) {
+        e.message += this.dialectHint();
+      }
+      throw e;
+    }
+  }
+
   private async ownerCall(call: string): Promise<void> {
     const manifest =
       "fn main() {\n" +
@@ -556,7 +610,7 @@ export class OnChainBudget {
       `    budget.${call};\n` +
       this.ownerProofClose() +
       "}\n";
-    await this.client.run(manifest, { owner: this.ownerAccount, budget: this.component! });
+    await this.runOwner(manifest, { owner: this.ownerAccount, budget: this.component! });
   }
 
   // -- agent -----------------------------------------------------------------------

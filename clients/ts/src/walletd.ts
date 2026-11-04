@@ -352,7 +352,15 @@ export class WalletdClient {
     manifest: string, variables: Record<string, string>, maxFee = 200_000,
   ): Promise<string> {
     const r = await this.submitManifest(manifest, variables, maxFee, false);
-    if (r.error) throw new ChainError(r.error.message ?? "submit_manifest failed");
+    if (r.error) {
+      // Flag a TRANSPORT/token auth failure (401/403-equivalent: expired/invalid token, access
+      // denied at the RPC auth layer) so an owner-call wrapper can tell it apart from a template-level
+      // authorization reject. A dialect mismatch (0.47/0.49) surfaces as the latter, not this. Mirrors
+      // the Python SDK's `err.auth_failed` attribute (used by `_run_owner`). (P1-3)
+      const err = new ChainError(r.error.message ?? "submit_manifest failed");
+      if (isAuthError(r.error.message)) (err as any).authFailed = true;
+      throw err;
+    }
     const txId = r.result?.transaction_id ?? r.result?.hash;
     if (!txId) throw new ChainError("submit_manifest did not return a transaction id");
     this.lastTxId = String(txId);

@@ -40,6 +40,12 @@ export declare class OnChainBudget {
     readonly agentAccount: string;
     /** Open an `authorize!` window around owner-badge calls (0.49+ dialect) or not (0.47). */
     readonly proofWindows: boolean;
+    /**
+     * True when `proofWindows` was a DEFAULTED guess (neither `{ proofWindows }` nor
+     * `AGENTPAY_PROOF_WINDOWS` was set), so an owner-call failure should carry the dialect hint — we
+     * cannot auto-detect the walletd version, only avoid failing on a silent guess. (P1-3)
+     */
+    readonly proofWindowsGuessed: boolean;
     component: string | null;
     ownerBadge: string | null;
     agentBadge: string | null;
@@ -146,6 +152,22 @@ export declare class OnChainBudget {
     private ownerProofOpen;
     /** Closes the window opened by `ownerProofOpen` (0.49 dialect) and drops the proof. */
     private ownerProofClose;
+    /**
+     * A remediation hint appended to an owner-call failure when the manifest dialect was a DEFAULTED
+     * guess (walletd exposes no version RPC to auto-detect it). Owner-badge manifests use
+     * `authorize!`/`drop_authorize!` on the 0.49 dialect and omit them on 0.47; a parser that does not
+     * know the macro rejects the whole manifest, and even when it parses, the wrong dialect leaves the
+     * authorization window unopened — both otherwise hard to attribute. Mirrors the Python SDK's
+     * `_dialect_hint`. (P1-3)
+     */
+    private dialectHint;
+    /**
+     * Submit an owner-badge manifest, enriching a failure with the dialect hint when the dialect was a
+     * silent default — so a 0.47/0.49 mismatch is attributable instead of a bare rejection. A clean
+     * transport/token auth failure (`authFailed`) is left untouched; its cause is not the manifest
+     * dialect. Mirrors the Python SDK's `_run_owner`. (P1-3)
+     */
+    private runOwner;
     private ownerCall;
     private payManifest;
     /**
