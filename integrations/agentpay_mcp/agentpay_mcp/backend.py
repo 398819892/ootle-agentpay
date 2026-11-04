@@ -98,7 +98,17 @@ class AgentWallet:
                              status="rejected")
 
         # Ask the validator up front. This is a real dry run against the running network.
-        reason = self.budget.would_reject(merchant, amount, memo=memo or "pay")
+        try:
+            reason = self.budget.would_reject(merchant, amount, memo=memo or "pay")
+        except ChainError as e:
+            if getattr(e, "transient", False):
+                # The preflight dry run could not reach a verdict (indexer/transport hiccup). That is
+                # NOT a rejection — the validator never ruled. Skip the preflight and let the REAL
+                # submit be the authority: its own transient handling returns `pending` (reconcile by
+                # tx id), never a phantom "rejected_by validator". (#3)
+                reason = None
+            else:
+                raise  # a definitive non-reject failure (e.g. auth) — surface it as before
         if reason is not None:
             # A dry-run rejection by the validator: ok=False AND status="rejected". Without the explicit
             # status it would default to "accepted" (PayResult.status), so the MCP tool — which reports
@@ -141,7 +151,12 @@ class AgentWallet:
         # A tiny whitelisted probe tells us whether the kill switch has been pulled on chain.
         revoked = False
         if self.whitelist:
-            probe_reason = self.budget.would_reject(self.whitelist[0], 1, memo="status-probe")
+            try:
+                probe_reason = self.budget.would_reject(self.whitelist[0], 1, memo="status-probe")
+            except ChainError:
+                # The probe could not reach a verdict (transient/transport). Leave `revoked` as-is —
+                # an inconclusive probe must never be read as "not revoked" nor crash status(). (#3)
+                probe_reason = None
             if probe_reason and "revok" in probe_reason.lower():
                 revoked = True
         out: dict[str, Any] = {

@@ -1,8 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.WalletdClient = exports.DEFAULT_WALLETD_URL = void 0;
-exports.finalizedOutcome = finalizedOutcome;
-exports.rejectReason = rejectReason;
+exports.WalletdClient = exports.rejectReason = exports.finalizedOutcome = exports.isTransient = exports.DEFAULT_WALLETD_URL = void 0;
 /**
  * Minimal JSON-RPC client for a Tari Ootle wallet daemon (auth = `none` devnet mode).
  *
@@ -26,6 +24,7 @@ const SUBMIT_RETRY_DELAY_MS = 12000;
 function isTransient(message) {
     return TRANSIENT_MARKERS.some((m) => message.includes(m));
 }
+exports.isTransient = isTransient;
 // An admin token has a finite lifetime, so a long-running host (e.g. the dashboard server) will
 // eventually see these once its boot-time token lapses. We re-mint and retry transparently.
 const AUTH_ERROR_MARKERS = ["Expired token", "Invalid token", "Access denied", "Unauthorized"];
@@ -112,11 +111,13 @@ function finalizedOutcome(rpcResult) {
     }
     return null;
 }
+exports.finalizedOutcome = finalizedOutcome;
 /** Extract a human reject reason from a finalized-but-rejected result tree, or null if not rejected. */
 function rejectReason(result) {
     const outcome = finalizedOutcome(result);
     return outcome && outcome[0] === "reject" ? outcome[1] : null;
 }
+exports.rejectReason = rejectReason;
 class WalletdClient {
     constructor(url = exports.DEFAULT_WALLETD_URL, opts = {}) {
         this.token = null;

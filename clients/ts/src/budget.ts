@@ -8,7 +8,7 @@
  */
 import { ChainError, PolicyViolation } from "./errors";
 import { encodeMemo } from "./invoice";
-import { finalizedOutcome, WalletdClient } from "./walletd";
+import { finalizedOutcome, isTransient, WalletdClient } from "./walletd";
 import { windowStatus, WindowStatus } from "./window";
 
 /** Native Tari test token used as the (plaintext, countable) budget resource on a devnet. */
@@ -661,13 +661,36 @@ export class OnChainBudget {
    */
   async wouldReject(merchant: string, amount: AmountInput, opts: { memo?: string; session?: string } = {}): Promise<string | null> {
     const memo = opts.memo ?? "forced";
-    const r = await this.client.dryRun(this.payManifest(merchant, amount, memo, opts.session ?? this.session), {
-      agent: this.agentAccount,
-      budget: this.component!,
-    });
+    let r;
+    try {
+      r = await this.client.dryRun(this.payManifest(merchant, amount, memo, opts.session ?? this.session), {
+        agent: this.agentAccount,
+        budget: this.component!,
+      });
+    } catch (e) {
+      // The dry run never reached a verdict — a transport drop, timeout or malformed response thrown
+      // by the fetch layer. The validator did NOT rule, so this is NOT a rejection; flag it
+      // `transient` so the caller falls through to the real submit instead of reporting a phantom
+      // "validator rejected". (#3)
+      const err = e instanceof ChainError
+        ? e
+        : new ChainError(`could not verify with the validator (transient): ${(e as any)?.message ?? e}`);
+      if (!(err as any).authFailed) (err as any).transient = true;
+      throw err;
+    }
     // walletd surfaces a dry-run rejection either as an RPC error (plain message — parsed in the one
     // place cleanReason lives) or as a finalized result whose TransactionResult is Reject (structural).
-    if (r.error) return cleanReason(r.error.message ?? "rejected");
+    if (r.error) {
+      const msg = r.error.message ?? "rejected";
+      // A TRANSIENT indexer error that survived dryRun's retry loop is not a verdict either — raise it
+      // `transient` rather than parse it into a fake reject reason. (#3)
+      if (isTransient(msg)) {
+        const err = new ChainError(`could not verify with the validator (transient): ${msg}`);
+        (err as any).transient = true;
+        throw err;
+      }
+      return cleanReason(msg);
+    }
     const outcome = finalizedOutcome(r.result);
     return outcome && outcome[0] === "reject" ? outcome[1] : null;
   }

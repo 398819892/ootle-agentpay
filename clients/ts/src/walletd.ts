@@ -21,7 +21,7 @@ const TRANSIENT_MARKERS = [
 const SUBMIT_RETRIES = 30;
 const SUBMIT_RETRY_DELAY_MS = 12_000;
 
-function isTransient(message: string): boolean {
+export function isTransient(message: string): boolean {
   return TRANSIENT_MARKERS.some((m) => message.includes(m));
 }
 

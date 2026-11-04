@@ -88,11 +88,20 @@ function createOps({
         // snapshot — and never spends a fee on a certain reject. Dashboard/owner pays skip the probe.
         const submit = ctx.apiKeyId
           ? async () => {
-              const reason = await b.wouldReject(merchant, amount, { memo, session });
-              if (reason) {
-                const err = new Error(reason);
-                err.chainRejected = true; // the validator refused it on a dry-run — a definitive verdict
-                throw err;
+              try {
+                const reason = await b.wouldReject(merchant, amount, { memo, session });
+                if (reason) {
+                  const err = new Error(reason);
+                  err.chainRejected = true; // the validator refused it on a dry-run — a definitive verdict
+                  throw err;
+                }
+              } catch (e) {
+                // A TRANSIENT preflight failure (indexer/transport hiccup) is not a verdict — the
+                // validator never ruled. Skip the probe and let the real submit be the authority (its
+                // own transient handling records the tx `pending`), instead of surfacing a phantom
+                // chainRejected that burns the idempotency key on an infra blip. Re-throw a genuine
+                // reject or any other error. (#3)
+                if (!e || !e.transient) throw e;
               }
               return b.payInvoice({ merchant, invoiceId, amount, agentTag, session });
             }

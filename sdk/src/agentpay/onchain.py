@@ -1077,13 +1077,31 @@ class OnChainBudget:
                      session: str | None = None) -> str | None:
         """Ask the validator (via a dry run) whether this pay would be rejected, returning the
         on-chain reason — used to show that the *chain*, not the client, enforces the rules."""
-        r = self.client.dry_run(self._pay_manifest(merchant, amount, memo, session),
-                                {"agent": self.agent_account, "budget": self.component})
+        try:
+            r = self.client.dry_run(self._pay_manifest(merchant, amount, memo, session),
+                                    {"agent": self.agent_account, "budget": self.component})
+        except ChainError as e:
+            # The dry run never reached a verdict — a transport drop, read timeout, HTTP 5xx or a
+            # malformed envelope (all raised by _rpc). The validator did NOT rule, so this is NOT a
+            # rejection; flagging it `transient` lets the caller fall through to the real submit
+            # instead of reporting a phantom "validator rejected". A DEFINITIVE auth failure
+            # (401/403) is left unflagged — it is a hard problem to surface, not retry. (#3)
+            if not getattr(e, "auth_failed", False):
+                e.transient = True
+            raise
         # walletd surfaces a dry-run rejection either as an RPC error (a plain message string — no
         # structured field is available there, so it is parsed in the one place _clean_reason lives)
         # or as a finalized result whose TransactionResult is Reject (read structurally).
         if "error" in r:
-            return _clean_reason(r["error"].get("message", "rejected"))
+            msg = _err_message(r["error"]) or "rejected"
+            # A TRANSIENT indexer error that survived dry_run's retry loop is not a verdict either —
+            # raise it `transient` rather than parse it into a fake reject reason. Only a genuine
+            # (non-transient) RPC error is a real rejection to report. (#3)
+            if _is_transient(msg):
+                err = ChainError("could not verify with the validator (transient): " + msg)
+                err.transient = True
+                raise err
+            return _clean_reason(msg)
         outcome = _finalized_outcome(r.get("result"))
         if outcome is not None and outcome[0] == "reject":
             return outcome[1]

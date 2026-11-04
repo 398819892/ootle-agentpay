@@ -1,5 +1,6 @@
 /** Default local-swarm wallet daemon endpoint (auth = none). */
 export declare const DEFAULT_WALLETD_URL = "http://127.0.0.1:12010/json_rpc";
+export declare function isTransient(message: string): boolean;
 /** `["accept", null]` / `["reject", reason]` once finalized, else null (still pending). */
 export declare function finalizedOutcome(rpcResult: unknown): ["accept", null] | ["reject", string] | null;
 /** Extract a human reject reason from a finalized-but-rejected result tree, or null if not rejected. */
