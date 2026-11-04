@@ -1603,15 +1603,38 @@ function viewGovernance() {
     pageHead(t("nav_governance"), t("gov_sub")) +
     `<div class="stack">
       <div class="gov-grid">
-        <div class="card">
-          <div class="card__head"><h3>${esc(t("wl_merchants"))}</h3><span class="sub">${fmt(b.whitelist.length)}</span></div>
-          <div class="card__body">
-            <div class="row row--wrap" style="gap:8px;margin-bottom:16px">${chips}</div>
-            <form id="merch-form" class="addrow" novalidate>
-              <input class="input" id="g-merchant" placeholder="${esc(t("add_merchant_placeholder"))}" autocomplete="off"/>
-              <button type="submit" class="btn btn--primary" id="g-add">${icon("plus", 16)} ${esc(t("add"))}</button>
-            </form>
-            <div class="field__hint mt-12">${esc(t("gov_wl_hint"))}${b.revoked ? t("gov_wl_hint_revoked") : ""}</div>
+        <div class="gov-col">
+          <div class="card">
+            <div class="card__head"><h3>${esc(t("wl_merchants"))}</h3><span class="sub">${fmt(b.whitelist.length)}</span></div>
+            <div class="card__body">
+              <div class="row row--wrap" style="gap:8px;margin-bottom:16px">${chips}</div>
+              <form id="merch-form" class="addrow" novalidate>
+                <input class="input" id="g-merchant" placeholder="${esc(t("add_merchant_placeholder"))}" autocomplete="off"/>
+                <button type="submit" class="btn btn--primary" id="g-add">${icon("plus", 16)} ${esc(t("add"))}</button>
+              </form>
+              <div class="field__hint mt-12">${esc(t("gov_wl_hint"))}${b.revoked ? t("gov_wl_hint_revoked") : ""}</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card__head"><h3>${esc(t("limits_title"))}</h3></div>
+            <div class="card__body">
+              <form id="limits-form" novalidate>
+                <div class="form-grid">
+                  <div class="field">
+                    <label class="field__label" for="g-pertx">${esc(t("pertx_cap"))}</label>
+                    <div class="input-affix"><input class="input" id="g-pertx" type="number" min="1" value="${esc(String(b.perTxCap))}"/><span class="affix">${UNIT}</span></div>
+                    <div class="field__err">${esc(t("limits_pertx_err"))}</div>
+                  </div>
+                  <div class="field">
+                    <label class="field__label" for="g-daily">${esc(t("daily_cap"))}</label>
+                    <div class="input-affix"><input class="input" id="g-daily" type="number" min="1" value="${esc(String(b.dailyCap))}"/><span class="affix">${UNIT}</span></div>
+                    <div class="field__err">${esc(t("daily_cap_err"))}</div>
+                  </div>
+                </div>
+                <button type="submit" class="btn btn--primary btn--block" id="g-limits">${icon("zap", 16)} ${esc(t("update_limits"))}</button>
+              </form>
+              <div class="field__hint mt-12">${t("limits_hint")}</div>
+            </div>
           </div>
         </div>
         <div class="card">
@@ -1638,27 +1661,6 @@ function viewGovernance() {
               </div>
               <button type="submit" class="btn btn--secondary btn--block" id="g-withdraw" ${amtBig(b.treasury) <= 0n ? "disabled" : ""}>${icon("up", 16)} ${esc(t("withdraw_to_owner"))}</button>
             </form>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card__head"><h3>${esc(t("limits_title"))}</h3></div>
-          <div class="card__body">
-            <form id="limits-form" novalidate>
-              <div class="form-grid">
-                <div class="field">
-                  <label class="field__label" for="g-pertx">${esc(t("pertx_cap"))}</label>
-                  <div class="input-affix"><input class="input" id="g-pertx" type="number" min="1" value="${esc(String(b.perTxCap))}"/><span class="affix">${UNIT}</span></div>
-                  <div class="field__err">${esc(t("limits_pertx_err"))}</div>
-                </div>
-                <div class="field">
-                  <label class="field__label" for="g-daily">${esc(t("daily_cap"))}</label>
-                  <div class="input-affix"><input class="input" id="g-daily" type="number" min="1" value="${esc(String(b.dailyCap))}"/><span class="affix">${UNIT}</span></div>
-                  <div class="field__err">${esc(t("daily_cap_err"))}</div>
-                </div>
-              </div>
-              <button type="submit" class="btn btn--primary btn--block" id="g-limits">${icon("zap", 16)} ${esc(t("update_limits"))}</button>
-            </form>
-            <div class="field__hint mt-12">${t("limits_hint")}</div>
           </div>
         </div>
       </div>

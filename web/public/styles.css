@@ -507,11 +507,22 @@ button {
 /* ---- governance page ------------------------------------------------------ */
 /* Balanced two-column top row: the treasury card (balance + top-up + withdraw)
    carries more content than the whitelist card, so it must not be the narrow one. */
+/* Three cards used to flow into a two-column grid, leaving one empty cell and a tall
+   treasury card beside a short whitelist card — lopsided, with dead space bottom-right.
+   Instead: the left column stacks whitelist + limits tight from the top (a flex column),
+   and treasury sits in the right column at its natural height. Both columns top-align,
+   so there is no orphaned cell and no stretched-row gap between the left cards. */
 .gov-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 18px;
   align-items: start;
+}
+.gov-col {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
 }
 @media (max-width: 900px) {
   .gov-grid {
