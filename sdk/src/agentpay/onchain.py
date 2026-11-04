@@ -654,6 +654,11 @@ def _parse_budget_state(state: Any) -> dict:
         raise ValueError("unexpected budget component layout: field 8 (merchant_whitelist) is not an array")
     if not isinstance(state[9], bool):
         raise ValueError("unexpected budget component layout: field 9 (revoked) is not a boolean")
+    # Decode the merchant whitelist to `component_…` addresses. Each entry is a ComponentAddress
+    # (CBOR-tagged bytes); `_cbor_hex` reads the 32-byte payload tag-agnostically. This is the
+    # AUTHORITATIVE list the validator enforces at pay time — distinct from any client-configured,
+    # display-only whitelist. `whitelist_raw` is kept for callers that want the undecoded form.
+    whitelist = ["component_" + h for e in state[8] if (h := _cbor_hex(e)) is not None]
     return {
         "vault_hex": _cbor_hex(state[0]),
         "per_tx_cap": per_tx_cap,
@@ -662,6 +667,7 @@ def _parse_budget_state(state: Any) -> dict:
         "window_start_epoch": window_start_epoch,
         "epochs_per_window": epochs_per_window,
         "whitelist_raw": state[8],
+        "whitelist": whitelist,
         "revoked": state[9],
     }
 

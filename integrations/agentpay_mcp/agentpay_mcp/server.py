@@ -224,13 +224,18 @@ def get_budget_status() -> dict:
 
 @mcp.tool()
 def list_merchants() -> dict:
-    """List the merchant addresses the agent is allowed to pay (the on-chain whitelist).
+    """List the merchant addresses the agent is allowed to pay — the component's ON-CHAIN whitelist,
+    read live (what the validator enforces at pay time), not a client-configured list.
 
     Returns ``{"ok": true, "merchants": [...]}`` or a structured error object."""
     w, err = _wallet_or_error()
     if err:
         return err
-    return {"ok": True, "merchants": w.list_merchants()}
+    try:
+        merchants = w.list_merchants()
+    except Exception as exc:  # noqa: BLE001 — surface a chain read failure as a structured error
+        return _error("chain_error", f"could not read the on-chain whitelist: {exc}", _walletd_hint())
+    return {"ok": True, "merchants": merchants}
 
 
 @mcp.tool()

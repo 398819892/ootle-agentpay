@@ -148,41 +148,48 @@ class AgentWallet:
         ``spent_in_window=None``) rather than falling back to this process's local estimate: a stale
         cache must never masquerade as a live balance (#16). `revoked` is confirmed against the chain
         both ways — the component flag and a dry-run kill-switch probe."""
-        # A tiny whitelisted probe tells us whether the kill switch has been pulled on chain.
-        revoked = False
-        if self.whitelist:
-            try:
-                probe_reason = self.budget.would_reject(self.whitelist[0], 1, memo="status-probe")
-            except ChainError:
-                # The probe could not reach a verdict (transient/transport). Leave `revoked` as-is —
-                # an inconclusive probe must never be read as "not revoked" nor crash status(). (#3)
-                probe_reason = None
-            if probe_reason and "revok" in probe_reason.lower():
-                revoked = True
         out: dict[str, Any] = {
             "component": self.component,
-            "whitelist": list(self.whitelist),
             "enforced_by": "Tari Ootle validator (AgentBudget on-chain template)",
         }
         try:
             chain = self.budget.read_onchain_state()
-        except Exception as e:  # noqa: BLE001 — any failure means we cannot vouch for the number
-            # Never present the local estimate as a live balance: report the spend as unknown. (#16)
+        except Exception as e:  # noqa: BLE001 — any failure means we cannot vouch for the numbers
+            # Never present a display copy as live state: report the whitelist AND spend as unknown,
+            # not the client-configured whitelist (which is usually empty and would read as "no
+            # merchants"). A stale/config value must never masquerade as a chain read. (#16)
             out.update({
+                "whitelist": None,
+                "whitelist_source": "unknown",
                 "spent_source": "unknown",
                 "spent_in_window": None,
                 "remaining_in_window": None,
                 "per_tx_cap": self.per_tx_cap,   # the owner-declared policy, for display only
                 "daily_cap": self.daily_cap,
                 "caps_source": "declared",
-                "revoked": revoked,
-                "note": (f"on-chain budget state unavailable ({type(e).__name__}); spend figures are "
-                         "unknown, not estimated"),
+                "revoked": False,
+                "note": (f"on-chain budget state unavailable ({type(e).__name__}); whitelist and "
+                         "spend figures are unknown, not estimated"),
             })
             return out
+        whitelist = list(chain["whitelist"])
         spent = chain["spent_in_window"]
         daily = chain["daily_cap"]
+        # Kill-switch probe: a revoked budget refuses even a 1-unit dry run with a "revoked" reason.
+        # Probe a genuinely on-chain-whitelisted merchant; the component flag is authoritative, the
+        # probe is a second confirmation. A transient/transport failure leaves `revoked` as the flag
+        # says — an inconclusive probe must never be read as "not revoked" nor crash status(). (#3)
+        revoked = bool(chain["revoked"])
+        if whitelist and not revoked:
+            try:
+                probe_reason = self.budget.would_reject(whitelist[0], 1, memo="status-probe")
+            except ChainError:
+                probe_reason = None
+            if probe_reason and "revok" in probe_reason.lower():
+                revoked = True
         out.update({
+            "whitelist": whitelist,
+            "whitelist_source": "chain",
             "spent_source": "chain",
             "spent_in_window": spent,
             "remaining_in_window": max(daily - spent, 0),
@@ -191,8 +198,7 @@ class AgentWallet:
             "caps_source": "chain",
             "window_start_epoch": chain["window_start_epoch"],
             "epochs_per_window": chain["epochs_per_window"],
-            # revoked if EITHER the chain flag is set OR the dry-run probe was refused for revocation.
-            "revoked": revoked or bool(chain["revoked"]),
+            "revoked": revoked,
         })
         return out
 
@@ -205,7 +211,11 @@ class AgentWallet:
         return {"status": status, "tx_id": tx_id, "reason": reason}
 
     def list_merchants(self) -> list[str]:
-        return list(self.whitelist)
+        """The merchants the chain will actually accept a pay to: the component's on-chain whitelist,
+        read live. This is NOT the client-configured `whitelist` (display-only, usually empty) — the
+        validator enforces the on-chain list at pay time, so a merchant returned here is payable now.
+        Raises ChainError/Exception if the component state can't be read (the caller surfaces it)."""
+        return list(self.budget.read_onchain_state()["whitelist"])
 
 
 def connect(url: str = WALLETD_URL) -> WalletdClient:
