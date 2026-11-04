@@ -104,6 +104,24 @@ AGENTPAY_URL=$AGENTPAY_URL AGENTPAY_API_KEY=$AGENTPAY_API_KEY \
 
 ---
 
+## LLM agent (a real model spends within the budget)
+
+Give a tool-calling model three tools (`get_budget`, `list_merchants`, `pay_merchant`) backed by
+the HTTP API above — the model decides what to buy, the chain caps what it can spend. A runaway or
+prompt-injected model still cannot exceed the per-tx/daily cap or pay a non-whitelisted merchant.
+
+```bash
+pip install anthropic
+ANTHROPIC_API_KEY=sk-ant-... AGENTPAY_URL=$AGENTPAY_URL AGENTPAY_API_KEY=$AGENTPAY_API_KEY \
+  python3 examples/llm_agent.py
+```
+
+[`llm_agent.py`](llm_agent.py) reuses `agentpay_api.py` for the tools, so the model never holds the
+wallet — only the agent API key. It is the LLM-driven twin of the scripted `demo_agent.py`
+(integrations/agentpay_mcp), which drives the same idea over MCP with no API key.
+
+---
+
 ## For the owner: enabling the API
 
 The API is **off** until you configure at least one key. Set `AGENTPAY_API_KEYS` (comma/newline
