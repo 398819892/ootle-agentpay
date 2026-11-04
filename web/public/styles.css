@@ -1280,6 +1280,12 @@ table.ledger {
   width: 100%;
   border-collapse: collapse;
   font-size: 13.5px;
+  /* split the three columns (商户 / 金额 / 备注) evenly across the card width */
+  table-layout: fixed;
+}
+.ledger th,
+.ledger td {
+  width: 33.33%;
 }
 .ledger th {
   text-align: left;
@@ -1308,6 +1314,16 @@ table.ledger {
   display: flex;
   align-items: center;
   gap: 9px;
+  min-width: 0;
+}
+/* truncate the merchant name/address so a fixed-width column never overflows */
+.ledger .merchant > div:last-child {
+  min-width: 0;
+}
+.ledger .merchant > div:last-child > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .avatar {
   width: 28px;
@@ -1321,10 +1337,11 @@ table.ledger {
   color: #fff;
 }
 .memo {
+  display: block;
   font-family: var(--mono);
   font-size: 12px;
   color: var(--text-muted);
-  max-width: 220px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
