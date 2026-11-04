@@ -622,25 +622,37 @@ half-fixes.
   (or a narrow `permissions`/`credentials` request) instead of forcing an `auth=none` Admin token, the
   SDK already supports a separate `agent_account`, and the MCP integration reads all of it from env.
   See `docs/deployment-noncustodial.md`. The hosted dashboard stays custodial by design.
-- **#4 back-half — revoke doesn't retroactively close open escrows (low severity; needs a colluding
-  whitelisted merchant to cause any loss).** `revoke` freezes the budget's `pay`/`pay_via_escrow`, but
-  an escrow a leaked agent key *already opened* before the revoke is not auto-closed — the escrow has
-  no link back to the budget's revocation flag, so it runs to completion. **Exposure is bounded by the
-  escrow's own construction, not just by the timeout.** `pay_via_escrow` records **owner-pubkey = payer**
-  (only the owner can `release`/`dispute`), **owner account = refund target**, and **payee = a
-  whitelisted merchant**. So the funds in an already-open escrow can only ever go to (a) a whitelisted
-  merchant on release, or (b) back to the owner on timeout — **a leaked agent key can never redirect
-  them to the attacker, nor change the refund address.** (The front half of #4 — this payer/refund/payee
-  wiring — is fixed; this back half is only that revoke doesn't *claw back* escrows opened in the
-  pre-revoke window.) For any actual loss an attacker therefore needs **a whitelisted merchant they
-  control or collude with**, plus the pre-revoke window, to funnel funds into escrows that then release
-  to that merchant instead of timing out to the owner; absent collusion the worst case is the funds sit
-  locked and refund to the owner. The total at risk in that window is capped by `per_tx_cap` (per open)
-  and `daily_cap` (per window). **Mitigations (in place):** keep `timeout_epochs` short for agent-opened
-  escrows (`escrow_max_timeout` bounds it) so the window is small; refund destination is always the
-  owner; the merchant whitelist is owner-controlled. A full fix would give `Escrow` a link back to the
-  budget's `revoked` flag so `revoke` freezes open escrows too — but `Escrow` is **IMMUTABLE (Locked)**,
-  so that is a new deployment, not an upgrade of the deployed template; deferred pending the owner's call.
+- **#4 back-half — revoke doesn't retroactively close open escrows (NOT an exploitable loss path —
+  verified against the release code, not inferred from the design).** `revoke` freezes the budget's
+  `pay`/`pay_via_escrow`, and an escrow a leaked agent key *already opened* before the revoke is not
+  auto-clawed-back — it has no link to the budget's `revoked` flag, so it runs to completion. But a
+  line-by-line read of what "runs to completion" can do shows **no path for a leaked key, or a
+  colluding whitelisted merchant, to extract those funds:**
+  - `pay_via_escrow` opens the escrow with **`hashlock = None`** (`agent_budget/src/lib.rs:345`), so
+    the preimage-release branch is dead — `has_preimage` is structurally `false`
+    (`escrow/src/lib.rs:186-189`).
+  - `release` then requires **`caller == payer`** (`escrow/src/lib.rs:181-193`), and the payer is the
+    **owner's pubkey** (`agent_budget/src/lib.rs:339`). So **only the owner's signing key can release**;
+    the leaked *agent* key cannot, and neither can the merchant — the merchant is the **payee**, not
+    the payer.
+  - `refund` sends `withdraw_all()` to the **`payer_account` = owner account**
+    (`escrow/src/lib.rs:252-254`, `agent_budget/src/lib.rs:340`), so a timeout returns the funds to the
+    owner, never anywhere else.
+  - the merchant (payee) can at most `dispute`, and **only if the owner configured an arbiter**
+    (`escrow/src/lib.rs:263`); resolution is then by the **owner's own** arbiter. No payee-only
+    extraction exists.
+  - **Correction to an earlier draft of this note:** it claimed a colluding whitelisted merchant could
+    get an open escrow released to itself. That is wrong — agent-opened escrows carry no hashlock and
+    the payee cannot `release`, so the merchant has no release path at all.
+
+  **The only real residual is availability, not loss:** after a `revoke`, funds the agent had
+  *legitimately* escrowed before the leak stay locked until the **owner** releases them or they time
+  out and **refund to the owner**. The owner keeps full control throughout; an attacker gets nothing.
+  Bounded further by `per_tx_cap` / `daily_cap` (the pre-revoke window's total) and by a short
+  `timeout_epochs` (`escrow_max_timeout`). A contract-level claw-back (an `Escrow`→budget-`revoked`
+  link so `revoke` also freezes open escrows) would require **redeploying `Escrow`, which is IMMUTABLE
+  (Locked)** and shared by other callers — and it would close **no** exploitable path, so it is **not
+  planned**. This entry is kept as a documented completeness note, not an open finding.
 - **OTC listing bond is never slashed.** The bond round-trips to the seller on every terminal path;
   it deters spam (skin-in-the-game) but is not a penalty fund. Slashing it on an adverse resolve was
   considered and rejected: "adverse" has no crisp on-chain definition and auto-slashing would deter
