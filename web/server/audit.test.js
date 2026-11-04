@@ -144,6 +144,22 @@ async function main() {
       const freezeOk = lines.find((l) => l.op === "freeze" && l.status === "ok");
       check("a durable `attempt` record was written before the effect", Boolean(freezeAttempt), JSON.stringify(lines.map((l) => [l.op, l.status])));
       check("a durable `ok` outcome record was written", Boolean(freezeOk));
+
+      // hash-chain: every record is chained to the previous one, and the chain verifies intact…
+      check("every record carries a hash + prevHash", lines.every((l) => typeof l.hash === "string" && typeof l.prevHash === "string"), JSON.stringify(lines[0]));
+      const { createAudit } = require("./audit");
+      const v = createAudit(goodAudit).verify();
+      check("audit hash chain verifies intact", v.ok === true && v.count === lines.length, JSON.stringify(v));
+
+      // …and editing any past record is DETECTED (the classic tamper the chain exists to catch).
+      const raw = fs.readFileSync(goodAudit, "utf8").split("\n").filter(Boolean);
+      const tampered = JSON.parse(raw[0]);
+      tampered.op = tampered.op === "freeze" ? "withdraw" : "freeze"; // rewrite history, keep the hash
+      raw[0] = JSON.stringify(tampered);
+      const tamperedFile = path.join(tmp, "audit2.tampered.log");
+      fs.writeFileSync(tamperedFile, raw.join("\n") + "\n");
+      const vt = createAudit(tamperedFile).verify();
+      check("a tampered record is detected (verify fails at the edited line)", vt.ok === false && vt.brokenAt === 0, JSON.stringify(vt));
     } finally {
       be.child.kill();
     }

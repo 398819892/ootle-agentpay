@@ -19,8 +19,16 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 
 const DEFAULT_FILE = path.resolve(__dirname, "audit.log");
+// Genesis `prevHash` for the first record in a fresh log (64 hex zeros).
+const GENESIS_HASH = "0".repeat(64);
+
+/** sha256 hex of `prevHash` concatenated with the canonical (pre-hash) JSON of a record. */
+function hashRecord(prevHash, canonicalJson) {
+  return crypto.createHash("sha256").update(prevHash + "\n" + canonicalJson).digest("hex");
+}
 
 // Keys whose values must never be written to the audit log, matched case-insensitively as a
 // substring so `password`, `adminPassword`, `confirmToken`, `sessionSecret`, … are all caught.
@@ -43,15 +51,43 @@ function redact(obj) {
 }
 
 function createAudit(file = process.env.AGENTPAY_AUDIT_FILE || DEFAULT_FILE) {
-  /** Stamp the time (so the caller can't forge it) and redact secrets → the JSONL line to write. */
+  // Hash-chain head: each record carries the hash of the one before it, so a deleted or edited line
+  // breaks the chain and is detectable (`verify`). In-memory and single-instance (matches the rest of
+  // the server's security state); it is NOT a substitute for shipping the log to an append-only,
+  // off-box sink — that is what makes tampering impossible rather than merely detectable. Seeded from
+  // the last well-formed record already on disk so the chain continues across restarts.
+  let lastHash = (() => {
+    try {
+      const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const o = JSON.parse(lines[i]);
+          if (typeof o.hash === "string" && o.hash) return o.hash;
+        } catch {
+          /* skip a malformed trailing line */
+        }
+      }
+    } catch {
+      /* no file yet */
+    }
+    return GENESIS_HASH;
+  })();
+
+  /**
+   * Stamp the time (so the caller can't forge it), redact secrets, and chain the record to the
+   * previous one. Returns the JSONL text to write AND the new head hash — the caller advances
+   * `lastHash` only AFTER the bytes are durably written, so a failed write never leaves a gap.
+   */
   function buildLine(entry) {
-    const line = {
+    const base = {
       ts: new Date().toISOString(),
       ...entry,
       // defensively redact a params blob if the caller passed one raw
       params: entry && entry.params !== undefined ? redact(entry.params) : undefined,
     };
-    return JSON.stringify(line) + "\n";
+    const prevHash = lastHash;
+    const hash = hashRecord(prevHash, JSON.stringify(base));
+    return { text: JSON.stringify({ ...base, prevHash, hash }) + "\n", hash };
   }
 
   /**
@@ -60,8 +96,10 @@ function createAudit(file = process.env.AGENTPAY_AUDIT_FILE || DEFAULT_FILE) {
    * low-risk / informational entries where losing one line must not take the request path down.
    */
   function append(entry) {
+    const { text, hash } = buildLine(entry);
     try {
-      fs.appendFileSync(file, buildLine(entry));
+      fs.appendFileSync(file, text);
+      lastHash = hash; // advance the chain head only once the line is on disk
     } catch (e) {
       // Never let a best-effort audit write failure break the operation it is recording.
       console.error("warn: could not write audit log:", e.message);
@@ -75,14 +113,53 @@ function createAudit(file = process.env.AGENTPAY_AUDIT_FILE || DEFAULT_FILE) {
    * (atomic append), write, fsync the file descriptor, then close; any error propagates.
    */
   function appendStrict(entry) {
-    const data = buildLine(entry);
+    const { text, hash } = buildLine(entry);
     const fd = fs.openSync(file, "a");
     try {
-      fs.writeSync(fd, data);
+      fs.writeSync(fd, text);
       fs.fsyncSync(fd); // flush to stable storage before we report the action as recorded
     } finally {
       fs.closeSync(fd);
     }
+    lastHash = hash; // reached only if the write + fsync above did not throw
+  }
+
+  /**
+   * Verify the on-disk hash chain: each record's `hash` must equal sha256(prevHash + its canonical
+   * body), and each `prevHash` must equal the previous record's `hash`. Returns `{ ok, count,
+   * brokenAt }` — `brokenAt` is the 0-based index of the first record that fails (null if intact).
+   * A deleted, reordered or edited line is detected here. Records with no `hash` (pre-chain legacy
+   * lines) are skipped until the first chained record, which is allowed to start from GENESIS.
+   */
+  function verify() {
+    let lines;
+    try {
+      lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+    } catch {
+      return { ok: true, count: 0, brokenAt: null }; // no log yet is trivially intact
+    }
+    let prev = GENESIS_HASH;
+    let started = false;
+    let count = 0;
+    for (let i = 0; i < lines.length; i++) {
+      let o;
+      try {
+        o = JSON.parse(lines[i]);
+      } catch {
+        return { ok: false, count, brokenAt: i };
+      }
+      if (typeof o.hash !== "string") {
+        if (started) return { ok: false, count, brokenAt: i }; // a gap after the chain began
+        continue; // legacy pre-chain line before any chained record
+      }
+      const { hash, prevHash, ...body } = o;
+      const expect = hashRecord(prevHash, JSON.stringify(body));
+      if (hash !== expect || prevHash !== prev) return { ok: false, count, brokenAt: i };
+      prev = hash;
+      started = true;
+      count++;
+    }
+    return { ok: true, count, brokenAt: null };
   }
 
   /** Best-effort read of the last `limit` entries (newest last), for an operator read-out. */
@@ -104,7 +181,7 @@ function createAudit(file = process.env.AGENTPAY_AUDIT_FILE || DEFAULT_FILE) {
     }
   }
 
-  return { append, appendStrict, recent, file, redact };
+  return { append, appendStrict, recent, verify, file, redact };
 }
 
 module.exports = { createAudit, redact };
