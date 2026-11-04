@@ -51,6 +51,14 @@ def _proof_windows_default() -> bool:
     v = os.environ.get("AGENTPAY_PROOF_WINDOWS", "").strip().lower()
     return v not in ("0", "false", "no", "off")
 
+
+def _proof_windows_env_set() -> bool:
+    """Whether the dialect was an explicit operator choice (``AGENTPAY_PROOF_WINDOWS`` set) rather than
+    the defaulted guess. Read at instantiation (not import) so a late env change is respected. Used only
+    to decide whether an owner-call failure carries the "maybe a dialect mismatch" hint — the daemon
+    exposes no version RPC here, so we cannot auto-detect, only avoid failing on a SILENT guess."""
+    return os.environ.get("AGENTPAY_PROOF_WINDOWS", "").strip() != ""
+
 # --- manifest value validation (injection guard, issue #7) --------------------------------------
 # A transaction manifest is assembled as text, so EVERY value spliced into it must be validated here,
 # at the lowest layer (inside the manifest builders) — not only in `_precheck`. This way a direct SDK
@@ -751,6 +759,9 @@ class OnChainBudget:
     def __post_init__(self) -> None:
         if self.agent_account is None:
             self.agent_account = self.owner_account
+        # True when `proof_windows` is the defaulted guess, not an explicit env choice — see
+        # `_run_owner` / `_dialect_hint` (P1-3: don't fail silently on a guessed dialect).
+        self._proof_windows_guessed = not _proof_windows_env_set()
 
     def _resource_arg(self) -> str:
         """Manifest expression for the budget's resource: the ``XTR`` keyword for the native token,
@@ -868,7 +879,7 @@ class OnChainBudget:
             + self._owner_proof_close() +
             '}\n'
         )
-        self.client.run(manifest, {"owner": self.owner_account, "budget": self.component})
+        self._run_owner(manifest, {"owner": self.owner_account, "budget": self.component})
 
     def add_merchant(self, merchant: str) -> None:
         self._owner_call(f'add_merchant(address!("{_check_component(merchant)}"))')
@@ -955,6 +966,30 @@ class OnChainBudget:
         """Closes the window opened by `_owner_proof_open` (0.49 dialect) and drops the proof."""
         return ('    drop_authorize!(proof);\n' if self.proof_windows else '') + '    drop_all_proofs!();\n'
 
+    def _dialect_hint(self) -> str:
+        """A remediation hint appended to an owner-call failure when the manifest dialect was a
+        DEFAULTED guess (walletd exposes no version RPC to auto-detect it). Owner-badge manifests use
+        `authorize!`/`drop_authorize!` on the 0.49 dialect and omit them on 0.47; a parser that doesn't
+        know the macro rejects the whole manifest, which is otherwise hard to attribute (P1-3)."""
+        assumed = "0.49 (proof-window)" if self.proof_windows else "0.47 (pre-window)"
+        flip = "0" if self.proof_windows else "1"
+        return (
+            f" [owner-badge manifests assume the {assumed} walletd dialect, DEFAULTED and not verified "
+            f"against the daemon version; if walletd rejected this as a manifest-parse/authorization "
+            f"mismatch, set AGENTPAY_PROOF_WINDOWS={flip} to match your walletd.]"
+        )
+
+    def _run_owner(self, manifest: str, variables: dict[str, str]) -> dict:
+        """Submit an owner-badge manifest, enriching a failure with the dialect hint when the dialect
+        was a silent default — so a 0.47/0.49 mismatch is attributable instead of a bare rejection. A
+        clean 401/403 (auth layer) is left untouched; its cause is not the manifest dialect."""
+        try:
+            return self.client.run(manifest, variables)
+        except ChainError as e:
+            if self._proof_windows_guessed and not getattr(e, "auth_failed", False) and e.args:
+                e.args = (str(e.args[0]) + self._dialect_hint(),) + e.args[1:]
+            raise
+
     def _owner_call(self, call: str) -> None:
         manifest = (
             'fn main() {\n'
@@ -965,7 +1000,7 @@ class OnChainBudget:
             + self._owner_proof_close() +
             '}\n'
         )
-        self.client.run(manifest, {"owner": self.owner_account, "budget": self.component})
+        self._run_owner(manifest, {"owner": self.owner_account, "budget": self.component})
 
     # -- agent -----------------------------------------------------------------------
     def _pay_manifest(self, merchant: str, amount: int, memo: str, session: str | None = None) -> str:

@@ -461,6 +461,50 @@ def test_proof_windows_env_switch(monkeypatch):
     assert OnChainBudget(FakeWalletd().connect(), TPL, OWNER, proof_windows=True).proof_windows is True
 
 
+# -- P1-3: a dialect mismatch on an owner call is attributable, not a bare parser rejection ---------
+
+def _owner_budget_that_rejects(err: ChainError) -> OnChainBudget:
+    b = OnChainBudget(FakeWalletd().connect(), TPL, OWNER)
+    b.component = "component_" + "c" * 64
+    b.owner_badge = "resource_" + "a" * 64
+
+    def boom(manifest, variables, max_fee=200_000):
+        raise err
+
+    b.client.run = boom
+    return b
+
+
+def test_owner_call_failure_carries_dialect_hint_when_guessed(monkeypatch):
+    # dialect is the DEFAULTED guess (no env) → an owner-call rejection should point at the knob.
+    monkeypatch.delenv("AGENTPAY_PROOF_WINDOWS", raising=False)
+    b = _owner_budget_that_rejects(ChainError("manifest parse error: unknown instruction `authorize!`"))
+    with pytest.raises(ChainError) as ei:
+        b.revoke()  # an owner-badge call (uses the proof-window macros)
+    msg = str(ei.value)
+    assert "AGENTPAY_PROOF_WINDOWS" in msg and "DEFAULTED" in msg
+
+
+def test_owner_call_hint_suppressed_when_dialect_explicit(monkeypatch):
+    # the operator chose the dialect explicitly → no need to second-guess it in the error.
+    monkeypatch.setenv("AGENTPAY_PROOF_WINDOWS", "1")
+    b = _owner_budget_that_rejects(ChainError("manifest parse error"))
+    with pytest.raises(ChainError) as ei:
+        b.revoke()
+    assert "AGENTPAY_PROOF_WINDOWS" not in str(ei.value)
+
+
+def test_owner_call_hint_suppressed_on_auth_failure(monkeypatch):
+    # a 401/403 is the auth layer, not the manifest dialect → don't misattribute it.
+    monkeypatch.delenv("AGENTPAY_PROOF_WINDOWS", raising=False)
+    err = ChainError("walletd HTTP 401 for submit")
+    err.auth_failed = True
+    b = _owner_budget_that_rejects(err)
+    with pytest.raises(ChainError) as ei:
+        b.revoke()
+    assert "AGENTPAY_PROOF_WINDOWS" not in str(ei.value)
+
+
 # -- session selection: the pay proof carries exactly ONE badge, chosen by id ---------------
 
 def test_pay_session_override_and_client_field():
