@@ -670,6 +670,8 @@ half-fixes.
 
 ### cargo test (WSL, all green)
 escrow **26** (authz 4, conservation 4, edge 4, test 14) · otc_board **45** (authz 22, conservation 4,
-test 19) · agent_budget **28** (conservation 3, escrow_integration 10, test 15). Total **99**.
-_(This round: agent_budget +3 for the #1/#2 regression tests; escrow `new` gained an explicit `payer`.
-The reviewer's `review_probe.rs` is a throwaway diagnostic, not committed.)_
+test 19) · agent_budget **33** (conservation 3, escrow_integration 10, test 20). Total **104**.
+_(Earlier round: agent_budget +3 for the #1/#2 regression tests; escrow `new` gained an explicit `payer`.
+The reviewer's `review_probe.rs` is a throwaway diagnostic, not committed. Later: agent_budget +5 —
+the C-5 upgrade-rule pair (owner can / agent-badge cannot `UpdateComponentTemplate`) and three
+review-flagged edge cases: empty-proof, exact window-reset boundary, reissue of a revoked label.)_
