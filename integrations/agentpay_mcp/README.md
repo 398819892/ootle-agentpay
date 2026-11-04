@@ -70,7 +70,7 @@ overridable by a CLI flag. **Defaults target a local swarm, so a dev usually set
 |---|---|---|---|
 | `AGENTPAY_NETWORK` | `--network` | `local` | `local` or `esmeralda` — picks the defaults below |
 | `AGENTPAY_WALLETD_URL` | `--walletd-url` | `http://127.0.0.1:12010/json_rpc` | wallet daemon JSON-RPC |
-| `AGENTPAY_BUDGET_TEMPLATE` | `--template` | `template_978113ef…` | AgentBudget template address |
+| `AGENTPAY_BUDGET_TEMPLATE` | `--template` | *(from repo-root `defaults.json`)* | AgentBudget template address. The local default is read from `defaults.json` (single source of truth), so a swarm republish is updated in one place; this env var still overrides it |
 | `AGENTPAY_OWNER_ACCOUNT` | `--owner` | `default` | account that funds a provisioned budget |
 | `AGENTPAY_PER_TX_CAP` | `--per-tx-cap` | `1000` | per-transaction cap |
 | `AGENTPAY_DAILY_CAP` | `--daily-cap` | `1500` | per-window spending cap (fixed epoch window, not a trailing 24h) |
@@ -81,9 +81,11 @@ overridable by a CLI flag. **Defaults target a local swarm, so a dev usually set
 | `AGENTPAY_AGENT_ACCOUNT` | `--agent-account` | *(unset)* | **attach mode:** the agent's account |
 | `AGENTPAY_AUTO_PROVISION` | `--no-provision` (forces off) | `false` | open a budget automatically when none is given. Default **off** (attach / non-custodial); set `true` for local demos |
 
-**esmeralda preset:** walletd `http://127.0.0.1:5100/json_rpc`, template
-`template_88b11261…` (the current `agent_budget`, published 2026-11-01), owner `dev` (or whichever funded account your walletd holds). See
-[`../../docs/esmeralda.md`](../../docs/esmeralda.md).
+**esmeralda preset:** walletd `http://127.0.0.1:5100/json_rpc`, owner `dev` (or whichever funded
+account your walletd holds). The preset bakes **no** template address — the 0.49 esmeralda reset
+invalidated the old one, and a stale literal would look configured but fail on chain as "Template
+not found" — so pass `AGENTPAY_BUDGET_TEMPLATE` (or `--template`) with the current published address.
+See [`../../docs/esmeralda.md`](../../docs/esmeralda.md).
 
 ### Two modes (chosen automatically)
 
