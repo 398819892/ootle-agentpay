@@ -65,6 +65,12 @@ const BUDGET_TEMPLATE =
   DEFAULT_TEMPLATES.agent_budget ||
   "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f";
 const OWNER = process.env.AGENTPAY_OWNER_ACCOUNT || "default";
+// Display ticker for the native token, surfaced to the dashboard. Defaults to the testnet tTARI;
+// set AGENTPAY_TOKEN_SYMBOL (e.g. "TARI") — or AGENTPAY_NETWORK=mainnet — for mainnet, so going live
+// is a config change, not a code edit. Display-only; the on-chain manifest keyword is unaffected.
+const TOKEN_SYMBOL =
+  process.env.AGENTPAY_TOKEN_SYMBOL ||
+  (String(process.env.AGENTPAY_NETWORK || "").toLowerCase() === "mainnet" ? "TARI" : "tTARI");
 
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
 // Overridable so a container can point it at a mounted volume for persistence.
@@ -1163,7 +1169,7 @@ async function dashboardState() {
   const names = nameByAddr();
   const label = (addr) => names[addr] || null;
   const base = {
-    config: { walletdUrl: WALLETD_URL, template: BUDGET_TEMPLATE, ownerAccount: OWNER },
+    config: { walletdUrl: WALLETD_URL, template: BUDGET_TEMPLATE, ownerAccount: OWNER, tokenSymbol: TOKEN_SYMBOL },
     connected: Boolean(wd),
     owner: ownerAddr,
     merchants: Object.entries(store.merchants).map(([name, address]) => ({ name, address })),

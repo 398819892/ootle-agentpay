@@ -28,10 +28,11 @@ const readAmt = (id) => {
 const amtBig = (v) => {
   try { return BigInt(String(v ?? "").trim() || "0"); } catch { return 0n; }
 };
-// Display ticker for the native budget resource. Devnet/testnet shows tTARI (matches the SDK's
-// balance() default and docs/devnet.md); mainnet branding would be $TARI. Display-only — the
-// on-chain manifest keyword is handled separately in the SDK/client (TARI, with XTR as an alias).
-const UNIT = "tTARI";
+// Display ticker for the native budget resource. Driven by the server config (`tokenSymbol`, set via
+// AGENTPAY_TOKEN_SYMBOL / AGENTPAY_NETWORK) so going to mainnet is a config change, not a code edit;
+// defaults to the testnet tTARI until state loads. Kept in sync with the config in render(). Display-
+// only — the on-chain manifest keyword is handled separately in the SDK/client (TARI, XTR alias).
+let UNIT = "tTARI";
 
 /* ============================================================================
    i18n — a tiny, zero-dependency dictionary layer.
@@ -1833,6 +1834,8 @@ function renderLogin() {
 function render() {
   const app = el("app");
   app.removeAttribute("aria-busy");
+  // Keep the token ticker in sync with the server config (mainnet sets tokenSymbol via env).
+  if (S.data && S.data.config && S.data.config.tokenSymbol) UNIT = S.data.config.tokenSymbol;
 
   if (S.connError && !S.data) {
     app.className = "app";
