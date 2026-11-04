@@ -28,11 +28,15 @@ const readAmt = (id) => {
 const amtBig = (v) => {
   try { return BigInt(String(v ?? "").trim() || "0"); } catch { return 0n; }
 };
-// Display ticker for the native budget resource. Driven by the server config (`tokenSymbol`, set via
-// AGENTPAY_TOKEN_SYMBOL / AGENTPAY_NETWORK) so going to mainnet is a config change, not a code edit;
-// defaults to the testnet tTARI until state loads. Kept in sync with the config in render(). Display-
-// only — the on-chain manifest keyword is handled separately in the SDK/client (TARI, XTR alias).
-let UNIT = "tTARI";
+// Display ticker for budget AMOUNTS. On-chain amounts (caps, treasury, spend, pay amounts) are
+// stored as integer BASE UNITS — microTari (µT), where 1,000,000 µT = 1 whole token (tTARI / XTR).
+// So every amount here is labelled µT, matching the SDK, the MCP tools and the validator (which all
+// speak µT). Labelling the raw integers with the whole-token ticker (`tokenSymbol`) was wrong — it
+// read e.g. "1000 tTARI" for a 1000 µT (0.001 tTARI) cap, so a human reading the dashboard and an
+// agent reading the chain disagreed by 1e6. `config.tokenSymbol` still names the whole token for
+// reference; the amount ticker stays µT (Tari's base unit, test and main alike). Display-only — the
+// on-chain manifest keyword is handled separately in the SDK/client (TARI, XTR alias).
+let UNIT = "µT";
 
 /* ============================================================================
    i18n — a tiny, zero-dependency dictionary layer.
@@ -1896,8 +1900,9 @@ function renderLogin() {
 function render() {
   const app = el("app");
   app.removeAttribute("aria-busy");
-  // Keep the token ticker in sync with the server config (mainnet sets tokenSymbol via env).
-  if (S.data && S.data.config && S.data.config.tokenSymbol) UNIT = S.data.config.tokenSymbol;
+  // Amounts are base units (µT) regardless of the token's whole-unit ticker, so UNIT stays "µT"
+  // (see its declaration). `config.tokenSymbol` names the whole token but must NOT relabel the
+  // base-unit amounts — doing that was the 1e6 unit mismatch this fixes.
 
   if (S.connError && !S.data) {
     app.className = "app";
