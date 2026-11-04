@@ -116,7 +116,9 @@ const COOKIE_SECURE_ENV = process.env.COOKIE_SECURE; // "true" | "false" | undef
 // X-Forwarded-For header is client-controlled, so we do NOT trust it by default — an attacker could
 // otherwise rotate a fake XFF to dodge the per-IP lockout. Values:
 //   unset/"false" → never trust XFF; use the direct socket peer (correct for a directly-exposed box)
-//   "true"        → trust the proxy in front of us; take the left-most XFF entry (the original client)
+//   "true"        → trust a single appending proxy in front of us; take the RIGHT-most XFF entry (the
+//                   address our proxy actually observed — nginx/Caddy append it). Taking the left-most
+//                   would let a client forge its own entry and choose its throttle key (N-2).
 //   "ip,ip,…"     → trust XFF ONLY when the direct peer is one of these proxy IPs; then take the
 //                   right-most entry that is not itself a listed proxy (defeats appended spoofing)
 const TRUSTED_PROXY = String(process.env.TRUSTED_PROXY || "").trim();
