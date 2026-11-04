@@ -503,6 +503,10 @@ button {
     grid-template-columns: 1fr;
   }
 }
+/* equal-height columns: both cards stretch to the taller one so their bottoms line up */
+.grid--equal {
+  align-items: stretch;
+}
 
 /* ---- governance page ------------------------------------------------------ */
 /* Balanced two-column top row: the treasury card (balance + top-up + withdraw)

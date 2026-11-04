@@ -1488,7 +1488,7 @@ function viewPay() {
 
   return (
     pageHead(t("nav_pay"), t("pay_sub")) +
-    `<div class="grid grid--2" style="align-items:start">
+    `<div class="grid grid--2 grid--equal">
       <div class="card">
         <div class="card__head"><h3>${esc(t("send_payment"))}</h3>
           ${b.revoked ? `<span class="badge badge--danger">${icon("ban", 13)} ${esc(t("agent_revoked_badge"))}</span>` : ""}</div>
