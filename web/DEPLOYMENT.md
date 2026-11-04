@@ -60,6 +60,7 @@ session, API keys, file paths) stay env-only.
 | `COOKIE_SECURE` | recommended | `true` behind HTTPS (forces the `Secure` cookie flag). Otherwise inferred from `X-Forwarded-Proto`. |
 | `TRUSTED_PROXY` | **behind a proxy** | How to read the real client IP for the throttles. Default ignores `X-Forwarded-For` (uses the socket peer, so a forged XFF can't dodge the lockout). Set `true` (single hop) or a proxy IP list. See [`../docs/security.md`](../docs/security.md). |
 | `ALLOWED_ORIGINS` | no | Extra browser-facing origins for the CSRF origin check (the request Host is always allowed). Only for split-origin proxy setups. |
+| `AGENTPAY_ALLOWED_HOSTS` | **network deploy** | The public hostname(s) served (comma-separated, no scheme). The server pins the request `Host` to an allowlist (loopback + bound address + `ALLOWED_ORIGINS` hosts + these) so a DNS-rebinding page can't drive the API with a self-consistent evil `Host`+`Origin`. Loopback dev needs none; a network bind that sets neither this nor `ALLOWED_ORIGINS` leaves the Host allowlist un-enforced (a startup note warns). |
 | `AGENTPAY_WALLETD_URL` | yes | walletd JSON-RPC URL, e.g. `http://walletd:5100/json_rpc`. |
 | `AGENTPAY_BUDGET_TEMPLATE` | yes | esmeralda AgentBudget template (below). |
 | `AGENTPAY_OWNER_ACCOUNT` | yes | Funded owner account name (`dev` on esmeralda). |

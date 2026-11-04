@@ -106,10 +106,11 @@ function createOps({
             { merchant, amount, invoiceId, memo, session },
             submit,
             { merchant, amount, memo }, // fingerprint on what the money DOES, not the (often auto-generated) invoiceId
+            { guardInflight: false }, // pay dedups on the caller's Idempotency-Key; its fingerprint omits the caller, so a fingerprint-only inflight guard would block two agents paying alike (multi-tenant)
           );
         } catch (e) {
           // Surface the chain's own reason as a friendly 422, distinct from a server fault.
-          if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
+          if (e.idempotencyConflict || e.inflightDuplicate) throw e; // preserve the 409 (reused key with different params, or an identical op still in flight)
           throw httpError(422, chainMessage(e));
         }
         ctx.meta.txId = (r.record && r.record.txId) || invoiceId;
@@ -161,7 +162,7 @@ function createOps({
         try {
           r = await runChainOp(key, "removeMerchant", b.component, { merchant: address }, () => b.removeMerchant(address));
         } catch (e) {
-          if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
+          if (e.idempotencyConflict || e.inflightDuplicate) throw e; // preserve the 409 (reused key with different params, or an identical op still in flight)
           throw httpError(422, chainMessage(e));
         }
         ctx.meta.txId = r.record.txId;
@@ -188,7 +189,7 @@ function createOps({
         try {
           r = await runChainOp(key, "setLimits", b.component, { perTxCap, dailyCap }, () => b.setLimits(perTxCap, dailyCap));
         } catch (e) {
-          if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
+          if (e.idempotencyConflict || e.inflightDuplicate) throw e; // preserve the 409 (reused key with different params, or an identical op still in flight)
           throw httpError(422, chainMessage(e));
         }
         ctx.meta.txId = r.record.txId;
@@ -239,7 +240,7 @@ function createOps({
         try {
           r = await runChainOp(key, "topUp", b.component, { amount }, () => b.topUp(amount));
         } catch (e) {
-          if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
+          if (e.idempotencyConflict || e.inflightDuplicate) throw e; // preserve the 409 (reused key with different params, or an identical op still in flight)
           throw httpError(422, chainMessage(e));
         }
         ctx.meta.txId = r.record.txId;
@@ -290,7 +291,7 @@ function createOps({
         try {
           r = await runChainOp(key, "issueSession", b.component, { session }, () => b.issueAgentBadge(session));
         } catch (e) {
-          if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
+          if (e.idempotencyConflict || e.inflightDuplicate) throw e; // preserve the 409 (reused key with different params, or an identical op still in flight)
           throw httpError(422, chainMessage(e));
         }
         ctx.meta.txId = r.record.txId;
@@ -316,7 +317,7 @@ function createOps({
         try {
           r = await runChainOp(key, "revokeSession", b.component, { session }, () => b.revokeSession(session));
         } catch (e) {
-          if (e.idempotencyConflict) throw e; // preserve the 409 for a reused key with different params
+          if (e.idempotencyConflict || e.inflightDuplicate) throw e; // preserve the 409 (reused key with different params, or an identical op still in flight)
           throw httpError(422, chainMessage(e));
         }
         ctx.meta.txId = r.record.txId;

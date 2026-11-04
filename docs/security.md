@@ -94,13 +94,18 @@ refused; "no cookie ⇒ nothing to abuse" is false. Only the synchronizer **toke
 it is active just when `DASHBOARD_PASSWORD` is set.
 
 - **CSRF defense (three checks on every state-changing POST).**
-  1. **Origin/Referer check (always on)** — a cross-site POST (`Origin` present and not matching the
-     Host, or a non-matching `Referer`) is refused with **403** before anything else. The request's own
-     Host is always allowed; `ALLOWED_ORIGINS` adds others for split-origin proxies. A request with
-     *neither* header is a non-browser client (curl, server-to-server), which is not subject to a
-     browser CSRF and is let through to the auth + token checks. A browser sends `Origin` on every
+  1. **Origin/Referer check + Host allowlist (always on)** — a cross-site POST (`Origin` present and not
+     matching the Host, or a non-matching `Referer`) is refused with **403** before anything else. The
+     request's own Host is always allowed; `ALLOWED_ORIGINS` adds others for split-origin proxies. A
+     request with *neither* header is a non-browser client (curl, server-to-server), which is not subject
+     to a browser CSRF and is let through to the auth + token checks. A browser sends `Origin` on every
      cross-site POST — including a `no-cors` `fetch` and a `<form>` submit — so this alone blocks the
-     web-page vector.
+     web-page vector. Because the Origin check is *Host-relative* and the `Host` header is
+     attacker-influenceable (**DNS rebinding**: a page on `evil.example` rebound to `127.0.0.1` sends a
+     self-consistent `Host`+`Origin`), the `Host` is additionally pinned to an allowlist — loopback +
+     the bound address + `ALLOWED_ORIGINS` hosts + `AGENTPAY_ALLOWED_HOSTS`. Enforced whenever we can
+     enumerate the valid hosts: always on a loopback bind (the vulnerable dev case), and on any deploy
+     that configured an origin/host list. (`hostAllowed` in `web/server/csrf.js`; `rebind.test.js`.)
   2. **JSON-only body (always on)** — a POST that carries a body must be `Content-Type: application/json`,
      else **415**. A cross-site `<form>` or a `no-cors` `fetch` can only send a "simple" content type
      (`text/plain` / `x-www-form-urlencoded` / `multipart`) — never `application/json` without a CORS
@@ -158,6 +163,15 @@ stability passes above). Each item has an automated test.
   `web/server/idempotency.js`; enforced in `runChainOp` (`web/server/chain_ops.js`). Proven by
   `scripts/stability/idempotency.js` (same key + different amount/payee → 409, no new submit; same
   params → replay).
+- **In-flight duplicate guard (refresh-and-retry double-spend).** An idempotency key is what dedups a
+  retry, but it only helps if the retry carries the *same* key. The dashboard persists the live key to
+  `localStorage` so a page reload reuses it, but a reload could still drop it (storage cleared/disabled)
+  and an owner op (`withdraw`, `top-up`, cap/whitelist/session changes) with no client key mints a fresh
+  random one — which would sidestep the same-key replay and submit a **second real tx**. So `runChainOp`
+  also refuses when an **identical-fingerprint** record is still open (pending/unknown), with HTTP 409
+  `inflightDuplicate`, and lets reconcile settle the original by its tx id. `pay` is exempt (its
+  fingerprint omits the caller, so two agents paying alike must not collide — it dedups on the required
+  `Idempotency-Key` instead). `web/server/chain_ops.js`; proven by `web/server/inflight.test.js`.
 - **Loopback bind by default; exposing requires a password (refuses to start otherwise).** `HOST`
   defaults to `127.0.0.1`, so the custodial dashboard is not reachable from the network unless the
   operator deliberately sets `HOST=0.0.0.0` (or a specific interface) — and if they do so **without**

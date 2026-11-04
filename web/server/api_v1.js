@@ -416,6 +416,7 @@ function createApiV1({
       if (e.frozen) payload.frozen = true;
       if (e.rateLimited) payload.rateLimited = true;
       if (e.idempotencyConflict) payload.idempotencyConflict = true;
+      if (e.inflightDuplicate) payload.inflightDuplicate = true;
       if (e.auditUnavailable) payload.auditUnavailable = true;
       if (e.confirmRequired) payload.confirmRequired = true; // not expected for admin keys (token auto-minted)
       return sendJson(res, status, payload);

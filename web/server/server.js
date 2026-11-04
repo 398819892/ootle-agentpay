@@ -39,7 +39,7 @@ const {
   PORT, HOST, WALLETD_URL, BUDGET_TEMPLATE, OWNER, NETWORK, TOKEN_SYMBOL, PUBLIC_DIR, STATE_FILE,
   FINALIZE_TRIES, FINALIZE_DELAY_MS, DASHBOARD_PASSWORD, AUTH_ON, AUTO_CREATE_MERCHANTS, REQUIRE_KEY_SESSIONS,
   SESSION_SECRET, SESSION_TTL_MS, COOKIE_NAME, TRUSTED_PROXY, ALLOWED_ORIGINS, ADMIN_PASSWORD, STEP_UP_ON,
-  CONFIRM_TTL_MS, LOGIN_MAX_FAILS, LOGIN_LOCK_MS,
+  CONFIRM_TTL_MS, LOGIN_MAX_FAILS, LOGIN_LOCK_MS, ALLOWED_HOSTS, HOST_CHECK_ON, hostnameOf,
 } = require("./settings");
 const { httpError, toAmount, big, clampStr, sendJson, readBody, parseCookies } = require("./http_util");
 const { applySecurityHeaders } = require("./security_headers");
@@ -96,6 +96,9 @@ const { revokedSids, pruneRevokedSids, signSession, verifySession, isAuthed, pas
 const { csrfTokenFor, csrfTokenOk, originAllowed, hasRequestBody, contentTypeIsJson } = createCsrf({
   secret: SESSION_SECRET,
   allowedOrigins: ALLOWED_ORIGINS,
+  allowedHosts: ALLOWED_HOSTS,
+  hostCheckOn: HOST_CHECK_ON,
+  hostnameOf,
 });
 const { clientIp, loginLocked, noteLoginFail, noteLoginOk, trustedProxyIps: TRUSTED_PROXY_IPS } = createLoginThrottle({
   trustedProxy: TRUSTED_PROXY,
@@ -412,6 +415,7 @@ const server = http.createServer(async (req, res) => {
     if (e.frozen) payload.frozen = true;
     if (e.rateLimited) payload.rateLimited = true;
     if (e.idempotencyConflict) payload.idempotencyConflict = true;
+    if (e.inflightDuplicate) payload.inflightDuplicate = true;
     if (e.auditUnavailable) payload.auditUnavailable = true;
     if (e.confirmRequired) {
       payload.confirmRequired = true;
@@ -481,6 +485,13 @@ server.listen(PORT, HOST, () => {
   console.log(`  ├─ owner   ${OWNER}`);
   console.log(`  ├─ auth    ${AUTH_ON ? "ON (DASHBOARD_PASSWORD set)" : "OFF — local dev mode, do NOT expose"}`);
   console.log(`  ├─ csrf    ${AUTH_ON ? "ON — Origin check + X-CSRF-Token on every POST" : "Origin + JSON-only on every POST (no token: no auth)"}`);
+  console.log(
+    `  ├─ host    ${
+      HOST_CHECK_ON
+        ? `allowlist ON — Host must be one of [${[...ALLOWED_HOSTS].join(", ")}] (anti DNS-rebinding)`
+        : "allowlist OFF — exposed bind with no AGENTPAY_ALLOWED_HOSTS; set it to pin the public hostname(s)"
+    }`,
+  );
   console.log(
     `  ├─ proxy   ${
       !TRUSTED_PROXY || TRUSTED_PROXY.toLowerCase() === "false"

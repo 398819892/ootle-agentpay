@@ -5,7 +5,7 @@
 
 const crypto = require("node:crypto");
 
-function createCsrf({ secret: SESSION_SECRET, allowedOrigins: ALLOWED_ORIGINS }) {
+function createCsrf({ secret: SESSION_SECRET, allowedOrigins: ALLOWED_ORIGINS, allowedHosts: ALLOWED_HOSTS, hostCheckOn: HOST_CHECK_ON, hostnameOf }) {
   // ---- CSRF (synchronizer token bound to the session) ------------------------------------------
   // A cookie-authenticated API is exposed to CSRF: a malicious page can make the browser POST with the
   // session cookie attached. We defend with TWO independent checks on every state-changing request
@@ -42,9 +42,17 @@ function createCsrf({ secret: SESSION_SECRET, allowedOrigins: ALLOWED_ORIGINS })
       return false;
     }
   }
+  // The Host header is attacker-influenceable (DNS rebinding), so a self-consistent Host+Origin pair is
+  // not enough on its own. When we can enumerate our valid hostnames, pin the Host to that allowlist so
+  // a rebound evil.example can never pass even with a matching Origin. See settings.js (ALLOWED_HOSTS).
+  function hostAllowed(req) {
+    if (!HOST_CHECK_ON) return true;
+    return ALLOWED_HOSTS.has(hostnameOf(req.headers.host));
+  }
   function originAllowed(req) {
     const host = String(req.headers.host || "").toLowerCase();
     if (!host) return false;
+    if (!hostAllowed(req)) return false; // anti DNS-rebinding: the Host itself must be one we serve
     const origin = req.headers.origin;
     if (origin) return origin !== "null" && hostMatches(origin, host);
     const ref = req.headers.referer || req.headers.referrer;
@@ -61,7 +69,7 @@ function createCsrf({ secret: SESSION_SECRET, allowedOrigins: ALLOWED_ORIGINS })
   function contentTypeIsJson(req) {
     return String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase() === "application/json";
   }
-  return { csrfTokenFor, csrfTokenOk, hostMatches, originAllowed, hasRequestBody, contentTypeIsJson };
+  return { csrfTokenFor, csrfTokenOk, hostMatches, hostAllowed, originAllowed, hasRequestBody, contentTypeIsJson };
 }
 
 module.exports = { createCsrf };

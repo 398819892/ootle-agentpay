@@ -925,28 +925,52 @@ async function api(path, body) {
  * is bound to the op + its exact parameters and rotates only once an attempt FINISHES one way or the
  * other: an identical retry reuses it (dedup), while a deliberate identical repeat after success — or
  * the same op with edited inputs — gets a fresh key. Token-gated ops (open budget, withdraw, revoke,
- * add merchant, issue/revoke session, reset) don't need this; their single-use token blocks replay. */
+ * add merchant, issue/revoke session, reset) don't need this; their single-use token blocks replay.
+ *
+ * The LIVE slot (one with an unresolved attempt) is mirrored to localStorage so it survives a page
+ * RELOAD — the single most likely thing a user does to a tx that looks stuck — and is shared across
+ * tabs. Without that the reload would drop the in-memory key, the retry would mint a fresh one, and the
+ * server (which has no other dedup for pay/top-up) would submit a second real tx. A slot is cleared
+ * from storage the moment its attempt resolves, so a later deliberate repeat still gets a fresh key.
+ * All access is wrapped: a browser with storage disabled simply falls back to in-memory (reload-fragile
+ * again, but no worse than before). The server's in-flight guard still backs up top-up regardless. */
+const _IDEM_NS = "agentpay.idem.";
+function _idemLoad(slot) {
+  try { return window.localStorage.getItem(_IDEM_NS + slot) || undefined; } catch { return undefined; }
+}
+function _idemStore(slot, key) {
+  try { window.localStorage.setItem(_IDEM_NS + slot, key); } catch { /* storage disabled: in-memory only */ }
+}
+function _idemClear(slot) {
+  try { window.localStorage.removeItem(_IDEM_NS + slot); } catch { /* ignore */ }
+}
 const _idemSlots = Object.create(null);
 function _rid() {
   return (window.crypto && crypto.randomUUID && crypto.randomUUID()) ||
     Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
 }
+function _idemRotate(slot) {
+  delete _idemSlots[slot];
+  _idemClear(slot);
+}
 async function idemPost(path, body, op, sig) {
   const slot = op + "|" + sig;
-  if (!_idemSlots[slot]) _idemSlots[slot] = op + ":" + _rid();
+  // Reuse an in-memory key, else a persisted one from a prior page load, else mint a fresh one.
+  if (!_idemSlots[slot]) _idemSlots[slot] = _idemLoad(slot) || op + ":" + _rid();
+  _idemStore(slot, _idemSlots[slot]); // persist the live key so a reload can reuse it
   try {
     const r = await api(path, { ...body, idempotencyKey: _idemSlots[slot] });
     // A journaled "unknown" comes back HTTP 200 with {pending:true}: the tx MAY have landed. That is
     // the AMBIGUOUS case — keep the key so a manual retry reuses it and the server dedups, instead of
     // minting a fresh key and paying twice. Only a DEFINITIVE success rotates it. (Once the op resolves,
     // the next identical submit returns the server's cached result — not pending — and rotates here.) (N-3)
-    if (!(r && r.pending === true)) delete _idemSlots[slot];
+    if (!(r && r.pending === true)) _idemRotate(slot);
     return r;
   } catch (err) {
     // Definitive "it did not happen" statuses let the key rotate, so the user can fix the input and
     // resubmit without a stale-key conflict. A network throw or a 5xx is AMBIGUOUS — keep the key so
     // the retry carries it and the server collapses a duplicate.
-    if (err && [400, 401, 403, 404, 409, 422].includes(err.status)) delete _idemSlots[slot];
+    if (err && [400, 401, 403, 404, 409, 422].includes(err.status)) _idemRotate(slot);
     throw err;
   }
 }

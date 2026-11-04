@@ -154,7 +154,7 @@ function createChainOps({
    * cross-process filesystem claim (claims.js) so that multiple instances sharing one filesystem never
    * submit the same key twice. See docs/stability.md for the cross-HOST limit that remains.
    */
-  async function runChainOp(key, opName, component, params, submitFn, fpParams) {
+  async function runChainOp(key, opName, component, params, submitFn, fpParams, opts = {}) {
     // Bind this key to a fingerprint of its FUNDING-RELEVANT parameters: a repeat of the key with
     // different parameters (amount, payee, memo…) must NOT silently replay the prior receipt (see
     // idempotency.js). The fingerprint is computed from `fpParams` when the op supplies it, else from
@@ -170,6 +170,29 @@ function createChainOps({
     if (prior) {
       if (fpConflicts(prior.fp, fp)) throw idempotencyConflict(key);
       return await replayPrior(prior);
+    }
+
+    // In-flight duplicate guard: an IDENTICAL operation (same fingerprint) is still unresolved under a
+    // DIFFERENT key. That is the refresh-and-retry case — an owner op whose stable client key was lost
+    // (a page reload drops the in-memory idempotency slot, so the retry mints a fresh random key) while
+    // the first submit is still pending/unknown on chain. Without this, the fresh key sidesteps the
+    // same-key fast path above and submits a SECOND real tx (a double-spend). Refuse instead, exactly
+    // like the createBudget inflight guard, and let reconcile settle the original by its tx id.
+    //   NOT applied to `pay` (opts.guardInflight === false): its fingerprint excludes the caller, so two
+    //   different agents legitimately paying the same merchant the same amount would collide here. The
+    //   pay path dedups on the caller-supplied Idempotency-Key instead (required on /api/v1; persisted
+    //   across reloads by the dashboard). Every other op has a single owner caller, so same-fingerprint
+    //   + still-open is always an accidental resubmit.
+    if (opts.guardInflight !== false && fp) {
+      const twin = txlog.pendingOrUnknown().find((r) => r.key !== key && r.op === opName && r.fp === fp);
+      if (twin) {
+        throw httpError(
+          409,
+          "An identical " + opName + " is still unresolved (tx " + (twin.txId || "pending") +
+            "). Wait for it to confirm or reconcile before retrying, so it is not submitted twice.",
+          { inflightDuplicate: true, key: twin.key },
+        );
+      }
     }
 
     // No local record yet. Before submitting anything, take the CROSS-PROCESS claim on this key. On a

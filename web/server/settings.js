@@ -103,6 +103,37 @@ const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || "")
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
 
+// Host allowlist — defence against DNS rebinding. The Origin/Referer check (csrf.js) proves a POST's
+// Origin matches the request's OWN Host header, but a Host header is attacker-influenceable: a page on
+// evil.example whose DNS has been rebound to 127.0.0.1 sends a SELF-CONSISTENT Host: evil.example +
+// Origin: http://evil.example that would pass. Pinning the Host to a known set closes that: the browser
+// is the confused deputy, but it can only reach us under a name we accept. Loopback names are always
+// allowed (the dev case); the bound address and any configured origins are folded in; AGENTPAY_ALLOWED_HOSTS
+// adds the public hostname(s) a network deployment is served under. Compared on hostname only (no port).
+function hostnameOf(hostHeader) {
+  const h = String(hostHeader || "").trim().toLowerCase();
+  if (!h) return "";
+  if (h.startsWith("[")) return h.slice(1, h.indexOf("]") === -1 ? undefined : h.indexOf("]")); // [::1]:port → ::1
+  const i = h.lastIndexOf(":");
+  // Strip a trailing :port, but leave a bare IPv6 literal (which has several colons and no brackets) intact.
+  return i !== -1 && h.indexOf(":") === i ? h.slice(0, i) : h;
+}
+const ALLOWED_HOSTS = (() => {
+  const set = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
+  for (const o of ALLOWED_ORIGINS) { try { set.add(new URL(o).hostname.toLowerCase()); } catch { /* ignore */ } }
+  for (const h of String(process.env.AGENTPAY_ALLOWED_HOSTS || "").split(",").map((s) => hostnameOf(s)).filter(Boolean)) set.add(h);
+  if (HOST && HOST !== "0.0.0.0" && HOST !== "::") set.add(hostnameOf(HOST));
+  return set;
+})();
+// Enforce the Host allowlist only when we can actually enumerate the valid hosts: always on a loopback
+// bind (the DNS-rebinding-exposed dev case), and whenever the operator configured an origin/host list.
+// A network-exposed deployment that set neither can be served under a hostname we cannot guess, so we
+// fall back to not enforcing there (a startup note nudges the operator) — its password + CSRF token
+// still stand. Set AGENTPAY_ALLOWED_HOSTS to turn enforcement on for such a deployment.
+const _hostLoopback = ["127.0.0.1", "::1", "localhost", ""].includes(String(HOST).trim().toLowerCase());
+const HOST_CHECK_ON =
+  _hostLoopback || ALLOWED_ORIGINS.length > 0 || String(process.env.AGENTPAY_ALLOWED_HOSTS || "").trim() !== "";
+
 // ---- hardening config (custody boundary) ----------------------------------------------------
 // High-risk owner actions (withdraw, revoke, change whitelist, mint/revoke an agent badge, reset,
 // freeze/unfreeze) require a SECOND confirmation that is independent of the login session: the
@@ -123,5 +154,6 @@ module.exports = {
   PORT, HOST, WALLETD_URL, BUDGET_TEMPLATE, OWNER, NETWORK, TOKEN_SYMBOL, PUBLIC_DIR, STATE_FILE,
   FINALIZE_TRIES, FINALIZE_DELAY_MS, DASHBOARD_PASSWORD, AUTH_ON, AUTO_CREATE_MERCHANTS, REQUIRE_KEY_SESSIONS,
   SESSION_SECRET, SESSION_TTL_MS, COOKIE_NAME, COOKIE_SECURE_ENV, TRUSTED_PROXY, ALLOWED_ORIGINS,
+  ALLOWED_HOSTS, HOST_CHECK_ON, hostnameOf,
   ADMIN_PASSWORD, STEP_UP_ON, CONFIRM_TTL_MS, LOGIN_MAX_FAILS, LOGIN_LOCK_MS,
 };
