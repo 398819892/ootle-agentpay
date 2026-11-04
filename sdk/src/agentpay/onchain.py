@@ -775,6 +775,8 @@ class OnChainBudget:
         # True when `proof_windows` is the defaulted guess, not an explicit env choice — see
         # `_run_owner` / `_dialect_hint` (P1-3: don't fail silently on a guessed dialect).
         self._proof_windows_guessed = not _proof_windows_env_set()
+        # Cache of account NAME -> component address resolutions (see `_account_var`).
+        self._account_addr_cache: dict[str, str] = {}
 
     @classmethod
     def from_config(cls, client: "WalletdClient", *, budget_template: str | None = None,
@@ -803,6 +805,22 @@ class OnChainBudget:
         else a strictly-validated ``address!("resource_…")``. Keeps the resource out of a raw string
         splice (same injection guard as every other spliced value)."""
         return _NATIVE_KEYWORD if self.resource in _NATIVE_ALIASES else f'address!("{_check_resource(self.resource)}")'
+
+    def _account_var(self, account: str) -> str:
+        """Resolve an account reference for a manifest ``var!`` binding. A ``component_…`` address is
+        passed through unchanged; a human account NAME (such as the ``"default"`` that ``owner_account``
+        / ``agent_account`` default to) is resolved to its component address via walletd. The manifest
+        parser needs an address literal there — a dry-run ``pay`` bound to a bare name fails with
+        ``Invalid manifest value 'default'`` while the real submit happens to resolve it, so an
+        attach-mode caller can configure the agent as a name and have both paths work. Resolutions are
+        cached per budget instance so repeated pays don't re-list the wallet's accounts each time."""
+        if _COMPONENT_RE.match(account):
+            return account
+        cached = self._account_addr_cache.get(account)
+        if cached is None:
+            cached = self.client.account_address(account)
+            self._account_addr_cache[account] = cached
+        return cached
 
     # -- owner -----------------------------------------------------------------------
     def open(self, *, fund: int, per_tx_cap: int, daily_cap: int,
@@ -955,7 +973,7 @@ class OnChainBudget:
             '}\n'
         )
         self.client.run(manifest, {"owner": self.owner_account, "budget": self.component,
-                                   "agent": target})
+                                   "agent": self._account_var(target)})
         if session not in self.sessions:
             self.sessions.append(session)
         if session in self.revoked_sessions:          # mirrors the template on a successful mint; note a
@@ -1060,7 +1078,7 @@ class OnChainBudget:
         ``session`` selects which issued session badge pays (defaults to ``self.session``)."""
         self._precheck(merchant, amount)
         res = self.client.run(self._pay_manifest(merchant, amount, memo, session),
-                              {"agent": self.agent_account, "budget": self.component})
+                              {"agent": self._account_var(self.agent_account), "budget": self.component})
         for ev in self.pay_events(res):      # ledger follows the chain's events
             # Track spend from the chain's OWN running total (`spent_in_window`), not by accumulating
             # locally. The on-chain window resets lazily, so a local accumulator keeps growing past a
@@ -1077,9 +1095,12 @@ class OnChainBudget:
                      session: str | None = None) -> str | None:
         """Ask the validator (via a dry run) whether this pay would be rejected, returning the
         on-chain reason — used to show that the *chain*, not the client, enforces the rules."""
+        # Resolve the agent account BEFORE the try: a bad account name is a config error, not a
+        # transient dry-run failure, so it must not be swallowed and reflagged `transient` below.
+        agent = self._account_var(self.agent_account)
         try:
             r = self.client.dry_run(self._pay_manifest(merchant, amount, memo, session),
-                                    {"agent": self.agent_account, "budget": self.component})
+                                    {"agent": agent, "budget": self.component})
         except ChainError as e:
             # The dry run never reached a verdict — a transport drop, read timeout, HTTP 5xx or a
             # malformed envelope (all raised by _rpc). The validator did NOT rule, so this is NOT a

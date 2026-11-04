@@ -38,7 +38,9 @@ class _DryRunClient(WalletdClient):
 def _budget(reply) -> OnChainBudget:
     return OnChainBudget(
         client=_DryRunClient(reply), budget_template="template_x",
-        owner_account="acc", agent_account="acc",
+        # agent is an ADDRESS so the dry-run path binds it straight through (no accounts.list lookup);
+        # these cases test transient classification, which is independent of the account's form.
+        owner_account="acc", agent_account="component_" + "e" * 64,
         component="component_" + "a" * 64, agent_badge="resource_" + "b" * 64,
     )
 
