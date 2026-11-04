@@ -923,6 +923,66 @@ button {
   opacity: 0.6;
 }
 
+/* ---- merchant whitelist as a vertical list (one merchant per row) ---------- */
+.merch-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.merch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--border);
+}
+.merch-row:first-child {
+  border-top: 0;
+}
+.merch-row .chip__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+.merch-row__name {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.merch-row__addr {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.merch-row__rm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+}
+.merch-row__rm:hover,
+.merch-row__rm:focus-visible {
+  background: var(--danger-tint);
+  color: var(--danger);
+  outline: none;
+}
+.merch-empty {
+  padding: 14px;
+  font-size: 13px;
+}
+
 /* ---- address pill (truncate + copy) --------------------------------------- */
 .addr {
   display: inline-flex;

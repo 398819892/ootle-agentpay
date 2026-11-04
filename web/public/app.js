@@ -1701,15 +1701,17 @@ function viewMerchants() {
   const d = S.data;
   const b = d.budget;
   if (!b) return noBudget(t("nav_merchants"), t("merchants_nobudget_sub"));
-  const chips = b.whitelist.length
+  const rows = b.whitelist.length
     ? b.whitelist
         .map(
-          (m) => `<span class="chip"><span class="chip__dot" style="background:${avatarColor(m.name || m.address)}"></span>
-          ${m.name ? `<b>${esc(m.name)}</b>` : ""}<code>${esc(shorten(m.address, 10, 6))}</code>
-          <button type="button" class="chip__rm" data-remove-merchant="${esc(m.address)}" data-merchant-name="${esc(m.name || "")}" title="${esc(t("remove_merchant"))}" aria-label="${esc(t("remove_merchant"))}">${icon("x", 12)}</button></span>`,
+          (m) => `<div class="merch-row">
+            <span class="chip__dot" style="background:${avatarColor(m.name || m.address)}"></span>
+            ${m.name ? `<b class="merch-row__name">${esc(m.name)}</b>` : ""}<code class="merch-row__addr">${esc(shorten(m.address, 10, 6))}</code>
+            <button type="button" class="chip__rm merch-row__rm" data-remove-merchant="${esc(m.address)}" data-merchant-name="${esc(m.name || "")}" title="${esc(t("remove_merchant"))}" aria-label="${esc(t("remove_merchant"))}">${icon("x", 12)}</button>
+          </div>`,
         )
         .join("")
-    : `<span class="muted" style="font-size:13px">${esc(t("no_wl_merchants"))}</span>`;
+    : `<div class="merch-empty muted">${esc(t("no_wl_merchants"))}</div>`;
 
   return (
     pageHead(t("nav_merchants"), t("merchants_sub")) +
@@ -1717,12 +1719,12 @@ function viewMerchants() {
       <div class="card">
         <div class="card__head"><h3>${esc(t("wl_merchants"))}</h3><span class="sub">${fmt(b.whitelist.length)}</span></div>
         <div class="card__body">
-          <div class="row row--wrap" style="gap:8px;margin-bottom:16px">${chips}</div>
           <form id="merch-form" class="addrow" novalidate>
             <input class="input" id="g-merchant" placeholder="${esc(t("add_merchant_placeholder"))}" autocomplete="off"/>
             <button type="submit" class="btn btn--primary" id="g-add">${icon("plus", 16)} ${esc(t("add"))}</button>
           </form>
           <div class="field__hint mt-12">${esc(t("gov_wl_hint"))}${b.revoked ? t("gov_wl_hint_revoked") : ""}</div>
+          <div class="merch-list mt-16">${rows}</div>
         </div>
       </div>
       <div class="callout">${icon("info", 18)}
