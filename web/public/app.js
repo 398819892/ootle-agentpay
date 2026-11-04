@@ -1711,7 +1711,7 @@ function viewMerchants() {
 
   return (
     pageHead(t("nav_merchants"), t("merchants_sub")) +
-    `<div class="grid grid--2" style="align-items:start">
+    `<div class="stack">
       <div class="card">
         <div class="card__head"><h3>${esc(t("wl_merchants"))}</h3><span class="sub">${fmt(b.whitelist.length)}</span></div>
         <div class="card__body">
@@ -1723,11 +1723,9 @@ function viewMerchants() {
           <div class="field__hint mt-12">${esc(t("gov_wl_hint"))}${b.revoked ? t("gov_wl_hint_revoked") : ""}</div>
         </div>
       </div>
-      <div class="card"><div class="card__body">
-        <div class="callout">${icon("info", 18)}
-          <div>${t("overview_callout")}</div>
-        </div>
-      </div></div>
+      <div class="callout">${icon("info", 18)}
+        <div>${t("overview_callout")}</div>
+      </div>
     </div>`
   );
 }
