@@ -32,11 +32,16 @@ import argparse
 import os
 from dataclasses import dataclass, field
 
+from . import _defaults
+
 # --- network presets --------------------------------------------------------------------
 PRESETS: dict[str, dict[str, str]] = {
     "local": {
         "walletd_url": "http://127.0.0.1:12010/json_rpc",
-        "budget_template": "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
+        # Read from the repo-root defaults.json (single source of truth) rather than a baked-in
+        # literal that silently goes stale after a swarm reset — AGENTPAY_BUDGET_TEMPLATE still wins
+        # (applied in load()). Empty if defaults.json is absent → fails honestly at provision time.
+        "budget_template": _defaults.template("agent_budget"),
         "owner_account": "default",
     },
     # esmeralda: the 0.49 testnet reset (docs/compat-0.49.md) invalidated the previously-published

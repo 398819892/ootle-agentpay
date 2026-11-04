@@ -51,10 +51,11 @@ except ImportError as exc:  # pragma: no cover - friendly message when the SDK c
     ) from exc
 
 WALLETD_URL = os.environ.get("AGENTPAY_WALLETD_URL", "http://127.0.0.1:12010/json_rpc")
-DEFAULT_TEMPLATE = os.environ.get(
-    "AGENTPAY_BUDGET_TEMPLATE",
-    "template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f",
-)
+# AGENTPAY_BUDGET_TEMPLATE wins; otherwise the current local-swarm agent_budget from the repo-root
+# defaults.json (single source of truth), not a baked-in literal that goes stale after a reset.
+from . import _defaults  # noqa: E402
+
+DEFAULT_TEMPLATE = _defaults.template("agent_budget", "AGENTPAY_BUDGET_TEMPLATE")
 
 
 @dataclass
