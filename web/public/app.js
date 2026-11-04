@@ -190,6 +190,8 @@ const I18N = {
     required: "Required.",
     daily_cap: "Daily cap",
     daily_cap_err: "Must be ≥ per-transaction cap.",
+    daily_cap_worst: (p) => `Worst case ≈ 2× across a window boundary = <b>${p.n}</b> ${p.unit} — fixed window, not sliding`,
+    daily_cap_worst_tip: (p) => `Worst case ≈ 2× across a window boundary = ${p.n} ${p.unit} (fixed window, not sliding).`,
     daily_window: "Daily window (epochs)",
     daily_window_hint: "The rolling window the daily cap is measured over, in chain epochs.",
     merchant_whitelist: "Merchant whitelist",
@@ -523,6 +525,8 @@ const I18N = {
     required: "必填。",
     daily_cap: "每日上限",
     daily_cap_err: "不能小于单笔上限。",
+    daily_cap_worst: (p) => `跨窗口边界最坏可花 ≈ 2× = <b>${p.n}</b> ${p.unit}——固定窗口，非滑动`,
+    daily_cap_worst_tip: (p) => `跨窗口边界最坏可花 ≈ 2× = ${p.n} ${p.unit}（固定窗口，非滑动）。`,
     daily_window: "每日窗口(纪元数)",
     daily_window_hint: "每日上限所统计的滚动窗口长度,以链纪元为单位。",
     merchant_whitelist: "商户白名单",
@@ -1225,6 +1229,11 @@ function viewOverview() {
         total: formatApprox(w.epochsPerWindow * w.epochMinutes),
       })
     : "";
+  // The daily cap is a fixed-window rate guard — spend can reach ~2× across a boundary. Surface the
+  // worst case on the badge tooltip so the owner doesn't have to work it out (see agent_budget/lib.rs).
+  const dailyCapTip = [epochTip, t("daily_cap_worst_tip", { n: fmt((amtBig(b.dailyCap) * 2n).toString()), unit: UNIT })]
+    .filter(Boolean)
+    .join(" · ");
   const resetNote = w
     ? w.windowElapsed
       ? t("reset_elapsed", { n: w.epochsPerWindow })
@@ -1303,7 +1312,7 @@ function viewOverview() {
         </div>
         <div class="hero__caps">
           <span class="badge badge--muted">${icon("zap", 13)} ${esc(t("cap_pertx", { n: fmt(b.perTxCap), unit: UNIT }))}</span>
-          <span class="badge badge--muted"${epochTip ? ` title="${esc(epochTip)}"` : ""}>${icon("clock", 13)} ${esc(t("cap_daily", { n: fmt(b.dailyCap), unit: UNIT }))}${w ? esc(t("cap_daily_window", { n: w.epochsPerWindow })) : ""}</span>
+          <span class="badge badge--muted" title="${esc(dailyCapTip)}">${icon("clock", 13)} ${esc(t("cap_daily", { n: fmt(b.dailyCap), unit: UNIT }))}${w ? esc(t("cap_daily_window", { n: w.epochsPerWindow })) : ""}</span>
           <span class="badge badge--muted">${icon("lock", 13)} ${esc(t("cap_validator"))}</span>
         </div>
         ${
@@ -1625,6 +1634,7 @@ function viewManage() {
                 <label class="field__label" for="g-daily">${esc(t("daily_cap"))}</label>
                 <div class="input-affix"><input class="input" id="g-daily" type="number" min="1" value="${esc(String(b.dailyCap))}"/><span class="affix">${UNIT}</span></div>
                 <div class="field__err">${esc(t("daily_cap_err"))}</div>
+                <div class="field__hint" id="daily-worst">${t("daily_cap_worst", { n: fmt((amtBig(b.dailyCap) * 2n).toString()), unit: UNIT })}</div>
               </div>
             </div>
             <button type="submit" class="btn btn--primary btn--block" id="g-limits">${icon("zap", 16)} ${esc(t("update_limits"))}</button>
@@ -2257,6 +2267,18 @@ function wireMerchants() {
 function wireManage() {
   const limitsForm = el("limits-form");
   if (limitsForm) {
+    // Keep the "worst case ≈ 2× across a window boundary" hint in sync as the owner edits the cap,
+    // so they never have to double the number in their head (fixed window — see agent_budget/lib.rs).
+    const dailyInput = el("g-daily");
+    const worst = el("daily-worst");
+    if (dailyInput && worst) {
+      dailyInput.addEventListener("input", () => {
+        const v = readAmt("g-daily");
+        worst.innerHTML = v !== null && amtBig(v) > 0n
+          ? t("daily_cap_worst", { n: fmt((amtBig(v) * 2n).toString()), unit: UNIT })
+          : "";
+      });
+    }
     limitsForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const perTxCap = readAmt("g-pertx");
