@@ -61,7 +61,8 @@ class StubBudget:
 
     def read_onchain_state(self):
         return {"spent_in_window": 10, "daily_cap": 2000, "per_tx_cap": 1000,
-                "window_start_epoch": 0, "epochs_per_window": 10, "revoked": False}
+                "window_start_epoch": 0, "epochs_per_window": 10, "revoked": False,
+                "whitelist": [MERCHANT]}
 
 
 def _wallet(bud: StubBudget) -> backend.AgentWallet:

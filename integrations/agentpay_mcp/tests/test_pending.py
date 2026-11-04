@@ -142,7 +142,8 @@ class _StatusBudget:
 
 def test_status_reads_spent_from_chain_not_local_estimate():
     chain = {"per_tx_cap": 1000, "daily_cap": 3000, "spent_in_window": 500,
-             "window_start_epoch": 10, "epochs_per_window": 48, "whitelist_raw": [], "revoked": False}
+             "window_start_epoch": 10, "epochs_per_window": 48,
+             "whitelist_raw": [], "whitelist": [], "revoked": False}
     w = backend.AgentWallet(_StatusBudget(state=chain), per_tx_cap=1, daily_cap=1, whitelist=[MERCHANT])
     s = w.status()
     assert s["spent_source"] == "chain"
@@ -165,6 +166,7 @@ def test_status_unknown_when_chain_unreadable():
 
 def test_status_revoked_from_chain_flag():
     chain = {"per_tx_cap": 1000, "daily_cap": 3000, "spent_in_window": 0,
-             "window_start_epoch": 0, "epochs_per_window": 48, "whitelist_raw": [], "revoked": True}
+             "window_start_epoch": 0, "epochs_per_window": 48,
+             "whitelist_raw": [], "whitelist": [], "revoked": True}
     w = backend.AgentWallet(_StatusBudget(state=chain), per_tx_cap=1, daily_cap=1, whitelist=[MERCHANT])
     assert w.status()["revoked"] is True        # chain flag alone marks it revoked
