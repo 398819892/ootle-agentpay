@@ -668,3 +668,70 @@ fn agent_pays_via_escrow_then_release() {
     assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![950]);
     assert_eq!(tari_balance(&mut ctx.test, &treasury), amount![50]);
 }
+
+// --------------------------------------------------------------------------------------------
+// C-5 upgrade rule — `with_upgrade_rule(AccessRule(resource(owner_badge)))` in `new` (lib.rs).
+// These guard the one authorization that is irreversible on mainnet: who may swap THIS budget's
+// template via the native `UpdateComponentTemplate` instruction. The owner badge may; the agent
+// badge may not. Both upgrade to the same AgentBudget template — a no-op swap that still runs the
+// engine's `check_component_upgrade_rule`, so what is under test is the auth gate, not a migration.
+// --------------------------------------------------------------------------------------------
+
+#[test]
+fn owner_can_upgrade_component_template() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![1000], amount![3000], 10,
+    );
+
+    // The owner badge authorizes UpdateComponentTemplate (the C-5 upgrade rule names its resource).
+    let template = ctx.template;
+    ctx.test.execute_expect_success(
+        ctx.test
+            .transaction()
+            .create_proof(owner.component, b.owner_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
+            .update_component_template(b.component, template)
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+}
+
+#[test]
+fn agent_badge_holder_cannot_upgrade_component_template() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![1000], amount![3000], 10,
+    );
+
+    // The agent badge must NOT be able to swap the template — otherwise a leaked agent key could
+    // replace the contract code. The upgrade rule names the owner-badge resource, so presenting the
+    // agent badge is denied (same "Access Denied" the owner-only methods raise).
+    let template = ctx.template;
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test
+            .transaction()
+            .create_proof(agent.component, b.agent_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
+            .update_component_template(b.component, template)
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&agent.key),
+        vec![agent.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Access Denied");
+}
