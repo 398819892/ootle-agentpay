@@ -48,6 +48,7 @@ function windowStatus(info) {
     const approxMinutesUntilReset = epochsUntilReset * exports.EPOCH_MINUTES;
     return {
         dailyCap,
+        dailyCapWorstCase: dailyCap * 2,
         spentInWindow,
         remaining,
         epochsPerWindow,

@@ -31,6 +31,13 @@ export interface BudgetWindowInput {
 export interface WindowStatus {
     /** The configured daily cap (per rolling window, not per calendar day). */
     dailyCap: number;
+    /**
+     * The real worst-case ceiling across a window boundary: `2 * dailyCap`. Because the cap binds
+     * within each FIXED window (not a trailing 24h), an agent can spend the full cap in the last epoch
+     * of one window and again in the first epoch of the next (see `templates/agent_budget/src/lib.rs`).
+     * Surfaced so callers don't have to double it — mirrors the Python SDK's `daily_cap_worst_case`.
+     */
+    dailyCapWorstCase: number;
     /** Spend that counts toward the cap *right now* — 0 once the window has elapsed. */
     spentInWindow: number;
     /** How much the agent may still spend before the window resets. */
