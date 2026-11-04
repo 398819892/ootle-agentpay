@@ -120,8 +120,13 @@ const I18N = {
     /* nav */
     nav_overview: "Overview",
     nav_create: "Create budget",
+    nav_manage: "Manage",
     nav_pay: "Payments",
     nav_governance: "Governance",
+    nav_merchants: "Merchants",
+    manage_sub: "Owner controls — funds, spending limits, agent sessions, and the kill switch.",
+    merchants_sub: "The on-chain whitelist of merchants this agent is allowed to pay.",
+    merchants_nobudget_sub: "Open a budget first, then manage its merchant whitelist here.",
 
     /* overview */
     overview_sub: "A live view of your agent's on-chain spending budget.",
@@ -451,8 +456,13 @@ const I18N = {
     /* nav */
     nav_overview: "总览",
     nav_create: "创建预算",
+    nav_manage: "管理",
     nav_pay: "支付",
     nav_governance: "治理",
+    nav_merchants: "商户",
+    manage_sub: "所有者控制——资金、支出限额、代理会话与紧急停止。",
+    merchants_sub: "代理被允许支付的链上商户白名单。",
+    merchants_nobudget_sub: "请先创建预算，再在此管理商户白名单。",
 
     /* overview */
     overview_sub: "实时查看代理的链上消费预算。",
@@ -1080,9 +1090,9 @@ async function withPending(btn, label, fn) {
 /* ---- navigation ----------------------------------------------------------- */
 const NAV = [
   { id: "overview", key: "nav_overview", icon: "grid" },
-  { id: "create", key: "nav_create", icon: "wallet" },
+  { id: "manage", key: "nav_manage", icon: "shield" },
   { id: "pay", key: "nav_pay", icon: "send" },
-  { id: "governance", key: "nav_governance", icon: "shield" },
+  { id: "merchants", key: "nav_merchants", icon: "store" },
 ];
 
 function go(view) {
@@ -1130,7 +1140,7 @@ function sidebar() {
   const connected = d && d.connected;
   const wlCount = d && d.budget ? d.budget.whitelist.length : 0;
   const navHtml = NAV.map((n) => {
-    const count = n.id === "governance" && wlCount ? `<span class="count">${wlCount}</span>` : "";
+    const count = n.id === "merchants" && wlCount ? `<span class="count">${wlCount}</span>` : "";
     return `<button class="nav__item ${S.view === n.id ? "is-active" : ""}" data-nav="${n.id}">
       ${icon(n.icon)}<span class="lbl">${esc(t(n.key))}</span>${count}</button>`;
   }).join("");
@@ -1190,7 +1200,7 @@ function viewOverview() {
         <div class="empty__icon">${icon("wallet", 26)}</div>
         <h3>${esc(t("nobudget_title"))}</h3>
         <p>${esc(t("overview_empty_body"))}</p>
-        <button class="btn btn--primary" data-nav="create">${icon("plus", 16)} ${esc(t("create_budget"))}</button>
+        <button class="btn btn--primary" data-nav="manage">${icon("plus", 16)} ${esc(t("create_budget"))}</button>
       </div></div>`
     );
   }
@@ -1325,7 +1335,7 @@ function viewOverview() {
         </div>
         <div class="card">
           <div class="card__head"><h3>${esc(t("whitelist"))}</h3>
-            <button class="btn btn--ghost btn--sm" data-nav="governance">${esc(t("manage"))} ${icon("shield", 14)}</button></div>
+            <button class="btn btn--ghost btn--sm" data-nav="merchants">${esc(t("manage"))} ${icon("store", 14)}</button></div>
           <div class="card__body">
             <div class="row row--wrap" style="gap:8px">${chips}</div>
             <div class="callout mt-18">${icon("info", 18)}
@@ -1584,59 +1594,22 @@ function sessionsCard(b) {
   </div>`;
 }
 
-/* ---- views: GOVERNANCE ---------------------------------------------------- */
-function viewGovernance() {
+/* ---- views: MANAGE -------------------------------------------------------- */
+/* "创建预算" and the owner controls live under one nav item: with no budget this is
+   the open-a-budget form; once a budget exists it is the owner's control panel —
+   funds, spending limits, agent sessions, and the danger zone. The merchant
+   whitelist moved to its own "商户" page. Layout mirrors the balanced governance
+   grid: the tall treasury card fills the left column, limits + sessions stack on
+   the right, so the two columns top-align and read as a balanced pair. */
+function viewManage() {
   const d = S.data;
   const b = d.budget;
-  if (!b) return noBudget(t("nav_governance"), t("gov_nobudget_sub"));
-  const chips = b.whitelist.length
-    ? b.whitelist
-        .map(
-          (m) => `<span class="chip"><span class="chip__dot" style="background:${avatarColor(m.name || m.address)}"></span>
-          ${m.name ? `<b>${esc(m.name)}</b>` : ""}<code>${esc(shorten(m.address, 10, 6))}</code>
-          <button type="button" class="chip__rm" data-remove-merchant="${esc(m.address)}" data-merchant-name="${esc(m.name || "")}" title="${esc(t("remove_merchant"))}" aria-label="${esc(t("remove_merchant"))}">${icon("x", 12)}</button></span>`,
-        )
-        .join("")
-    : `<span class="muted" style="font-size:13px">${esc(t("no_wl_merchants"))}</span>`;
+  if (!b) return viewCreate();
 
   return (
-    pageHead(t("nav_governance"), t("gov_sub")) +
+    pageHead(t("nav_manage"), t("manage_sub")) +
     `<div class="stack">
       <div class="gov-grid">
-        <div class="gov-col">
-          <div class="card">
-            <div class="card__head"><h3>${esc(t("wl_merchants"))}</h3><span class="sub">${fmt(b.whitelist.length)}</span></div>
-            <div class="card__body">
-              <div class="row row--wrap" style="gap:8px;margin-bottom:16px">${chips}</div>
-              <form id="merch-form" class="addrow" novalidate>
-                <input class="input" id="g-merchant" placeholder="${esc(t("add_merchant_placeholder"))}" autocomplete="off"/>
-                <button type="submit" class="btn btn--primary" id="g-add">${icon("plus", 16)} ${esc(t("add"))}</button>
-              </form>
-              <div class="field__hint mt-12">${esc(t("gov_wl_hint"))}${b.revoked ? t("gov_wl_hint_revoked") : ""}</div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card__head"><h3>${esc(t("limits_title"))}</h3></div>
-            <div class="card__body">
-              <form id="limits-form" novalidate>
-                <div class="form-grid">
-                  <div class="field">
-                    <label class="field__label" for="g-pertx">${esc(t("pertx_cap"))}</label>
-                    <div class="input-affix"><input class="input" id="g-pertx" type="number" min="1" value="${esc(String(b.perTxCap))}"/><span class="affix">${UNIT}</span></div>
-                    <div class="field__err">${esc(t("limits_pertx_err"))}</div>
-                  </div>
-                  <div class="field">
-                    <label class="field__label" for="g-daily">${esc(t("daily_cap"))}</label>
-                    <div class="input-affix"><input class="input" id="g-daily" type="number" min="1" value="${esc(String(b.dailyCap))}"/><span class="affix">${UNIT}</span></div>
-                    <div class="field__err">${esc(t("daily_cap_err"))}</div>
-                  </div>
-                </div>
-                <button type="submit" class="btn btn--primary btn--block" id="g-limits">${icon("zap", 16)} ${esc(t("update_limits"))}</button>
-              </form>
-              <div class="field__hint mt-12">${t("limits_hint")}</div>
-            </div>
-          </div>
-        </div>
         <div class="card">
           <div class="card__head"><h3>${esc(t("treasury"))}</h3></div>
           <div class="card__body">
@@ -1663,9 +1636,31 @@ function viewGovernance() {
             </form>
           </div>
         </div>
+        <div class="gov-col">
+          <div class="card">
+            <div class="card__head"><h3>${esc(t("limits_title"))}</h3></div>
+            <div class="card__body">
+              <form id="limits-form" novalidate>
+                <div class="form-grid">
+                  <div class="field">
+                    <label class="field__label" for="g-pertx">${esc(t("pertx_cap"))}</label>
+                    <div class="input-affix"><input class="input" id="g-pertx" type="number" min="1" value="${esc(String(b.perTxCap))}"/><span class="affix">${UNIT}</span></div>
+                    <div class="field__err">${esc(t("limits_pertx_err"))}</div>
+                  </div>
+                  <div class="field">
+                    <label class="field__label" for="g-daily">${esc(t("daily_cap"))}</label>
+                    <div class="input-affix"><input class="input" id="g-daily" type="number" min="1" value="${esc(String(b.dailyCap))}"/><span class="affix">${UNIT}</span></div>
+                    <div class="field__err">${esc(t("daily_cap_err"))}</div>
+                  </div>
+                </div>
+                <button type="submit" class="btn btn--primary btn--block" id="g-limits">${icon("zap", 16)} ${esc(t("update_limits"))}</button>
+              </form>
+              <div class="field__hint mt-12">${t("limits_hint")}</div>
+            </div>
+          </div>
+          ${sessionsCard(b)}
+        </div>
       </div>
-
-      ${sessionsCard(b)}
 
       <div class="danger-zone">
         <div class="danger-zone__head">${icon("ban", 14)} ${esc(t("danger_zone"))}</div>
@@ -1698,13 +1693,52 @@ function viewGovernance() {
   );
 }
 
+/* ---- views: MERCHANTS ----------------------------------------------------- */
+/* The on-chain payee whitelist, split out of governance into its own section. */
+function viewMerchants() {
+  const d = S.data;
+  const b = d.budget;
+  if (!b) return noBudget(t("nav_merchants"), t("merchants_nobudget_sub"));
+  const chips = b.whitelist.length
+    ? b.whitelist
+        .map(
+          (m) => `<span class="chip"><span class="chip__dot" style="background:${avatarColor(m.name || m.address)}"></span>
+          ${m.name ? `<b>${esc(m.name)}</b>` : ""}<code>${esc(shorten(m.address, 10, 6))}</code>
+          <button type="button" class="chip__rm" data-remove-merchant="${esc(m.address)}" data-merchant-name="${esc(m.name || "")}" title="${esc(t("remove_merchant"))}" aria-label="${esc(t("remove_merchant"))}">${icon("x", 12)}</button></span>`,
+        )
+        .join("")
+    : `<span class="muted" style="font-size:13px">${esc(t("no_wl_merchants"))}</span>`;
+
+  return (
+    pageHead(t("nav_merchants"), t("merchants_sub")) +
+    `<div class="grid grid--2" style="align-items:start">
+      <div class="card">
+        <div class="card__head"><h3>${esc(t("wl_merchants"))}</h3><span class="sub">${fmt(b.whitelist.length)}</span></div>
+        <div class="card__body">
+          <div class="row row--wrap" style="gap:8px;margin-bottom:16px">${chips}</div>
+          <form id="merch-form" class="addrow" novalidate>
+            <input class="input" id="g-merchant" placeholder="${esc(t("add_merchant_placeholder"))}" autocomplete="off"/>
+            <button type="submit" class="btn btn--primary" id="g-add">${icon("plus", 16)} ${esc(t("add"))}</button>
+          </form>
+          <div class="field__hint mt-12">${esc(t("gov_wl_hint"))}${b.revoked ? t("gov_wl_hint_revoked") : ""}</div>
+        </div>
+      </div>
+      <div class="card"><div class="card__body">
+        <div class="callout">${icon("info", 18)}
+          <div>${t("overview_callout")}</div>
+        </div>
+      </div></div>
+    </div>`
+  );
+}
+
 /** A dashboard-wide banner shown while the emergency stop (freeze) is engaged. */
 function frozenBanner() {
   if (!(S.data && S.data.frozen)) return "";
   return `<div class="banner banner--danger" role="alert" style="border-color:color-mix(in srgb, var(--danger) 45%, var(--border))">
     ${icon("ban", 20)}
     <div class="banner__text"><b>${esc(t("frozen_banner_title"))}</b>${esc(t("frozen_banner_body"))}</div>
-    <button class="btn btn--secondary btn--sm" data-nav="governance">${esc(t("manage"))}</button>
+    <button class="btn btn--secondary btn--sm" data-nav="manage">${esc(t("manage"))}</button>
   </div>`;
 }
 
@@ -1715,7 +1749,7 @@ function noBudget(title, sub) {
       <div class="empty__icon">${icon("wallet", 26)}</div>
       <h3>${esc(t("nobudget_open_title"))}</h3>
       <p>${esc(t("nobudget_open_body"))}</p>
-      <button class="btn btn--primary" data-nav="create">${icon("plus", 16)} ${esc(t("create_budget"))}</button>
+      <button class="btn btn--primary" data-nav="manage">${icon("plus", 16)} ${esc(t("create_budget"))}</button>
     </div></div>`
   );
 }
@@ -1808,14 +1842,14 @@ function render() {
   app.className = "app";
   let body;
   switch (S.view) {
-    case "create":
-      body = viewCreate();
+    case "manage":
+      body = viewManage();
       break;
     case "pay":
       body = viewPay();
       break;
-    case "governance":
-      body = viewGovernance();
+    case "merchants":
+      body = viewMerchants();
       break;
     default:
       body = viewOverview();
@@ -1859,9 +1893,10 @@ function wire() {
   // language toggle
   wireLangToggle(app);
 
-  if (S.view === "create" && !S.data.budget) wireCreate();
+  if (S.view === "manage" && !S.data.budget) wireCreate();
+  if (S.view === "manage" && S.data.budget) wireManage();
   if (S.view === "pay" && S.data.budget) wirePay();
-  if (S.view === "governance" && S.data.budget) wireGovernance();
+  if (S.view === "merchants" && S.data.budget) wireMerchants();
 }
 
 async function doCopy(btn) {
@@ -1948,7 +1983,7 @@ async function handleAction(action, btn) {
     if (!res) return;
     try {
       S.data = await api("/api/reset", { confirmToken: res.token });
-      go("create");
+      go("manage");
       toast("info", t("t_reset"), t("t_reset_msg"));
     } catch (e) {
       toast("error", t("t_reset_failed"), e.message);
@@ -2195,8 +2230,9 @@ function wirePay() {
 }
 
 /* ---- governance wiring ---------------------------------------------------- */
-function wireGovernance() {
+function wireMerchants() {
   const merchForm = el("merch-form");
+  if (!merchForm) return;
   merchForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = el("g-merchant").value.trim();
@@ -2214,7 +2250,9 @@ function wireGovernance() {
       }
     });
   });
+}
 
+function wireManage() {
   const limitsForm = el("limits-form");
   if (limitsForm) {
     limitsForm.addEventListener("submit", async (e) => {
