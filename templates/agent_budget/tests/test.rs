@@ -735,3 +735,115 @@ fn agent_badge_holder_cannot_upgrade_component_template() {
     );
     assert_reject_reason(reason, "Access Denied");
 }
+
+// --------------------------------------------------------------------------------------------
+// Adversarial edge cases flagged in review: a zero-badge (empty) proof, the exact window-reset
+// boundary epoch, and re-issuing an already-existing/revoked session label.
+// --------------------------------------------------------------------------------------------
+
+/// A `pay` attempt carrying ZERO session badges must not go through. It turns out the zero-badge
+/// case is caught one layer *before* the template's `sessions.len() == 1` guard: once the agent has
+/// transferred its only badge away, `create_proof` over the now-empty vault cannot build a proof at
+/// all (it needs at least one token), so the transaction is rejected at proof creation with
+/// `InsufficientFunds` — the template's exactly-one guard is defense-in-depth behind that. Either
+/// way, a zero-badge pay cannot reach the spend logic. (Companion to
+/// `pay_with_more_than_one_session_badge_is_rejected`, which covers the >1 side.)
+#[test]
+fn pay_with_empty_proof_is_rejected() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+    let sink = empty(&mut ctx.test); // somewhere to park the badge we move out
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![1000], amount![3000], 10,
+    );
+
+    // Move the agent's only ("default") session badge out, leaving a zero-balance vault behind.
+    ctx.test.execute_expect_success(
+        ctx.test
+            .transaction()
+            .call_method(agent.component, "withdraw", args![b.agent_badge, amount![1]])
+            .put_last_instruction_output_on_workspace("badge")
+            .call_method(sink.component, "deposit", args![Workspace("badge")])
+            .build_and_seal(&agent.key),
+        vec![agent.owner_token.clone()],
+    );
+
+    // `pay_fail`'s first instruction is `create_proof(agent, agent_badge)`; over the empty vault it
+    // has no token to lock, so the pay is rejected before any spend logic runs.
+    let reason = pay_fail(&mut ctx, &agent, &b, merchant.component, amount![100]);
+    assert_reject_reason(reason, "contained no tokens");
+}
+
+/// The rolling window resets exactly when `now >= window_start + epochs_per_window` — not a step
+/// early, not a step late. With a window created at epoch 0 and length 10: at epoch 9 the window
+/// has NOT elapsed (the daily cap still binds), and at epoch 10 it HAS (the allowance is fresh).
+#[test]
+fn window_resets_exactly_at_boundary() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    // per_tx 2000, daily 3000, window length 10 (created at epoch 0).
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![2000], amount![3000], 10,
+    );
+
+    pay_ok(&mut ctx, &agent, &b, merchant.component, amount![2000]); // spent 2000 in the window
+
+    // Epoch 9 — one before the boundary: the window has NOT reset, so another 2000 breaks the daily
+    // cap (2000 + 2000 > 3000).
+    set_epoch(&mut ctx.test, 9);
+    let reason = pay_fail(&mut ctx, &agent, &b, merchant.component, amount![2000]);
+    assert_reject_reason(reason, "Amount exceeds the daily cap");
+
+    // Epoch 10 — exactly the boundary (now >= 0 + 10): the window resets, so 2000 is allowed again.
+    set_epoch(&mut ctx.test, 10);
+    pay_ok(&mut ctx, &agent, &b, merchant.component, amount![2000]);
+    assert_eq!(tari_balance(&mut ctx.test, &merchant), amount![4000]);
+}
+
+/// Revoking a session marks its non-fungible id but does NOT burn the token, so the label's NFT
+/// substate still exists. Re-issuing the same label must therefore fail (the engine refuses to
+/// create a substate that already exists) — it does not silently "un-revoke" the session. This
+/// pins the behaviour the API works around by minting a next-generation label (audit-notes #14).
+#[test]
+fn reissue_revoked_label_fails() {
+    let mut ctx = setup();
+    let owner = funded(&mut ctx.test);
+    let agent = empty(&mut ctx.test);
+    let other = empty(&mut ctx.test);
+    let merchant = empty(&mut ctx.test);
+
+    let b = create_budget(
+        &mut ctx, &owner, &agent,
+        vec![merchant.component],
+        amount![10000], amount![1000], amount![3000], 10,
+    );
+
+    // Revoke the "default" session (marks the id; the badge token is not burned).
+    revoke_session(&mut ctx, &owner, &b, "default");
+
+    // Re-issuing "default" must fail — its NFT id already exists on the agent-badge resource.
+    let reason = ctx.test.execute_expect_failure(
+        ctx.test
+            .transaction()
+            .create_proof(owner.component, b.owner_badge)
+            .put_last_instruction_output_on_workspace("proof")
+            .authorize_proof("proof")
+            .call_method(b.component, "issue_agent_badge", args!["default".to_string()])
+            .put_last_instruction_output_on_workspace("badge")
+            .call_method(other.component, "deposit", args![Workspace("badge")])
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&owner.key),
+        vec![owner.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Duplicate NFT token id");
+}
