@@ -202,6 +202,7 @@ function createChainReads({ store, walletd, conn, txlog, OnChainBudget, windowSt
             txKind: e.txKind || "pay",
             status: "confirmed",
             txId: null,
+            via: "manual", // legacy dashboard ledger — this dashboard's own (owner / UI) pays
             ts: e.ts || (e.time ? Date.parse(e.time) : null) || null,
             migrated: true,
           });
@@ -220,6 +221,9 @@ function createChainReads({ store, walletd, conn, txlog, OnChainBudget, windowSt
           txKind: "pay",
           status: "confirmed",
           txId: r.txId,
+          // How this pay was initiated. /api/v1 pays namespace their idempotency key with a NUL
+          // separator (see api_v1.payKeyFor); a plain key is a dashboard/owner (manual) pay.
+          via: typeof r.key === "string" && r.key.includes("\u0000") ? "api" : "manual",
           ts: r.createdAt ? Date.parse(r.createdAt) : null, // when this dashboard journaled the pay
         });
       }

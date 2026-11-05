@@ -12,7 +12,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { extractChainPays, parseWalletdTime } = require("./chain_reads");
+const { extractChainPays, parseWalletdTime, createChainReads } = require("./chain_reads");
 const { mergeLedgers } = require("./dashboard");
 
 const COMP = "component_" + "e1".repeat(32);
@@ -90,4 +90,37 @@ test("mergeLedgers: with no journal rows, every on-chain pay appears", () => {
   const merged = mergeLedgers([], scan, label);
   assert.deepEqual(merged.map((e) => e.memo), ["m1", "m2"]);
   assert.ok(merged.every((e) => e.source === "chain"));
+});
+
+test("mergeLedgers: chain-only pays are via:chain; journal rows keep their own via", () => {
+  const label = () => null;
+  const journal = [
+    { index: 0, merchant: SHOP, amount: "10", memo: "api-pay", txKind: "pay", status: "confirmed", txId: "t1", via: "api" },
+    { index: 1, merchant: SHOP, amount: "5", memo: "ui-pay", txKind: "pay", status: "confirmed", txId: "t2", via: "manual" },
+  ];
+  const scan = extractChainPays([
+    { id: "t3", last_update_time: "2026-11-04 15:00:00.0", is_dry_run: false, finalize: { events: [payEv(COMP, { amount: "2", memo: "mcp", merchant: SHOP, spent: "17" })] } },
+    { id: "t1", last_update_time: "2026-11-04 09:00:00.0", is_dry_run: false, finalize: { events: [payEv(COMP, { amount: "10", memo: "x", merchant: SHOP, spent: "10" })] } },
+    { id: "t2", last_update_time: "2026-11-04 12:00:00.0", is_dry_run: false, finalize: { events: [payEv(COMP, { amount: "5", memo: "y", merchant: SHOP, spent: "15" })] } },
+  ], COMP);
+  const merged = mergeLedgers(journal, scan, label);
+  const via = Object.fromEntries(merged.map((e) => [e.txId, e.via]));
+  assert.equal(via.t1, "api");    // journal row preserved (API key pay)
+  assert.equal(via.t2, "manual"); // journal row preserved (dashboard/owner pay)
+  assert.equal(via.t3, "chain");  // external client, discovered on chain
+});
+
+test("journalLedger: a NUL-namespaced idempotency key marks an API pay; a plain key is manual", () => {
+  const ev = (memo) => ({ merchant: SHOP, amount: "1", memo });
+  const records = [
+    { op: "migrated-genesis", status: "confirmed", component: COMP, migratedLedger: [{ merchant: SHOP, amount: "3", memo: "legacy" }] },
+    { op: "pay", status: "confirmed", component: COMP, key: `key-7${"\u0000"}inv-1`, params: {}, event: ev("api"), createdAt: "2026-11-04T09:00:00Z" },
+    { op: "pay", status: "confirmed", component: COMP, key: "pay:inv-2", params: {}, event: ev("ui"), createdAt: "2026-11-04T10:00:00Z" },
+  ];
+  const reads = createChainReads({
+    store: {}, walletd: () => {}, conn: {}, txlog: { list: () => records },
+    OnChainBudget: function () {}, windowStatus: () => {}, budgetTemplate: "",
+  });
+  const rows = reads.journalLedger(COMP, () => null);
+  assert.deepEqual(rows.map((r) => [r.memo, r.via]), [["legacy", "manual"], ["api", "api"], ["ui", "manual"]]);
 });

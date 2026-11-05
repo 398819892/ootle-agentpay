@@ -33,6 +33,7 @@ function mergeLedgers(journal, scan, label) {
       status: "confirmed",
       txId: p.txId,
       source: "chain", // discovered on chain, not in this dashboard's journal
+      via: "chain", // external client (MCP / SDK / another dashboard) — not journaled here
       _ts: p.ts || 0,
     });
   }

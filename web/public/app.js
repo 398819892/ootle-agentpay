@@ -264,6 +264,13 @@ const I18N = {
     th_amount: "Amount",
     th_memo: "Memo",
     th_time: "Time",
+    th_source: "Source",
+    via_manual: "Manual",
+    via_api: "API",
+    via_chain: "On-chain",
+    via_manual_tip: "Sent from this dashboard (owner / web UI).",
+    via_api_tip: "Sent through the Integration API (agent key).",
+    via_chain_tip: "Discovered on chain — an external client (MCP / SDK / another dashboard).",
     verdict_ok_title: "The chain would accept this",
     verdict_ok_body: (p) =>
       `A validator dry-run of paying <b>${p.amount} ${p.unit}</b> to <b>${p.merchant}</b> passes every on-chain rule. Hit <b>Pay</b> to submit it for real.`,
@@ -617,6 +624,13 @@ const I18N = {
     th_amount: "金额",
     th_memo: "备注",
     th_time: "时间",
+    th_source: "来源",
+    via_manual: "人工",
+    via_api: "API",
+    via_chain: "链上",
+    via_manual_tip: "通过本面板发起(所有者 / 网页端)。",
+    via_api_tip: "通过集成 API 发起(Agent 密钥)。",
+    via_chain_tip: "链上发现 —— 外部客户端(MCP / SDK / 其他面板)。",
     verdict_ok_title: "链上会接受这笔支付",
     verdict_ok_body: (p) =>
       `对向 <b>${p.merchant}</b> 支付 <b>${p.amount} ${p.unit}</b> 做验证节点试算,结果通过了全部链上规则。点「付款」即可真正提交。`,
@@ -1435,6 +1449,15 @@ function fmtTs(ts) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+// A small tag showing how a pay was initiated: 人工 (dashboard/owner), API (integration key),
+// or 链上 (external client — MCP/SDK/another dashboard — found on chain, not journaled here).
+function viaBadge(via) {
+  const mod = via === "api" ? "badge--ok" : via === "chain" ? "badge--warn" : "badge--muted";
+  const label = via === "api" ? t("via_api") : via === "chain" ? t("via_chain") : t("via_manual");
+  const tip = via === "api" ? t("via_api_tip") : via === "chain" ? t("via_chain_tip") : t("via_manual_tip");
+  return `<span class="badge badge--src ${mod}" title="${esc(tip)}">${esc(label)}</span>`;
+}
+
 function ledgerRow(e) {
   const name = e.merchantName;
   return `<tr>
@@ -1445,7 +1468,8 @@ function ledgerRow(e) {
     </div></td>
     <td class="amount">−${fmt(e.amount)} <span class="muted" style="font-weight:500">${UNIT}</span></td>
     <td><span class="memo" title="${esc(e.onchainMemo || e.memo)}">${esc(e.memo || "—")}</span>
-      <div class="muted" style="font-size:11px;white-space:nowrap">${icon("clock", 11)} ${esc(fmtTs(e.ts))}</div></td>
+      <div class="muted" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px">
+        <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap">${icon("clock", 11)} ${esc(fmtTs(e.ts))}</span>${viaBadge(e.via)}</div></td>
   </tr>`;
 }
 
@@ -1624,7 +1648,7 @@ function viewPay() {
             ${
               ledger
                 ? `<div class="table-wrap"><table class="ledger">
-                    <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th><th>${esc(t("th_time"))}</th></tr></thead>
+                    <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th><th>${esc(t("th_source"))}</th><th>${esc(t("th_time"))}</th></tr></thead>
                     <tbody>${ledger}</tbody></table></div>`
                 : `<div class="empty" style="padding:40px"><div class="empty__icon">${icon("activity", 26)}</div>
                    <h3>${esc(t("pay_no_payments_title"))}</h3><p>${t("pay_no_payments_body")}</p></div>`
@@ -1645,6 +1669,7 @@ function fullLedgerRow(e) {
     </div></td>
     <td class="amount">−${fmt(e.amount)} <span class="muted" style="font-weight:500">${UNIT}</span></td>
     <td><span class="memo" title="${esc(e.onchainMemo || e.memo)}">${esc(e.memo || "—")}</span></td>
+    <td>${viaBadge(e.via)}</td>
     <td class="muted" style="font-size:12px;white-space:nowrap;font-family:var(--mono)">${esc(fmtTs(e.ts))}</td>
   </tr>`;
 }

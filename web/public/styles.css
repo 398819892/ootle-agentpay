@@ -883,6 +883,14 @@ button {
   color: var(--text-muted);
   background: var(--surface-2);
 }
+/* compact badge used as a per-row source tag (人工 / API / 链上) in the payment feed */
+.badge--src {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 8px;
+  gap: 4px;
+  white-space: nowrap;
+}
 
 .chip {
   display: inline-flex;
