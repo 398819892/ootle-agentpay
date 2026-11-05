@@ -64,15 +64,15 @@ def _short_merchant(m) -> str:
 # language. The dashboard's Settings page picks which one the agent gets back (see server.py).
 def _labels(lang):
     if lang == "zh":
-        return {"subtitle": "付款回执", "ok": "付款成功", "payer": "付款方", "merchant": "商户",
+        return {"subtitle": "付款回执", "ok": "付款成功", "payer": "付款方", "merchant": "收款方",
                 "memo": "备注", "balance": "剩余金额", "window": "本窗口剩余", "time": "付款时间",
                 "foot": "Tari Ootle 验证者 · 链上已确认"}
     if lang == "en":
         return {"subtitle": "Payment Receipt", "ok": "Payment successful", "payer": "Payer",
-                "merchant": "Merchant", "memo": "Memo", "balance": "Balance", "window": "Window left",
+                "merchant": "Payee", "memo": "Memo", "balance": "Balance", "window": "Window left",
                 "time": "Time", "foot": "Tari Ootle validator · confirmed on-chain"}
     return {"subtitle": "付款回执 · Payment Receipt", "ok": "付款成功", "payer": "付款方  Payer",
-            "merchant": "商户  Merchant", "memo": "备注  Memo", "balance": "剩余金额  Balance",
+            "merchant": "收款方  Payee", "memo": "备注  Memo", "balance": "剩余金额  Balance",
             "window": "本窗口剩余  Window left", "time": "付款时间  Time",
             "foot": "Tari Ootle validator · 链上已确认"}
 
