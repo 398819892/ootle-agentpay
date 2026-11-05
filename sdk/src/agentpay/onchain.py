@@ -1141,15 +1141,67 @@ class OnChainBudget:
         memo = encode_memo(invoice_id, agent_tag)["Message"]
         return self.pay(merchant, amount, memo=memo, session=session)
 
+    def _refresh_policy_from_chain(self) -> bool:
+        """Best-effort: pull the fields the pre-check tests (caps, whitelist, revoked, spend-in-window)
+        from the AUTHORITATIVE on-chain state, overwriting the display copy this client was attached
+        with. Returns True if it refreshed. Any read failure is swallowed — the chain still enforces
+        the real limits on submit, so a read hiccup must neither block a pay nor crash the pre-check.
+
+        This exists because ``attach_wallet`` takes the caps/whitelist for *display* only, while
+        ``self.spent`` is kept in lock-step with the chain's own ``spent_in_window`` after every pay.
+        Comparing a chain-sourced spend against a stale display cap (e.g. a daily cap raised on chain
+        after attach) is exactly what makes the courtesy pre-check FALSE-reject a pay the validator
+        would accept, so before any client-side rejection we reconcile against the chain."""
+        if not self.component:
+            return False
+        try:
+            s = self.read_onchain_state()
+        except Exception:  # noqa: BLE001 - unreadable chain: keep the display copy, let submit decide
+            return False
+        pt, dc, siw = s.get("per_tx_cap"), s.get("daily_cap"), s.get("spent_in_window")
+        rv, wl = s.get("revoked"), s.get("whitelist")
+        if isinstance(pt, int) and not isinstance(pt, bool):
+            self.per_tx_cap = pt
+        if isinstance(dc, int) and not isinstance(dc, bool):
+            self.daily_cap = dc
+        if isinstance(siw, int) and not isinstance(siw, bool):
+            self.spent = siw
+        if isinstance(rv, bool):
+            self.revoked = rv
+        if isinstance(wl, list):
+            self.whitelist = list(wl)
+        return True
+
     def _precheck(self, merchant: str, amount: int) -> None:
+        """A courtesy early error — the chain enforces the real limits regardless. It must never
+        FALSE-reject: before raising on any limit, reconcile the caps/whitelist/revoked/spend with the
+        authoritative on-chain state (once, best-effort), so a stale display copy cannot block a valid
+        pay. ``amount <= 0`` is the one client-only rule (always invalid, no chain read needed)."""
+        if amount <= 0:
+            raise PolicyViolation((f"amount {amount} must be positive (client pre-check)",))
+        self._precheck_refreshed = False
+
+        def reconcile() -> None:
+            if not self._precheck_refreshed:
+                self._precheck_refreshed = True
+                self._refresh_policy_from_chain()
+
         if self.revoked:
-            raise PolicyViolation(("budget revoked (client pre-check; chain also rejects)",))
-        if amount <= 0 or amount > self.per_tx_cap:
-            raise PolicyViolation((f"amount {amount} over per-tx cap {self.per_tx_cap} (client pre-check)",))
+            reconcile()
+            if self.revoked:
+                raise PolicyViolation(("budget revoked (client pre-check; chain also rejects)",))
+        if amount > self.per_tx_cap:
+            reconcile()
+            if amount > self.per_tx_cap:
+                raise PolicyViolation((f"amount {amount} over per-tx cap {self.per_tx_cap} (client pre-check)",))
         if self.whitelist and merchant not in self.whitelist:
-            raise PolicyViolation(("merchant not whitelisted (client pre-check)",))
+            reconcile()
+            if self.whitelist and merchant not in self.whitelist:
+                raise PolicyViolation(("merchant not whitelisted (client pre-check)",))
         if self.spent + amount > self.daily_cap:
-            raise PolicyViolation((f"would exceed daily cap {self.daily_cap} (client pre-check)",))
+            reconcile()
+            if self.spent + amount > self.daily_cap:
+                raise PolicyViolation((f"would exceed daily cap {self.daily_cap} (client pre-check)",))
 
     # -- events / ledger -------------------------------------------------------------
     @staticmethod

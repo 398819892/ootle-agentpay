@@ -106,6 +106,42 @@ def test_precheck_rejects_when_revoked():
         b.pay(SHOP, 100, memo="x")
 
 
+def test_precheck_refreshes_stale_caps_from_chain_instead_of_false_rejecting(monkeypatch):
+    # Attached with a STALE display daily cap (1500) while the chain's real cap is 15000 (raised on
+    # chain after attach). A spend that exceeds the stale cap but fits the real one must NOT be
+    # pre-rejected: the pre-check reconciles with the authoritative chain state before rejecting.
+    b = _budget(per_tx_cap=1_000, daily_cap=1_500, spent=1_530)
+    monkeypatch.setattr(b, "read_onchain_state", lambda: {
+        "per_tx_cap": 1_000, "daily_cap": 15_000, "spent_in_window": 1_530,
+        "whitelist": [SHOP], "revoked": False})
+    b.client.next_result = _pay_event(SHOP, 1, "x", 1_531)
+    b.pay(SHOP, 1, memo="x")                 # within the real cap -> accepted, not pre-rejected
+    assert b.daily_cap == 15_000             # reconciled from chain
+    assert b.spent == 1_531                  # ledger still follows the pay event
+
+
+def test_precheck_still_rejects_when_chain_confirms_over_cap(monkeypatch):
+    # Reconciling with chain must not WEAKEN the check: if the chain's own numbers still say over
+    # cap, the client pre-check rejects (early, friendly) exactly as before.
+    b = _budget(per_tx_cap=1_000, daily_cap=1_500, spent=1_530)
+    monkeypatch.setattr(b, "read_onchain_state", lambda: {
+        "per_tx_cap": 1_000, "daily_cap": 1_500, "spent_in_window": 1_530,
+        "whitelist": [SHOP], "revoked": False})
+    with pytest.raises(PolicyViolation):
+        b.pay(SHOP, 1, memo="x")
+
+
+def test_precheck_keeps_display_copy_when_chain_unreadable(monkeypatch):
+    # A read hiccup must never block a pay-by-crash NOR silently pass: it falls back to the display
+    # copy (the pre-0.49 offline/mock behaviour), and the chain still enforces on the real submit.
+    b = _budget(per_tx_cap=1_000, daily_cap=1_500, spent=1_530)
+    def boom():
+        raise ChainError("walletd unreachable")
+    monkeypatch.setattr(b, "read_onchain_state", boom)
+    with pytest.raises(PolicyViolation):
+        b.pay(SHOP, 1, memo="x")             # stale 1500 kept -> 1531 > 1500 -> rejected as before
+
+
 # -- manifest shape + memo pass-through -----------------------------------------------
 
 def test_pay_builds_manifest_with_proof_and_memo():
