@@ -74,6 +74,9 @@ function createDashboard({
       frozen: Boolean(store.frozen),
       // whether high-risk actions require a step-up confirmation (true iff auth is enabled)
       stepUpRequired: STEP_UP_ON,
+      // default language for the MCP's payment-receipt image ("zh" | "en" | "both"); the MCP reads
+      // this field from /api/state, so the dashboard setting drives the separate MCP process too.
+      receiptLang: store.receiptLang || "both",
       // tx journal health: counts by status + anything needing operator attention (unknown txs).
       tx: txlog.summary(),
       budget: null,

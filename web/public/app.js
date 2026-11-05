@@ -135,6 +135,17 @@ const I18N = {
 
     /* connect */
     nav_connect: "Connect AI",
+    nav_settings: "Settings",
+    settings_sub: "Defaults for this dashboard and the agent's payment receipts.",
+    set_ui_lang: "Interface language",
+    set_ui_lang_hint: "The language of this dashboard — applies right away, remembered in this browser.",
+    set_receipt_lang: "Receipt language",
+    set_receipt_lang_hint: "The language of the payment-receipt image the AI agent gets back over MCP (takes effect on the next payment).",
+    lang_zh: "中文",
+    lang_en: "English",
+    lang_both: "Bilingual · 中文 / English",
+    settings_saved: "Saved",
+    settings_save_failed: "Could not save",
     connect_sub: "Copy a ready-made config and paste it into your AI — Claude Desktop, Cursor, any MCP host, or an HTTP framework like OpenClaw.",
     connect_no_budget: "No budget is open yet, so the block below uses a placeholder component. Open a budget (Manage) to fill in the real one.",
     connect_mcp_title: "MCP host — Claude Desktop / Cursor",
@@ -500,6 +511,17 @@ const I18N = {
 
     /* connect */
     nav_connect: "接入",
+    nav_settings: "设置",
+    settings_sub: "设置本控制台与代理付款回执的默认项。",
+    set_ui_lang: "界面语言",
+    set_ui_lang_hint: "本控制台的显示语言 —— 即时生效,记在本浏览器。",
+    set_receipt_lang: "回执单语言",
+    set_receipt_lang_hint: "AI 代理通过 MCP 收到的付款回执图的语言(下一笔付款起生效)。",
+    lang_zh: "中文",
+    lang_en: "English",
+    lang_both: "双语 · 中文 / English",
+    settings_saved: "已保存",
+    settings_save_failed: "保存失败",
     connect_sub: "复制一份现成配置，直接粘贴到你的 AI —— Claude Desktop、Cursor、任意 MCP 宿主，或 OpenClaw 这类 HTTP 框架。",
     connect_no_budget: "当前还没有开预算，下面的配置用的是占位组件地址。到「管理」开一个预算后，这里会自动填入真实地址。",
     connect_mcp_title: "MCP 宿主 —— Claude Desktop / Cursor",
@@ -867,6 +889,8 @@ const P = {
   refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v4h-4"/>',
   trend: '<path d="M3 17l6-6 4 4 7-7"/><path d="M21 8v5h-5"/>',
   plug: '<path d="M9 2v6M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0V8Z"/><path d="M12 17v4"/>',
+  settings:
+    '<circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l1.7-1.3-1.8-3.1-2 .8a7.6 7.6 0 0 0-2.6-1.5L14.3 3h-3.6l-.3 2.1a7.6 7.6 0 0 0-2.6 1.5l-2-.8-1.8 3.1 1.7 1.3a7.6 7.6 0 0 0 0 3l-1.7 1.3 1.8 3.1 2-.8a7.6 7.6 0 0 0 2.6 1.5l.3 2.1h3.6l.3-2.1a7.6 7.6 0 0 0 2.6-1.5l2 .8 1.8-3.1-1.7-1.3Z"/>',
 };
 function icon(name, size = 18) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ""}</svg>`;
@@ -1182,6 +1206,7 @@ const NAV = [
   { id: "pay", key: "nav_pay", icon: "send" },
   { id: "merchants", key: "nav_merchants", icon: "store" },
   { id: "connect", key: "nav_connect", icon: "plug" },
+  { id: "settings", key: "nav_settings", icon: "settings" },
 ];
 
 function go(view) {
@@ -1276,6 +1301,44 @@ function pageHead(title, sub, actions = "") {
     <div><h1>${esc(title)}</h1>${sub ? `<p>${sub}</p>` : ""}</div>
     ${actions ? `<div class="row">${actions}</div>` : ""}
   </header>`;
+}
+
+/* ---- views: SETTINGS ------------------------------------------------------ */
+// Two defaults in one place: the dashboard's own interface language (client-side, remembered in this
+// browser via setLang/localStorage) and the language of the payment-receipt image the MCP hands back
+// to the agent (server-side in the store, read by the separate MCP process over /api/state).
+function viewSettings() {
+  const d = S.data || {};
+  const rl = ["zh", "en", "both"].includes(d.receiptLang) ? d.receiptLang : "both";
+  const opt = (val, label, cur) => `<option value="${val}"${val === cur ? " selected" : ""}>${esc(label)}</option>`;
+  return (
+    pageHead(t("nav_settings"), t("settings_sub")) +
+    `<div class="card" style="max-width:560px">
+      <div class="card__body">
+        <div class="field">
+          <label class="field__label" for="set-ui-lang">${esc(t("set_ui_lang"))}</label>
+          <div class="select-wrap">
+            <select class="select" id="set-ui-lang">
+              ${opt("zh", t("lang_zh"), LANG)}
+              ${opt("en", t("lang_en"), LANG)}
+            </select>
+          </div>
+          <div class="field__hint">${esc(t("set_ui_lang_hint"))}</div>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label class="field__label" for="set-receipt-lang">${esc(t("set_receipt_lang"))}</label>
+          <div class="select-wrap">
+            <select class="select" id="set-receipt-lang">
+              ${opt("zh", t("lang_zh"), rl)}
+              ${opt("en", t("lang_en"), rl)}
+              ${opt("both", t("lang_both"), rl)}
+            </select>
+          </div>
+          <div class="field__hint">${esc(t("set_receipt_lang_hint"))}</div>
+        </div>
+      </div>
+    </div>`
+  );
 }
 
 /* ---- views: OVERVIEW ------------------------------------------------------ */
@@ -1949,6 +2012,9 @@ function render() {
     case "connect":
       body = viewConnect();
       break;
+    case "settings":
+      body = viewSettings();
+      break;
     default:
       body = viewOverview();
   }
@@ -2075,6 +2141,25 @@ function wire() {
   if (S.view === "manage" && S.data.budget) wireManage();
   if (S.view === "pay" && S.data.budget) wirePay();
   if (S.view === "merchants" && S.data.budget) wireMerchants();
+  if (S.view === "settings") wireSettings();
+}
+
+function wireSettings() {
+  const ui = el("set-ui-lang");
+  if (ui) ui.onchange = () => setLang(ui.value); // client-side; re-renders in the chosen language
+  const rc = el("set-receipt-lang");
+  if (rc) {
+    rc.onchange = async () => {
+      const prev = S.data && S.data.receiptLang;
+      try {
+        S.data = await api("/api/settings", { receiptLang: rc.value });
+        toast("success", t("settings_saved"));
+      } catch (e) {
+        rc.value = prev || "both"; // revert the control if the save failed
+        toast("error", t("settings_save_failed"), e.message);
+      }
+    };
+  }
 }
 
 async function doCopy(btn) {

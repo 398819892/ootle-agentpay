@@ -17,8 +17,8 @@ function createStore({ stateFile: STATE_FILE, budgetTemplate: BUDGET_TEMPLATE, t
   // (treasury), spend-in-window, the on-chain whitelist and the revoked flag — is read LIVE from the
   // chain in `dashboardState()` (see `readChainBudget`). The cached caps/whitelist/revoked here are
   // only a fallback for when a chain read momentarily fails, and are labelled as such to the client.
-  /** @type {{ budget: any|null, merchants: Record<string,string>, frozen: boolean }} */
-  let store = { budget: null, merchants: {}, frozen: false };
+  /** @type {{ budget: any|null, merchants: Record<string,string>, frozen: boolean, receiptLang: string }} */
+  let store = { budget: null, merchants: {}, frozen: false, receiptLang: "both" };
 
   function loadStore() {
     let raw = null;
@@ -30,6 +30,9 @@ function createStore({ stateFile: STATE_FILE, budgetTemplate: BUDGET_TEMPLATE, t
     if (!raw || typeof raw !== "object") return;
     store.merchants = raw.merchants && typeof raw.merchants === "object" ? raw.merchants : {};
     store.frozen = Boolean(raw.frozen);
+    // Default language for the MCP's payment-receipt image ("zh" | "en" | "both"); the MCP reads it
+    // live from /api/state so the dashboard setting controls a separate process too.
+    store.receiptLang = ["zh", "en", "both"].includes(raw.receiptLang) ? raw.receiptLang : "both";
     // API-key revocations persist across restarts (the key list itself stays in env).
     store.apiKeys = raw.apiKeys && typeof raw.apiKeys === "object" ? raw.apiKeys : {};
     if (raw.budget) {

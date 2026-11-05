@@ -60,12 +60,33 @@ def _short_merchant(m) -> str:
     return m
 
 
+# Row/section labels per receipt language. "both" is the bilingual default; "zh"/"en" are single
+# language. The dashboard's Settings page picks which one the agent gets back (see server.py).
+def _labels(lang):
+    if lang == "zh":
+        return {"subtitle": "付款回执", "ok": "付款成功", "merchant": "商户", "memo": "备注",
+                "balance": "剩余金额", "window": "本窗口剩余", "time": "付款时间",
+                "foot": "Tari Ootle 验证者 · 链上已确认"}
+    if lang == "en":
+        return {"subtitle": "Payment Receipt", "ok": "Payment successful", "merchant": "Merchant",
+                "memo": "Memo", "balance": "Balance", "window": "Window left", "time": "Time",
+                "foot": "Tari Ootle validator · confirmed on-chain"}
+    return {"subtitle": "付款回执 · Payment Receipt", "ok": "付款成功", "merchant": "商户  Merchant",
+            "memo": "备注  Memo", "balance": "剩余金额  Balance", "window": "本窗口剩余  Window left",
+            "time": "付款时间  Time", "foot": "Tari Ootle validator · 链上已确认"}
+
+
 def render_receipt_png(*, merchant, amount, memo="", remaining_balance=None,
-                       remaining_in_window=None, paid_at=None, unit="µT") -> Optional[bytes]:
-    """Return a PNG receipt as bytes, or ``None`` if it cannot be rendered."""
+                       remaining_in_window=None, paid_at=None, unit="µT",
+                       lang="both") -> Optional[bytes]:
+    """Return a PNG receipt as bytes, or ``None`` if it cannot be rendered.
+
+    ``lang`` is "zh", "en" or "both" (anything else falls back to bilingual).
+    """
     if not _PIL_OK:
         return None
     try:
+        L = _labels(lang if lang in ("zh", "en", "both") else "both")
         S = 2  # supersample, then downscale for crisp text
 
         # palette
@@ -86,11 +107,11 @@ def render_receipt_png(*, merchant, amount, memo="", remaining_balance=None,
         f_foot = _font(_REGULAR, 12 * S)
 
         rows = [
-            ("商户  Merchant", _short_merchant(merchant)),
-            ("备注  Memo", str(memo) if memo else "—"),
-            ("剩余金额  Balance", f"{_fmt_amount(remaining_balance)} {unit}"),
-            ("本窗口剩余  Window left", f"{_fmt_amount(remaining_in_window)} {unit}"),
-            ("付款时间  Time", _fmt_time(paid_at)),
+            (L["merchant"], _short_merchant(merchant)),
+            (L["memo"], str(memo) if memo else "—"),
+            (L["balance"], f"{_fmt_amount(remaining_balance)} {unit}"),
+            (L["window"], f"{_fmt_amount(remaining_in_window)} {unit}"),
+            (L["time"], _fmt_time(paid_at)),
         ]
 
         W = 720 * S
@@ -114,7 +135,7 @@ def render_receipt_png(*, merchant, amount, memo="", remaining_balance=None,
         d.rectangle([cx0, cy0 + header_h - 18 * S, cx1, cy0 + header_h], fill=brand)
         hy = cy0 + header_h // 2
         d.text((cx0 + pad, hy), "AgentPay", font=f_brand, fill=(255, 255, 255), anchor="lm")
-        d.text((cx1 - pad, hy), "付款回执 · Payment Receipt", font=f_title, fill=(232, 228, 255), anchor="rm")
+        d.text((cx1 - pad, hy), L["subtitle"], font=f_title, fill=(232, 228, 255), anchor="rm")
 
         y = cy0 + header_h
         # a drawn green check badge (a ✓ glyph is missing from some bold CJK faces, so we draw it)
@@ -124,7 +145,7 @@ def render_receipt_png(*, merchant, amount, memo="", remaining_balance=None,
         d.ellipse([bx - r, by - r, bx + r, by + r], fill=ok)
         d.line([(bx - 5 * S, by), (bx - 1 * S, by + 4 * S)], fill=(255, 255, 255), width=2 * S)
         d.line([(bx - 1 * S, by + 4 * S), (bx + 6 * S, by - 5 * S)], fill=(255, 255, 255), width=2 * S)
-        d.text((bx + r + 10 * S, by), "付款成功", font=f_ok, fill=ok, anchor="lm")
+        d.text((bx + r + 10 * S, by), L["ok"], font=f_ok, fill=ok, anchor="lm")
         y += ok_h
         d.text((cx0 + pad, y + amount_h // 2), f"{_fmt_amount(amount)} {unit}",
                font=f_amount, fill=ink, anchor="lm")
@@ -138,7 +159,7 @@ def render_receipt_png(*, merchant, amount, memo="", remaining_balance=None,
             y += row_h
 
         d.line([cx0 + pad, y, cx1 - pad, y], fill=line, width=max(1, S))
-        d.text((cx0 + pad, y + foot_h // 2), "Tari Ootle validator · 链上已确认",
+        d.text((cx0 + pad, y + foot_h // 2), L["foot"],
                font=f_foot, fill=muted, anchor="lm")
 
         img = img.resize((W // S, H // S), Image.LANCZOS)

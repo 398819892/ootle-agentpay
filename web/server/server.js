@@ -248,6 +248,19 @@ const api = {
   "POST /api/revoke": (body, ctx) => authz.execute("revoke", body, ctx),
   "POST /api/sessions": (body, ctx) => authz.execute("issueSession", body, ctx),
   "POST /api/sessions/revoke": (body, ctx) => authz.execute("revokeSession", body, ctx),
+  // Low-risk UI/receipt preferences (no funds, no chain) — set directly on the store, not via the
+  // authorizer. Currently just the receipt-image language, which the MCP reads back from /api/state.
+  async "POST /api/settings"(body) {
+    if (body && body.receiptLang !== undefined) {
+      if (!["zh", "en", "both"].includes(body.receiptLang)) {
+        throw httpError(400, "receiptLang must be 'zh', 'en' or 'both'.");
+      }
+      store.receiptLang = body.receiptLang;
+      saveStore();
+    }
+    return await dashboardState();
+  },
+
   "POST /api/reset": (body, ctx) => authz.execute("resetLocal", body, ctx),
   "POST /api/freeze": (body, ctx) => authz.execute("freeze", body, ctx),
   "POST /api/unfreeze": (body, ctx) => authz.execute("unfreeze", body, ctx),

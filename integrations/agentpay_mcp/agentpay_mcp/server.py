@@ -23,10 +23,45 @@ agent-friendly error objects rather than raw exceptions / a crashed server.
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
+import urllib.request
 
 from . import backend, config
 from .receipt_image import render_receipt_png
+
+# ---- receipt language -------------------------------------------------------------------------
+# The receipt image's language is a dashboard Setting, but the dashboard is a SEPARATE process
+# (often on a different host/OS). So the MCP reads it live from the dashboard's open /api/state
+# endpoint over localhost, cached briefly, and falls back to AGENTPAY_RECEIPT_LANG then "both" when
+# the dashboard can't be reached. This keeps one Settings page in control of this process too.
+_RECEIPT_LANG_CACHE = {"val": None, "at": 0.0}
+_RECEIPT_LANG_TTL = 10.0  # seconds — short, so a Settings change is picked up on the next pay
+
+
+def _receipt_lang() -> str:
+    """Resolve the receipt language ("zh" | "en" | "both"). Never raises."""
+    now = time.time()
+    cached = _RECEIPT_LANG_CACHE["val"]
+    if cached and now - _RECEIPT_LANG_CACHE["at"] < _RECEIPT_LANG_TTL:
+        return cached
+    lang = None
+    base = os.environ.get("AGENTPAY_DASHBOARD_URL", "http://127.0.0.1:8787").rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{base}/api/state", timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        v = data.get("receiptLang")
+        if v in ("zh", "en", "both"):
+            lang = v
+    except Exception:  # noqa: BLE001 - dashboard unreachable; use the env/default fallback
+        lang = None
+    if lang is None:
+        env = os.environ.get("AGENTPAY_RECEIPT_LANG", "").strip().lower()
+        lang = env if env in ("zh", "en", "both") else "both"
+    _RECEIPT_LANG_CACHE["val"] = lang
+    _RECEIPT_LANG_CACHE["at"] = now
+    return lang
 
 try:
     from mcp.server.fastmcp import FastMCP, Image
@@ -202,7 +237,7 @@ def pay_merchant(merchant: str, amount: int, memo: str = "") -> dict:
         png = render_receipt_png(
             merchant=r.merchant, amount=r.amount, memo=r.memo,
             remaining_balance=r.balance, remaining_in_window=r.remaining_in_window,
-            paid_at=r.paid_at,
+            paid_at=r.paid_at, lang=_receipt_lang(),
         )
         if png:
             return [Image(data=png, format="png"), out]
