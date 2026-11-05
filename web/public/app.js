@@ -150,8 +150,9 @@ const I18N = {
     set_receipt_lang: "Receipt language",
     set_receipt_lang_hint: "The language of the payment-receipt image the AI agent gets back over MCP (takes effect on the next payment).",
     set_pay_confirm: "Payment confirmation",
-    set_pay_required: "Require a passphrase for every payment",
-    set_pay_required_hint: "When on, the AI agent must supply your pay passphrase on each payment, or the payment is refused. The passphrase is checked here and never leaves this dashboard.",
+    set_pay_confirm_intro: "Every payment is already confirmed by your AI app's own \"Allow pay_merchant?\" prompt (it shows the merchant and amount). Keep that tool set to \"Ask every time\" — don't \"Always allow\" it — and that one click is your per-payment confirmation. Nothing is typed into the chat.",
+    set_pay_required: "Also require a pay passphrase (advanced)",
+    set_pay_required_hint: "Optional extra layer: the agent must also supply your pay passphrase, verified here (never leaves this dashboard). It needs an AI client that can prompt for a secret securely (MCP elicitation). Claude Desktop does not support that yet, so leave this OFF there and rely on its Allow prompt above.",
     pay_pass_set_ph: "Enter a new passphrase to replace the current one",
     pay_pass_unset_ph: "Set a pay passphrase",
     pay_pass_save: "Save passphrase",
@@ -545,8 +546,9 @@ const I18N = {
     set_receipt_lang: "回执单语言",
     set_receipt_lang_hint: "AI 代理通过 MCP 收到的付款回执图的语言(下一笔付款起生效)。",
     set_pay_confirm: "支付确认",
-    set_pay_required: "每笔支付都需要口令",
-    set_pay_required_hint: "开启后,AI 代理每次付款都必须提供你的支付口令,否则付款会被拒绝。口令在本控制台校验,绝不离开本机。",
+    set_pay_confirm_intro: "每笔付款都已经由你的 AI 应用自带的「允许运行 pay_merchant?」弹窗来确认(弹窗会显示商户和金额)。把该工具保持为「每次询问」、不要设成「始终允许」,点一下允许就是你对这笔付款的确认 —— 口令不会进聊天。",
+    set_pay_required: "额外再要一道支付口令(进阶)",
+    set_pay_required_hint: "可选的加强层:代理还必须提供你的支付口令,在本控制台校验(绝不离开本机)。它需要 AI 客户端能安全地弹框收口令(MCP elicitation)。Claude Desktop 目前不支持,所以在它上面请保持关闭,改用上面的「允许」弹窗即可。",
     pay_pass_set_ph: "输入新口令以替换当前口令",
     pay_pass_unset_ph: "设置支付口令",
     pay_pass_save: "保存口令",
@@ -1380,7 +1382,8 @@ function viewSettings() {
         </div>
         <div class="field" style="margin-bottom:0">
           <label class="field__label">${esc(t("set_pay_confirm"))}</label>
-          <label class="switch-row">
+          <div class="field__hint" style="margin-top:0">${esc(t("set_pay_confirm_intro"))}</div>
+          <label class="switch-row" style="margin-top:12px">
             <input type="checkbox" id="set-pay-required"${d.payConfirmRequired ? " checked" : ""}/>
             <span>${esc(t("set_pay_required"))}</span>
           </label>
