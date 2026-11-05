@@ -77,6 +77,11 @@ function createDashboard({
       // default language for the MCP's payment-receipt image ("zh" | "en" | "both"); the MCP reads
       // this field from /api/state, so the dashboard setting drives the separate MCP process too.
       receiptLang: store.receiptLang || "both",
+      // Pay-confirmation policy the MCP reads: whether a human passphrase is required at pay time, and
+      // whether one is currently set. The passphrase HASH is deliberately NOT exposed here — the MCP
+      // verifies a candidate via POST /api/verify-pay, so the hash never leaves the dashboard.
+      payConfirmRequired: Boolean(store.payConfirm && store.payConfirm.required && store.payConfirm.hash),
+      payPassphraseSet: Boolean(store.payConfirm && store.payConfirm.hash),
       // tx journal health: counts by status + anything needing operator attention (unknown txs).
       tx: txlog.summary(),
       budget: null,

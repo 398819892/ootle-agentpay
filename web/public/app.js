@@ -149,6 +149,17 @@ const I18N = {
     set_ui_lang_hint: "The language of this dashboard — applies right away, remembered in this browser.",
     set_receipt_lang: "Receipt language",
     set_receipt_lang_hint: "The language of the payment-receipt image the AI agent gets back over MCP (takes effect on the next payment).",
+    set_pay_confirm: "Payment confirmation",
+    set_pay_required: "Require a passphrase for every payment",
+    set_pay_required_hint: "When on, the AI agent must supply your pay passphrase on each payment, or the payment is refused. The passphrase is checked here and never leaves this dashboard.",
+    pay_pass_set_ph: "Enter a new passphrase to replace the current one",
+    pay_pass_unset_ph: "Set a pay passphrase",
+    pay_pass_save: "Save passphrase",
+    pay_pass_is_set: "A pay passphrase is set.",
+    pay_pass_not_set: "No pay passphrase set yet.",
+    pay_pass_saved: "Pay passphrase saved",
+    pay_pass_cleared: "Pay passphrase cleared",
+    pay_need_pass_first: "Set a pay passphrase first",
     lang_zh: "中文",
     lang_en: "English",
     lang_both: "Bilingual · 中文 / English",
@@ -533,6 +544,17 @@ const I18N = {
     set_ui_lang_hint: "本控制台的显示语言 —— 即时生效,记在本浏览器。",
     set_receipt_lang: "回执单语言",
     set_receipt_lang_hint: "AI 代理通过 MCP 收到的付款回执图的语言(下一笔付款起生效)。",
+    set_pay_confirm: "支付确认",
+    set_pay_required: "每笔支付都需要口令",
+    set_pay_required_hint: "开启后,AI 代理每次付款都必须提供你的支付口令,否则付款会被拒绝。口令在本控制台校验,绝不离开本机。",
+    pay_pass_set_ph: "输入新口令以替换当前口令",
+    pay_pass_unset_ph: "设置支付口令",
+    pay_pass_save: "保存口令",
+    pay_pass_is_set: "已设置支付口令。",
+    pay_pass_not_set: "尚未设置支付口令。",
+    pay_pass_saved: "支付口令已保存",
+    pay_pass_cleared: "支付口令已清除",
+    pay_need_pass_first: "请先设置支付口令",
     lang_zh: "中文",
     lang_en: "English",
     lang_both: "双语 · 中文 / English",
@@ -1345,7 +1367,7 @@ function viewSettings() {
           </div>
           <div class="field__hint">${esc(t("set_ui_lang_hint"))}</div>
         </div>
-        <div class="field" style="margin-bottom:0">
+        <div class="field">
           <label class="field__label" for="set-receipt-lang">${esc(t("set_receipt_lang"))}</label>
           <div class="select-wrap">
             <select class="select" id="set-receipt-lang">
@@ -1355,6 +1377,20 @@ function viewSettings() {
             </select>
           </div>
           <div class="field__hint">${esc(t("set_receipt_lang_hint"))}</div>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label class="field__label">${esc(t("set_pay_confirm"))}</label>
+          <label class="switch-row">
+            <input type="checkbox" id="set-pay-required"${d.payConfirmRequired ? " checked" : ""}/>
+            <span>${esc(t("set_pay_required"))}</span>
+          </label>
+          <div class="field__hint">${esc(t("set_pay_required_hint"))}</div>
+          <div class="addrow" style="margin-top:12px">
+            <input class="input" id="set-pay-pass" type="password" autocomplete="new-password"
+                   placeholder="${esc(d.payPassphraseSet ? t("pay_pass_set_ph") : t("pay_pass_unset_ph"))}"/>
+            <button type="button" class="btn btn--secondary" id="set-pay-save">${icon("shield", 15)} ${esc(t("pay_pass_save"))}</button>
+          </div>
+          <div class="field__hint" id="pay-pass-status">${esc(d.payPassphraseSet ? t("pay_pass_is_set") : t("pay_pass_not_set"))}</div>
         </div>
       </div>
     </div>`
@@ -2227,6 +2263,46 @@ function wireSettings() {
         rc.value = prev || "both"; // revert the control if the save failed
         toast("error", t("settings_save_failed"), e.message);
       }
+    };
+  }
+
+  // Pay confirmation: the toggle requires a passphrase to be set first (guarded client-side AND on the
+  // server), and the passphrase input is masked (type="password") and never pre-filled or echoed back.
+  const req = el("set-pay-required");
+  if (req) {
+    req.onchange = async () => {
+      const want = req.checked;
+      if (want && !(S.data && S.data.payPassphraseSet)) {
+        req.checked = false; // can't require what isn't set yet
+        toast("error", t("pay_need_pass_first"));
+        return;
+      }
+      try {
+        S.data = await api("/api/settings", { payConfirmRequired: want });
+        toast("success", t("settings_saved"));
+      } catch (e) {
+        req.checked = !want; // revert the toggle if the save failed
+        toast("error", t("settings_save_failed"), e.message);
+      }
+    };
+  }
+  const saveP = el("set-pay-save");
+  const passIn = el("set-pay-pass");
+  if (saveP && passIn) {
+    saveP.onclick = async () => {
+      const val = passIn.value;
+      try {
+        S.data = await api("/api/settings", { payPassphrase: val });
+        passIn.value = ""; // never keep the plaintext around in the field
+        // Feedback after input: say whether it was set or cleared, then re-render the status line.
+        toast("success", val.length ? t("pay_pass_saved") : t("pay_pass_cleared"));
+        render();
+      } catch (e) {
+        toast("error", t("settings_save_failed"), e.message);
+      }
+    };
+    passIn.onkeydown = (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); saveP.click(); }
     };
   }
 }

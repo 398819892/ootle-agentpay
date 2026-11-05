@@ -17,8 +17,9 @@ function createStore({ stateFile: STATE_FILE, budgetTemplate: BUDGET_TEMPLATE, t
   // (treasury), spend-in-window, the on-chain whitelist and the revoked flag — is read LIVE from the
   // chain in `dashboardState()` (see `readChainBudget`). The cached caps/whitelist/revoked here are
   // only a fallback for when a chain read momentarily fails, and are labelled as such to the client.
-  /** @type {{ budget: any|null, merchants: Record<string,string>, frozen: boolean, receiptLang: string }} */
-  let store = { budget: null, merchants: {}, frozen: false, receiptLang: "both" };
+  /** @type {{ budget: any|null, merchants: Record<string,string>, frozen: boolean, receiptLang: string, payConfirm: { required: boolean, hash: string|null } }} */
+  let store = { budget: null, merchants: {}, frozen: false, receiptLang: "both",
+                payConfirm: { required: false, hash: null } };
 
   function loadStore() {
     let raw = null;
@@ -33,6 +34,15 @@ function createStore({ stateFile: STATE_FILE, budgetTemplate: BUDGET_TEMPLATE, t
     // Default language for the MCP's payment-receipt image ("zh" | "en" | "both"); the MCP reads it
     // live from /api/state so the dashboard setting controls a separate process too.
     store.receiptLang = ["zh", "en", "both"].includes(raw.receiptLang) ? raw.receiptLang : "both";
+    // Pay-confirmation: whether a passphrase is required at pay time, and its SHA-256 (hex) — NEVER
+    // the plaintext. The MCP verifies against this hash via /api/verify-pay; it is not exposed in
+    // /api/state. A string hash with no "required" is kept (so you can preset the passphrase, then
+    // toggle), and "required" with no hash is ignored on load (can't enforce what isn't set).
+    {
+      const pc = raw.payConfirm && typeof raw.payConfirm === "object" ? raw.payConfirm : {};
+      const hash = typeof pc.hash === "string" && /^[0-9a-f]{64}$/.test(pc.hash) ? pc.hash : null;
+      store.payConfirm = { required: Boolean(pc.required) && Boolean(hash), hash };
+    }
     // API-key revocations persist across restarts (the key list itself stays in env).
     store.apiKeys = raw.apiKeys && typeof raw.apiKeys === "object" ? raw.apiKeys : {};
     if (raw.budget) {

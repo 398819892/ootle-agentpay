@@ -22,6 +22,8 @@ agent-friendly error objects rather than raw exceptions / a crashed server.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -34,37 +36,43 @@ from pathlib import Path
 from . import backend, config
 from .receipt_image import render_receipt_png
 
-# ---- receipt language -------------------------------------------------------------------------
-# The receipt image's language is a dashboard Setting, but the dashboard is a SEPARATE process
-# (often on a different host/OS). So the MCP reads it live from the dashboard's open /api/state
-# endpoint over localhost, cached briefly, and falls back to AGENTPAY_RECEIPT_LANG then "both" when
-# the dashboard can't be reached. This keeps one Settings page in control of this process too.
-_RECEIPT_LANG_CACHE = {"val": None, "at": 0.0}
-_RECEIPT_LANG_TTL = 10.0  # seconds — short, so a Settings change is picked up on the next pay
+# ---- the dashboard as a config source ---------------------------------------------------------
+# Some settings live in the dashboard (a SEPARATE process, often a different host/OS): the receipt
+# language and the pay-confirmation policy. The MCP reads them live from the dashboard's open
+# /api/state over localhost, cached briefly, and falls back to env when the dashboard is unreachable.
+def _dashboard_base() -> str:
+    return os.environ.get("AGENTPAY_DASHBOARD_URL", "http://127.0.0.1:8787").rstrip("/")
+
+
+_STATE_CACHE = {"val": None, "at": 0.0}
+_STATE_TTL = 5.0  # seconds — short, so a Settings change is picked up on the next pay
+
+
+def _dashboard_state() -> dict | None:
+    """The dashboard's /api/state as a dict, cached briefly; None if unreachable. Never raises."""
+    now = time.time()
+    if _STATE_CACHE["val"] is not None and now - _STATE_CACHE["at"] < _STATE_TTL:
+        return _STATE_CACHE["val"]
+    data = None
+    try:
+        with urllib.request.urlopen(f"{_dashboard_base()}/api/state", timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 - dashboard unreachable; caller falls back to env
+        data = None
+    _STATE_CACHE["val"] = data
+    _STATE_CACHE["at"] = now
+    return data
 
 
 def _receipt_lang() -> str:
     """Resolve the receipt language ("zh" | "en" | "both"). Never raises."""
-    now = time.time()
-    cached = _RECEIPT_LANG_CACHE["val"]
-    if cached and now - _RECEIPT_LANG_CACHE["at"] < _RECEIPT_LANG_TTL:
-        return cached
-    lang = None
-    base = os.environ.get("AGENTPAY_DASHBOARD_URL", "http://127.0.0.1:8787").rstrip("/")
-    try:
-        with urllib.request.urlopen(f"{base}/api/state", timeout=1.5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+    data = _dashboard_state()
+    if data is not None:
         v = data.get("receiptLang")
         if v in ("zh", "en", "both"):
-            lang = v
-    except Exception:  # noqa: BLE001 - dashboard unreachable; use the env/default fallback
-        lang = None
-    if lang is None:
-        env = os.environ.get("AGENTPAY_RECEIPT_LANG", "").strip().lower()
-        lang = env if env in ("zh", "en", "both") else "both"
-    _RECEIPT_LANG_CACHE["val"] = lang
-    _RECEIPT_LANG_CACHE["at"] = now
-    return lang
+            return v
+    env = os.environ.get("AGENTPAY_RECEIPT_LANG", "").strip().lower()
+    return env if env in ("zh", "en", "both") else "both"
 
 
 # ---- saving the receipt image to a downloadable file ------------------------------------------
@@ -154,6 +162,56 @@ CONFIG: config.ServerConfig = config.load([])  # env-only by default; CLI main()
 _wallet: "backend.AgentWallet | None" = None
 
 
+# ---- human confirmation for payments (opt-in) -------------------------------------------------
+# A guardrail against the AGENT paying without a human's say-so (a mis-decision or a prompt
+# injection): when a pay passphrase is configured, every pay_merchant must carry the human's
+# passphrase in `confirmation` or it is refused BEFORE any chain submit. Store a HASH, never the
+# plaintext; AGENTPAY_PAY_PASSPHRASE_SHA256 (hex) wins, else AGENTPAY_PAY_PASSPHRASE is hashed here.
+# NOTE: this is a client-side guardrail, not a hard security boundary — the chain caps + the owner's
+# revoke are the real boundary (see docs/securing-the-mcp-agent.md). Unset => confirmation is off.
+def _env_pay_hash() -> str | None:
+    """Env-configured pay passphrase hash (fallback for when no dashboard is reachable).
+    AGENTPAY_PAY_PASSPHRASE_SHA256 (hex) wins; else AGENTPAY_PAY_PASSPHRASE is hashed here."""
+    h = os.environ.get("AGENTPAY_PAY_PASSPHRASE_SHA256", "").strip().lower()
+    if h:
+        return h
+    p = os.environ.get("AGENTPAY_PAY_PASSPHRASE", "")
+    if p:
+        return hashlib.sha256(p.encode("utf-8")).hexdigest()
+    return None
+
+
+def _verify_pay_with_dashboard(confirmation: str) -> bool | None:
+    """Ask the dashboard to verify the passphrase (POST /api/verify-pay). Returns the boolean result,
+    or None if the dashboard could not be reached. The hash stays on the dashboard."""
+    body = json.dumps({"confirmation": confirmation or ""}).encode("utf-8")
+    req = urllib.request.Request(f"{_dashboard_base()}/api/verify-pay", data=body, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            return bool(json.loads(resp.read().decode("utf-8")).get("ok"))
+    except Exception:  # noqa: BLE001 - dashboard unreachable at verify time
+        return None
+
+
+def _pay_confirmation_check(confirmation: str) -> tuple[bool, bool]:
+    """``(required, ok)``. Primary source is the dashboard Settings: ``payConfirmRequired`` plus a
+    passphrase verified SERVER-SIDE via /api/verify-pay (so the hash never leaves the dashboard).
+    Falls back to an env-configured passphrase when the dashboard is unreachable. Fail-closed: if
+    confirmation is required but cannot be verified, ``ok`` is False. Never logs/echoes the secret."""
+    data = _dashboard_state()
+    if data is not None and "payConfirmRequired" in data:
+        if not data.get("payConfirmRequired"):
+            return (False, True)
+        return (True, bool(_verify_pay_with_dashboard(confirmation)))  # unreachable -> None -> False
+    # Fallback: no dashboard config visible -> env-configured passphrase, if any.
+    want = _env_pay_hash()
+    if not want:
+        return (False, True)
+    got = hashlib.sha256((confirmation or "").encode("utf-8")).hexdigest()
+    return (True, hmac.compare_digest(got, want))
+
+
 # --- structured, agent-friendly errors --------------------------------------------------
 def _error(error_type: str, message: str, hint: str = "") -> dict:
     """Shape returned to the agent when something is wrong with the setup or the chain link
@@ -238,7 +296,7 @@ def _wallet_or_error() -> "tuple[backend.AgentWallet | None, dict | None]":
 
 # --- tools (the agent's entire surface) -------------------------------------------------
 @mcp.tool()
-def pay_merchant(merchant: str, amount: int, memo: str = "") -> dict:
+def pay_merchant(merchant: str, amount: int, memo: str = "", confirmation: str = "") -> dict:
     """Pay a merchant from the agent's on-chain budget.
 
     The payment is adjudicated by the Tari Ootle validator against the budget's on-chain rules
@@ -262,7 +320,26 @@ def pay_merchant(merchant: str, amount: int, memo: str = "") -> dict:
         amount:   amount to pay, in BASE UNITS (µT; 1 XTR = 1,000,000 µT). Integer — so one whole XTR
                   is ``1000000``, not ``1``. The per-tx and daily caps use the same base units.
         memo:     optional note / invoice reference carried on chain with the payment.
+        confirmation: the human's pay passphrase. REQUIRED only when this budget is configured to
+                  require a human confirmation (AGENTPAY_PAY_PASSPHRASE[_SHA256]); otherwise leave it
+                  empty. If a payment is refused with ``confirmation_required: true``, ASK the human
+                  for their passphrase and call again with it here — never guess or reuse a wrong one.
     """
+    # Human-confirmation gate (opt-in, configured in the dashboard Settings; env is a fallback): refuse
+    # BEFORE any chain submit if a passphrase is required and missing/wrong. A guardrail against the
+    # agent paying without a human's say-so.
+    _required, _ok = _pay_confirmation_check(confirmation)
+    if _required and not _ok:
+        return {
+            "ok": False, "status": "rejected", "merchant": merchant, "amount": amount, "memo": memo,
+            "reason": "payment confirmation required: the human's pay passphrase was missing or incorrect",
+            "confirmation_required": True,
+            "action_required": (
+                "This budget requires a human confirmation passphrase for every payment. Ask the human "
+                "for their AgentPay pay passphrase, then call pay_merchant again with it in the "
+                "`confirmation` argument. Do NOT guess it or retry with the same wrong value."
+            ),
+        }
     w, err = _wallet_or_error()
     if err:
         return err

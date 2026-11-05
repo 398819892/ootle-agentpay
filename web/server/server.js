@@ -110,6 +110,18 @@ function serveReceipt(req, res, urlPath) {
     res.end(data);
   });
 }
+
+// Pay-confirmation passphrase: stored and compared as a SHA-256 hex, never plaintext. The compare is
+// constant-time so /api/verify-pay is not a timing oracle for the hash.
+const sha256Hex = (s) => crypto.createHash("sha256").update(String(s == null ? "" : s), "utf8").digest("hex");
+function hashEqual(aHex, bHex) {
+  if (typeof aHex !== "string" || typeof bHex !== "string" || aHex.length !== bHex.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(aHex, "hex"), Buffer.from(bHex, "hex"));
+  } catch {
+    return false;
+  }
+}
 const { revokedSids, pruneRevokedSids, signSession, verifySession, isAuthed, passwordMatches, setSessionCookie, clearSessionCookie } =
   createSessions({ secret: SESSION_SECRET, cookieName: COOKIE_NAME, authOn: AUTH_ON, password: DASHBOARD_PASSWORD });
 const { csrfTokenFor, csrfTokenOk, originAllowed, hasRequestBody, contentTypeIsJson } = createCsrf({
@@ -277,7 +289,35 @@ const api = {
       store.receiptLang = body.receiptLang;
       saveStore();
     }
+    // Pay-confirmation: set/clear the passphrase (hashed; plaintext never stored) and/or the required
+    // toggle. The plaintext never leaves this handler. Requiring confirmation needs a passphrase to be
+    // set (stored already, or supplied in this same call), so you can't lock yourself out.
+    if (body && (body.payPassphrase !== undefined || body.payConfirmRequired !== undefined)) {
+      const pc = store.payConfirm && typeof store.payConfirm === "object"
+        ? store.payConfirm : { required: false, hash: null };
+      if (body.payPassphrase !== undefined) {
+        const p = String(body.payPassphrase);
+        pc.hash = p.length ? sha256Hex(p) : null; // "" clears it
+        if (!pc.hash) pc.required = false;         // no passphrase -> cannot require
+      }
+      if (body.payConfirmRequired !== undefined) {
+        const want = Boolean(body.payConfirmRequired);
+        if (want && !pc.hash) throw httpError(400, "Set a pay passphrase before requiring it.");
+        pc.required = want;
+      }
+      store.payConfirm = pc;
+      saveStore();
+    }
     return await dashboardState();
+  },
+
+  // The MCP posts a candidate passphrase here at pay time; we verify it against the stored hash
+  // (constant-time) so the hash never leaves the dashboard. Returns only a boolean.
+  "POST /api/verify-pay"(body) {
+    const pc = (store.payConfirm && typeof store.payConfirm === "object") ? store.payConfirm : {};
+    if (!pc.hash) return { ok: true, required: false }; // nothing configured to verify against
+    const got = sha256Hex(body && body.confirmation != null ? body.confirmation : "");
+    return { ok: hashEqual(got, pc.hash), required: Boolean(pc.required) };
   },
 
   // Receipt images: the MCP uploads the PNG it renders (base64) so the dashboard can list + serve it

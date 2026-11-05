@@ -1257,6 +1257,20 @@ button {
 .addrow .input {
   flex: 1;
 }
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.switch-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent, #6d54ff);
+  cursor: pointer;
+}
 .tag-list {
   display: flex;
   flex-wrap: wrap;
