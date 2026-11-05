@@ -24,6 +24,11 @@ classifiers = [
 # install produces image receipts out of the box.
 dependencies = ["mcp>=1.2,<2", "pillow>=10"]
 
+# The remote (Streamable HTTP) transport needs an ASGI server. Starlette ships with `mcp`; uvicorn is
+# the runner, pulled in only when you want the HTTP transport: `pip install 'agentpay-mcp[http]'`.
+[project.optional-dependencies]
+http = ["uvicorn>=0.27"]
+
 [project.scripts]
 agentpay-mcp = "agentpay_mcp.server:main"
 

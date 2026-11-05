@@ -88,6 +88,23 @@ def _split_whitelist(raw: str) -> list[str]:
     return [m.strip() for m in raw.replace("\n", ",").split(",") if m.strip()]
 
 
+def _split_tokens(raw: str) -> list[str]:
+    """Bearer tokens for the HTTP transport, comma/newline separated (secret; env only)."""
+    return [t.strip() for t in (raw or "").replace("\n", ",").split(",") if t.strip()]
+
+
+def _norm_transport(v: str) -> str:
+    v = (v or "stdio").strip().lower()
+    return "streamable-http" if v in ("http", "streamable-http", "streamable_http", "streamablehttp") else "stdio"
+
+
+def _norm_http_path(v: str) -> str:
+    v = (v or "/mcp").strip()
+    if not v.startswith("/"):
+        v = "/" + v
+    return v or "/mcp"
+
+
 @dataclass
 class ServerConfig:
     """Resolved configuration. Build it with :func:`load`."""
@@ -113,6 +130,16 @@ class ServerConfig:
     fund: int = 10_000
     epochs_per_window: int = 10
     whitelist: list[str] = field(default_factory=list)
+
+    # transport: STDIO (default; local hosts launch the server over stdio) or Streamable HTTP (opt-in,
+    # for remote/mobile clients). Exposing the payment tools over the network requires a bearer token
+    # (http_tokens, from AGENTPAY_MCP_HTTP_TOKEN); binding to a non-loopback host without one is
+    # refused in server._run_http (fail-closed). Put the HTTP endpoint behind HTTPS in production.
+    transport: str = "stdio"  # "stdio" | "streamable-http"
+    http_host: str = "127.0.0.1"
+    http_port: int = 8000
+    http_path: str = "/mcp"
+    http_tokens: list[str] = field(default_factory=list)  # bearer token(s); SECRET — env only
 
     @property
     def mode(self) -> str:
@@ -200,15 +227,32 @@ class ServerConfig:
             return json.dumps(block, indent=2, ensure_ascii=False)
         if host == "http-env":
             return "\n".join(f"{k}={v}" for k, v in self.http_env().items())
+        if host == "remote":
+            # Remote MCP over Streamable HTTP. The server doesn't know your public HTTPS URL, so this
+            # prints the local bind endpoint plus the shape clients use once it's behind a TLS proxy.
+            local = f"http://{self.http_host}:{self.http_port}{self.http_path}"
+            return "\n".join([
+                "# Remote MCP (Streamable HTTP). Front this with HTTPS before exposing it publicly.",
+                f"# Local bind / test endpoint: {local}",
+                "#",
+                "# Run the server (token is required to expose beyond localhost):",
+                f"#   AGENTPAY_MCP_HTTP_TOKEN=<secret> agentpay-mcp --http "
+                f"--http-host {self.http_host} --http-port {self.http_port}" +
+                ("" if self.http_path == "/mcp" else f" --http-path {self.http_path}"),
+                "#",
+                "# Point a remote client (Claude connector, ChatGPT custom connector) at your proxy:",
+                "#   URL:    https://YOUR_DOMAIN" + self.http_path,
+                "#   Header: Authorization: Bearer <the same AGENTPAY_MCP_HTTP_TOKEN>",
+            ])
         raise ValueError(f"unknown --host {host!r}")
 
     #: Hosts ``--emit-config`` understands, and the subset ``--install`` can write a file for.
-    EMIT_HOSTS = ("claude", "cursor", "generic", "http-json", "http-env")
+    EMIT_HOSTS = ("claude", "cursor", "generic", "http-json", "http-env", "remote")
     INSTALL_HOSTS = ("claude", "cursor")
 
     def public_dict(self) -> dict:
         """Non-secret view of the config, safe to return from the ``get_server_info`` tool."""
-        return {
+        d = {
             "network": self.network,
             "walletd_url": self.walletd_url,
             "budget_template": self.budget_template,
@@ -218,7 +262,13 @@ class ServerConfig:
             "per_tx_cap": self.per_tx_cap,
             "daily_cap": self.daily_cap,
             "whitelist": list(self.whitelist),
+            "transport": self.transport,
         }
+        if self.transport == "streamable-http":
+            # endpoint is non-secret; the token itself is NEVER exposed — only whether auth is on.
+            d["http_bind"] = f"{self.http_host}:{self.http_port}{self.http_path}"
+            d["http_auth"] = bool(self.http_tokens)
+        return d
 
 
 def load(argv: list[str] | None = None) -> ServerConfig:
@@ -267,6 +317,11 @@ def load(argv: list[str] | None = None) -> ServerConfig:
         fund=_env_int("AGENTPAY_FUND", 10_000),
         epochs_per_window=_env_int("AGENTPAY_EPOCHS_PER_WINDOW", 10),
         whitelist=_split_whitelist(os.environ.get("AGENTPAY_WHITELIST", "")),
+        transport=_norm_transport(os.environ.get("AGENTPAY_MCP_TRANSPORT", "stdio")),
+        http_host=(os.environ.get("AGENTPAY_MCP_HTTP_HOST", "").strip() or "127.0.0.1"),
+        http_port=_env_int("AGENTPAY_MCP_HTTP_PORT", 8000),
+        http_path=_norm_http_path(os.environ.get("AGENTPAY_MCP_HTTP_PATH", "/mcp")),
+        http_tokens=_split_tokens(os.environ.get("AGENTPAY_MCP_HTTP_TOKEN", "")),
     )
 
     # 2) CLI overrides (handy for `agentpay-mcp --network esmeralda --print-config`).
@@ -309,6 +364,16 @@ def load(argv: list[str] | None = None) -> ServerConfig:
         cfg.whitelist = _split_whitelist(args.whitelist)
     if args.no_provision:
         cfg.auto_provision = False
+    if args.transport:
+        cfg.transport = _norm_transport(args.transport)
+    if args.http:
+        cfg.transport = "streamable-http"
+    if args.http_host:
+        cfg.http_host = args.http_host
+    if args.http_port is not None:
+        cfg.http_port = args.http_port
+    if args.http_path:
+        cfg.http_path = _norm_http_path(args.http_path)
 
     # In attach mode the agent account defaults to the owner account (devnet: one key).
     if cfg.component and not cfg.agent_account:
@@ -348,12 +413,21 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--whitelist", help="comma-separated merchant account addresses")
     p.add_argument("--no-provision", dest="no_provision", action="store_true",
                    help="do not open a budget automatically; require attach vars")
+    # transport (default stdio). --http is shorthand for --transport streamable-http. The bearer
+    # token is a SECRET and is read only from AGENTPAY_MCP_HTTP_TOKEN (never a CLI flag, so it does
+    # not land in the process list).
+    p.add_argument("--transport", choices=["stdio", "streamable-http"],
+                   help="MCP transport: stdio (default, local) or streamable-http (remote)")
+    p.add_argument("--http", action="store_true", help="shorthand for --transport streamable-http")
+    p.add_argument("--http-host", dest="http_host", help="streamable-http bind host (default 127.0.0.1)")
+    p.add_argument("--http-port", dest="http_port", type=int, help="streamable-http bind port (default 8000)")
+    p.add_argument("--http-path", dest="http_path", help="streamable-http URL path (default /mcp)")
     p.add_argument("--print-config", dest="print_config", action="store_true",
                    help="print the resolved (non-secret) config as JSON and exit")
     p.add_argument("--selftest", action="store_true",
                    help="run an in-process check against walletd (connect + budget) and exit")
     p.add_argument("--emit-config", dest="emit_config", action="store_true",
-                   help="print the wiring for --host (claude|cursor|generic|http-json|http-env) and exit")
+                   help="print the wiring for --host (claude|cursor|generic|http-json|http-env|remote) and exit")
     p.add_argument("--install", dest="install", action="store_true",
                    help="merge the 'agentpay' entry into --host's config file (claude|cursor; keeps other servers) and exit")
     p.add_argument("--host", choices=list(ServerConfig.EMIT_HOSTS),

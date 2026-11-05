@@ -23,9 +23,9 @@ chain is what says no.
 
 | MCP tool | what it does |
 |---|---|
-| `pay_merchant(merchant, amount, memo="")` | Attempt an on-chain payment. The validator adjudicates; a blocked payment returns `{"ok": false, "reason": "<validator's reason>", "rejected_by": ...}`. |
+| `pay_merchant(merchant, amount, memo="")` | Attempt an on-chain payment. `merchant` is a whitelisted **name** (from the dashboard book) or a `component_…` address. The validator adjudicates; a blocked payment returns `{"ok": false, "reason": "<validator's reason>", "rejected_by": ...}`. |
 | `get_budget_status()` | Remaining budget + the rules the agent must stay within. `spent_in_window` and `revoked` are confirmed against the live chain. |
-| `list_merchants()` | `{"ok": true, "merchants": [...]}` — the on-chain whitelist the agent may pay. |
+| `list_merchants()` | `{"ok": true, "merchants": [{"address", "name"}, ...]}` — the on-chain whitelist the agent may pay, each labelled with its dashboard name when set. |
 | `get_server_info()` | How this server is configured (network, walletd, template, mode, caps) and whether the budget is reachable. Handy for the agent or operator to confirm wiring. |
 
 There is deliberately **no** tool to raise a cap, add a merchant, withdraw, or revoke — those are
@@ -94,6 +94,28 @@ component on chain, and the agent account defaults to the owner account (pass
 All of these values can also come from the shared [`agentpay.config.json`](../../docs/configuration.md)
 (the same file the SDK and the HTTP server read), so you configure once and every surface agrees.
 
+### Remote (HTTP) transport — for mobile / ChatGPT / remote clients
+
+STDIO is the default and is all a local host (Claude Desktop, Cursor) needs. The **same** server can
+also run over **Streamable HTTP** so remote and mobile clients reach it over the network:
+
+```bash
+# local test (loopback, no auth needed):
+agentpay-mcp --http                       # serves http://127.0.0.1:8000/mcp
+
+# exposed (behind an HTTPS reverse proxy): a bearer token is REQUIRED, and binding to a
+# non-loopback host without one is refused (fail-closed):
+AGENTPAY_MCP_HTTP_TOKEN=$(openssl rand -hex 32) \
+  agentpay-mcp --http --http-host 127.0.0.1 --http-port 8000
+agentpay-mcp --emit-config --host remote   # prints the client URL + Authorization header shape
+```
+
+Clients send `Authorization: Bearer <token>`; set several comma-separated tokens in
+`AGENTPAY_MCP_HTTP_TOKEN` to give each agent its own (revoke by removing it and restarting). This is
+**not** the dashboard's `/api/v1` HTTP API — that is a separate key-auth REST surface, not MCP. Full
+setup (TLS reverse proxy, mobile/ChatGPT wiring, security) is in
+[`docs/remote-mcp.md`](../../docs/remote-mcp.md). Needs the `http` extra: `pip install 'agentpay-mcp[http]'`.
+
 ## Configure
 
 Everything is set through environment variables (what an MCP client passes under `"env"`), each
@@ -113,6 +135,11 @@ overridable by a CLI flag. **Defaults target a local swarm, so a dev usually set
 | `AGENTPAY_AGENT_BADGE` | `--agent-badge` | *(derived)* | **attach mode:** the agent badge resource — **optional**, derived from the component's on-chain state when omitted |
 | `AGENTPAY_AGENT_ACCOUNT` | `--agent-account` | *(owner account)* | **attach mode:** the agent's account — defaults to the owner account |
 | `AGENTPAY_AUTO_PROVISION` | `--no-provision` (forces off) | `false` | open a budget automatically when none is given. Default **off** (attach / non-custodial); set `true` for local demos |
+| `AGENTPAY_MCP_TRANSPORT` | `--transport` / `--http` | `stdio` | `stdio` (local) or `streamable-http` (remote). See [Remote (HTTP) transport](#remote-http-transport--for-mobile--chatgpt--remote-clients) |
+| `AGENTPAY_MCP_HTTP_HOST` | `--http-host` | `127.0.0.1` | streamable-http bind host. Non-loopback requires a token |
+| `AGENTPAY_MCP_HTTP_PORT` | `--http-port` | `8000` | streamable-http bind port |
+| `AGENTPAY_MCP_HTTP_PATH` | `--http-path` | `/mcp` | streamable-http URL path |
+| `AGENTPAY_MCP_HTTP_TOKEN` | *(env only — secret)* | *(unset)* | bearer token(s) clients must send (comma-separated for per-agent keys). Required to expose beyond loopback |
 
 **esmeralda preset:** walletd `http://127.0.0.1:5100/json_rpc`, owner `dev` (or whichever funded
 account your walletd holds). The preset bakes **no** template address — the 0.49 esmeralda reset

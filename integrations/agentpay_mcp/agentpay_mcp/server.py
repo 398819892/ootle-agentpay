@@ -575,9 +575,83 @@ def get_server_info() -> dict:
 
 
 # --- entry point ------------------------------------------------------------------------
+# ---- remote (Streamable HTTP) transport + bearer auth -----------------------------------------
+# The SAME MCP server can also run over Streamable HTTP, so remote / mobile clients (Claude
+# iOS/Android connectors, ChatGPT custom connectors) can reach it — STDIO stays the default for local
+# hosts. Exposing payment tools on a network is gated: a bearer token (AGENTPAY_MCP_HTTP_TOKEN) is
+# required, and binding to a NON-loopback host without one is refused (fail-closed). Terminate TLS at a
+# reverse proxy in production. The on-chain caps/whitelist/revoke + the pay confirmation stay the real
+# boundary either way; this transport never widens what a client may do, only how it connects.
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", ""}
+
+
+def _is_loopback_host(host: str) -> bool:
+    return (host or "").strip().lower() in _LOOPBACK_HOSTS
+
+
+def _http_exposure_error(host: str, tokens: "list[str]") -> "str | None":
+    """Fail-closed: refuse to bind the payment MCP to a non-loopback address without a bearer token."""
+    if not _is_loopback_host(host) and not tokens:
+        return (f"refusing to serve the payment MCP on {host!r} without auth: set AGENTPAY_MCP_HTTP_TOKEN "
+                "(a bearer token clients must send), or bind to 127.0.0.1 for local use only.")
+    return None
+
+
+class _BearerAuthASGI:
+    """Minimal ASGI gate. With tokens configured, every HTTP request must carry
+    ``Authorization: Bearer <token>`` matching one of them (constant-time compare). With no tokens it
+    is a pass-through — only reachable on loopback, since exposure without a token is refused first."""
+
+    def __init__(self, app, tokens: "list[str]"):
+        self.app = app
+        self._tokens = [t for t in (tokens or []) if t]
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or self._authorized(scope):
+            await self.app(scope, receive, send)
+            return
+        await send({"type": "http.response.start", "status": 401,
+                    "headers": [(b"content-type", b"application/json"), (b"www-authenticate", b"Bearer")]})
+        await send({"type": "http.response.body", "body": b'{"error":"unauthorized"}'})
+
+    def _authorized(self, scope) -> bool:
+        if not self._tokens:
+            return True
+        for k, v in scope.get("headers") or []:
+            if k == b"authorization":
+                s = v.decode("latin-1")
+                if s[:7].lower() == "bearer ":
+                    got = s[7:].strip()
+                    return any(hmac.compare_digest(got, t) for t in self._tokens)
+        return False
+
+
+def _run_http(cfg) -> None:
+    """Serve the MCP over Streamable HTTP (uvicorn), gated by a bearer token. uvicorn is imported
+    lazily so the default stdio path never needs it."""
+    err = _http_exposure_error(cfg.http_host, cfg.http_tokens)
+    if err:
+        sys.stderr.write(err + "\n")
+        sys.exit(2)
+    try:
+        import uvicorn
+    except ImportError:
+        sys.stderr.write("The Streamable HTTP transport needs uvicorn:\n"
+                         "  pip install 'agentpay-mcp[http]'   (or: pip install uvicorn)\n")
+        sys.exit(1)
+    mcp.settings.host = cfg.http_host
+    mcp.settings.port = cfg.http_port
+    mcp.settings.streamable_http_path = cfg.http_path
+    app = _BearerAuthASGI(mcp.streamable_http_app(), cfg.http_tokens)
+    auth = "bearer-token auth" if cfg.http_tokens else "NO AUTH (loopback only)"
+    sys.stderr.write(f"AgentPay MCP (Streamable HTTP) → http://{cfg.http_host}:{cfg.http_port}"
+                     f"{cfg.http_path}  [{auth}]\n")
+    uvicorn.run(app, host=cfg.http_host, port=cfg.http_port, log_level="warning")
+
+
 def main() -> None:
     """Console-script / module entry point. Parses CLI flags, handles ``--print-config`` and
-    ``--selftest``, otherwise runs the stdio MCP server."""
+    ``--selftest``, otherwise runs the MCP server (stdio by default, or Streamable HTTP)."""
     global CONFIG
     CONFIG = config.load()  # read CLI args this time
 
@@ -622,7 +696,10 @@ def main() -> None:
         print(json.dumps({"selftest": "ok", **info}, indent=2, default=str))
         return
 
-    mcp.run()  # stdio transport
+    if getattr(CONFIG, "transport", "stdio") == "streamable-http":
+        _run_http(CONFIG)
+    else:
+        mcp.run()  # stdio transport (default; local MCP hosts launch the server this way)
 
 
 if __name__ == "__main__":
