@@ -5,8 +5,45 @@
 
 const { big, clampStr } = require("./http_util");
 
+/**
+ * Merge the dashboard's journal ledger with the chain scan into one oldest→newest feed. Journal
+ * rows are kept as-is (they carry the caller's free-text memo and the migrated legacy rows) and are
+ * time-stamped from the chain by txId; chain pays whose txId is NOT already in the journal are added
+ * (the external pays — made via the MCP / SDK / another dashboard). Ordered by chain timestamp (a
+ * row with no timestamp sorts oldest), then re-indexed. `scan` is `{ rows, tsByTxId }` from
+ * extractChainPays. Pure + exported for unit testing.
+ */
+function mergeLedgers(journal, scan, label) {
+  const { rows: chainRows, tsByTxId } = scan;
+  const journalTxIds = new Set(journal.map((e) => e.txId).filter(Boolean));
+  const out = [];
+  for (const e of journal) {
+    out.push({ ...e, _ts: (e.txId && tsByTxId.get(e.txId)) || 0 });
+  }
+  for (const p of chainRows) {
+    if (p.txId && journalTxIds.has(p.txId)) continue; // the journal already has this pay (richer memo)
+    out.push({
+      merchant: p.merchant,
+      merchantName: label(p.merchant),
+      amount: String(p.amount),
+      memo: p.memo,
+      onchainMemo: p.memo,
+      txKind: "pay",
+      status: "confirmed",
+      txId: p.txId,
+      source: "chain", // discovered on chain, not in this dashboard's journal
+      _ts: p.ts || 0,
+    });
+  }
+  out.sort((a, b) => a._ts - b._ts); // oldest→newest; equal ts keeps insertion order (journal first)
+  return out.map((e, i) => {
+    const { _ts, ...rest } = e;
+    return { ...rest, index: i };
+  });
+}
+
 function createDashboard({
-  store, nameByAddr, apiKeys, conn, txlog, readChainBudget, journalTotals, journalLedger,
+  store, nameByAddr, apiKeys, conn, txlog, readChainBudget, journalTotals, journalLedger, chainPayScan,
   walletdUrl: WALLETD_URL, budgetTemplate: BUDGET_TEMPLATE, owner: OWNER, tokenSymbol: TOKEN_SYMBOL, network: NETWORK,
   stepUpOn: STEP_UP_ON,
 }) {
@@ -64,6 +101,23 @@ function createDashboard({
       ? chain.vaultBalance
       : clampStr(big(totals.funded) - big(spent) - big(totals.withdrawn));
 
+    // The payment feed: the dashboard's own journal MERGED with the chain's full pay history, so a
+    // pay made via the MCP / SDK / another dashboard shows up too (not just this dashboard's own
+    // pays). The journal row wins for a matching tx (its memo is the caller's free text). On any
+    // chain failure we fall back to the journal alone — the pre-feature behaviour.
+    const jLedger = journalLedger(cfg.component, label);
+    let ledger = jLedger;
+    let ledgerSource = "journal";
+    try {
+      const scan = chainPayScan ? await chainPayScan(cfg.component) : null;
+      if (scan) {
+        ledger = mergeLedgers(jLedger, scan, label);
+        ledgerSource = "chain+journal";
+      }
+    } catch (e) {
+      console.error("warn: chain ledger scan failed, showing journal only:", e.message);
+    }
+
     base.budget = {
       component: cfg.component,
       perTxCap,
@@ -80,7 +134,7 @@ function createDashboard({
       })),
       window: chainOk ? chain.window : null,
       whitelist: whitelist.map((address) => ({ address, name: label(address) })),
-      ledger: journalLedger(cfg.component, label),
+      ledger,
       // Provenance of each figure, so the UI (and a reviewer) can see what is chain-authoritative.
       source: {
         treasury: treasuryFromChain ? "chain" : "journal(cache)",
@@ -89,6 +143,7 @@ function createDashboard({
         whitelist: chainOk ? "chain" : "cache",
         revoked: chainOk ? "chain" : "cache",
         fundedWithdrawn: "journal",
+        ledger: ledgerSource, // "chain+journal" (all on-chain pays) or "journal" (fallback)
         chainRead: chainOk,
       },
     };
@@ -110,4 +165,4 @@ function createDashboard({
   return { dashboardState, pendingResult };
 }
 
-module.exports = { createDashboard };
+module.exports = { createDashboard, mergeLedgers };
