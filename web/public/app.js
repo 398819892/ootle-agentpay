@@ -263,6 +263,7 @@ const I18N = {
     th_merchant: "Merchant",
     th_amount: "Amount",
     th_memo: "Memo",
+    th_time: "Time",
     verdict_ok_title: "The chain would accept this",
     verdict_ok_body: (p) =>
       `A validator dry-run of paying <b>${p.amount} ${p.unit}</b> to <b>${p.merchant}</b> passes every on-chain rule. Hit <b>Pay</b> to submit it for real.`,
@@ -615,6 +616,7 @@ const I18N = {
     th_merchant: "商户",
     th_amount: "金额",
     th_memo: "备注",
+    th_time: "时间",
     verdict_ok_title: "链上会接受这笔支付",
     verdict_ok_body: (p) =>
       `对向 <b>${p.merchant}</b> 支付 <b>${p.amount} ${p.unit}</b> 做验证节点试算,结果通过了全部链上规则。点「付款」即可真正提交。`,
@@ -1424,6 +1426,15 @@ function viewOverview() {
   );
 }
 
+// Format an epoch-ms timestamp as a full local "YYYY-MM-DD HH:MM:SS" ("—" when unknown).
+function fmtTs(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "—";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 function ledgerRow(e) {
   const name = e.merchantName;
   return `<tr>
@@ -1433,7 +1444,8 @@ function ledgerRow(e) {
         <div class="muted" style="font-size:12px;font-family:var(--mono)">${esc(shorten(e.merchant, 8, 5))}</div></div>
     </div></td>
     <td class="amount">−${fmt(e.amount)} <span class="muted" style="font-weight:500">${UNIT}</span></td>
-    <td><span class="memo" title="${esc(e.onchainMemo || e.memo)}">${esc(e.memo || "—")}</span></td>
+    <td><span class="memo" title="${esc(e.onchainMemo || e.memo)}">${esc(e.memo || "—")}</span>
+      <div class="muted" style="font-size:11px;white-space:nowrap">${icon("clock", 11)} ${esc(fmtTs(e.ts))}</div></td>
   </tr>`;
 }
 
@@ -1612,7 +1624,7 @@ function viewPay() {
             ${
               ledger
                 ? `<div class="table-wrap"><table class="ledger">
-                    <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th></tr></thead>
+                    <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th><th>${esc(t("th_time"))}</th></tr></thead>
                     <tbody>${ledger}</tbody></table></div>`
                 : `<div class="empty" style="padding:40px"><div class="empty__icon">${icon("activity", 26)}</div>
                    <h3>${esc(t("pay_no_payments_title"))}</h3><p>${t("pay_no_payments_body")}</p></div>`
@@ -1633,6 +1645,7 @@ function fullLedgerRow(e) {
     </div></td>
     <td class="amount">−${fmt(e.amount)} <span class="muted" style="font-weight:500">${UNIT}</span></td>
     <td><span class="memo" title="${esc(e.onchainMemo || e.memo)}">${esc(e.memo || "—")}</span></td>
+    <td class="muted" style="font-size:12px;white-space:nowrap;font-family:var(--mono)">${esc(fmtTs(e.ts))}</td>
   </tr>`;
 }
 

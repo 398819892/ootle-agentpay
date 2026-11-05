@@ -202,6 +202,7 @@ function createChainReads({ store, walletd, conn, txlog, OnChainBudget, windowSt
             txKind: e.txKind || "pay",
             status: "confirmed",
             txId: null,
+            ts: e.ts || (e.time ? Date.parse(e.time) : null) || null,
             migrated: true,
           });
         }
@@ -219,6 +220,7 @@ function createChainReads({ store, walletd, conn, txlog, OnChainBudget, windowSt
           txKind: "pay",
           status: "confirmed",
           txId: r.txId,
+          ts: r.createdAt ? Date.parse(r.createdAt) : null, // when this dashboard journaled the pay
         });
       }
     }

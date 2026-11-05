@@ -18,7 +18,8 @@ function mergeLedgers(journal, scan, label) {
   const journalTxIds = new Set(journal.map((e) => e.txId).filter(Boolean));
   const out = [];
   for (const e of journal) {
-    out.push({ ...e, _ts: (e.txId && tsByTxId.get(e.txId)) || 0 });
+    // prefer the chain's finalize timestamp for this tx; fall back to the journal row's own time
+    out.push({ ...e, _ts: (e.txId && tsByTxId.get(e.txId)) || e.ts || 0 });
   }
   for (const p of chainRows) {
     if (p.txId && journalTxIds.has(p.txId)) continue; // the journal already has this pay (richer memo)
@@ -38,7 +39,7 @@ function mergeLedgers(journal, scan, label) {
   out.sort((a, b) => a._ts - b._ts); // oldest→newest; equal ts keeps insertion order (journal first)
   return out.map((e, i) => {
     const { _ts, ...rest } = e;
-    return { ...rest, index: i };
+    return { ...rest, index: i, ts: _ts || null }; // epoch ms of the pay (for the UI's date/time column)
   });
 }
 
