@@ -75,6 +75,49 @@ def _receipt_lang() -> str:
     return env if env in ("zh", "en", "both") else "both"
 
 
+# ---- merchant name <-> address resolution ------------------------------------------------------
+# The on-chain whitelist is ADDRESSES ONLY; the friendly NAMES live in the dashboard's merchant book
+# (store.merchants), surfaced in /api/state as `merchants: [{name, address}]`. The MCP reads that book
+# so the agent can see names in list_merchants and PAY BY NAME — instead of guessing a bare address or
+# paying the wrong one. A `component_…` address is always accepted as-is.
+def _merchant_book() -> list[dict]:
+    """The dashboard's name<->address book as [{name, address}, ...]; [] if unreachable or unset."""
+    data = _dashboard_state()
+    book = (data or {}).get("merchants")
+    return [e for e in book if isinstance(e, dict)] if isinstance(book, list) else []
+
+
+def _looks_like_address(s: str) -> bool:
+    return bool(re.fullmatch(r"component_[0-9a-f]{2,}", (s or "").strip()))
+
+
+def _resolve_merchant(merchant: str) -> "tuple[str | None, dict | None]":
+    """Turn the ``merchant`` argument into a payable component address. A ``component_…`` address
+    passes through unchanged; any other string is looked up (case-insensitively) in the dashboard's
+    name book. On a miss, return a structured error that LISTS the known merchants — so the agent asks
+    the human instead of submitting a pay to a name the chain can never match. Never raises."""
+    m = (merchant or "").strip()
+    if not m:
+        return None, {"ok": False, "error_type": "merchant_unknown", "error": "no merchant was given",
+                      "known_merchants": [], "hint": "Pass a merchant name (see list_merchants) or a "
+                      "component_… address."}
+    if _looks_like_address(m):
+        return m, None
+    book = _merchant_book()
+    for e in book:
+        if str(e.get("name", "")).strip().lower() == m.lower() and e.get("address"):
+            return str(e["address"]), None
+    known = [{"name": e.get("name"), "address": e.get("address")} for e in book if e.get("address")]
+    return None, {
+        "ok": False, "error_type": "merchant_unknown",
+        "error": f"no merchant named {m!r} is configured",
+        "known_merchants": known,
+        "hint": ("Pay one of the names/addresses in known_merchants (or call list_merchants). If this "
+                 "is a NEW payee, the human must add it on the dashboard's Merchants page and whitelist "
+                 "it on chain first — do NOT guess an address."),
+    }
+
+
 # ---- saving the receipt image to a downloadable file ------------------------------------------
 # The MCP returns the receipt inline, but an inline image has no "download" affordance in most MCP
 # hosts. So we also WRITE each receipt to a PNG file the user can open / save, and hand the path back
@@ -140,7 +183,8 @@ def _upload_receipt_to_dashboard(png: bytes, meta: dict) -> str | None:
         return None
 
 try:
-    from mcp.server.fastmcp import FastMCP, Image
+    from mcp.server.fastmcp import Context, FastMCP, Image
+    from pydantic import BaseModel, Field
 except ImportError:  # pragma: no cover - friendly message when deps are missing
     sys.stderr.write(
         "The 'mcp' package is not installed. Install this server, e.g.:\n"
@@ -210,6 +254,37 @@ def _pay_confirmation_check(confirmation: str) -> tuple[bool, bool]:
         return (False, True)
     got = hashlib.sha256((confirmation or "").encode("utf-8")).hexdigest()
     return (True, hmac.compare_digest(got, want))
+
+
+class _PayPassphrase(BaseModel):
+    """The one field the host collects for a payment confirmation. Elicitation only supports
+    primitive types, so this is a plain string; the host decides how to render/mask it."""
+    passphrase: str = Field(
+        default="",
+        description="Your AgentPay pay passphrase. Entered here in your own app and sent straight to "
+                    "the AgentPay server — it is NOT shared with the AI and does not appear in the chat.",
+    )
+
+
+async def _elicit_confirmation(ctx: "Context | None") -> str | None:
+    """Collect the pay passphrase OUT OF BAND via MCP elicitation, so it never becomes a tool
+    argument in the chat transcript. The host pops its own input prompt; the value returns straight
+    to this server. Returns the entered string, or None when elicitation is unsupported, the user
+    declined/cancelled, or anything failed (caller then falls back to the refusal). Never raises."""
+    if ctx is None:
+        return None
+    try:
+        result = await ctx.elicit(
+            message=("Confirm this payment: enter your AgentPay pay passphrase. It is sent straight to "
+                     "the AgentPay server and is NOT shared with the AI."),
+            schema=_PayPassphrase,
+        )
+    except Exception:  # noqa: BLE001 - host doesn't support elicitation / transport error -> fall back
+        return None
+    if getattr(result, "action", None) == "accept" and getattr(result, "data", None) is not None:
+        val = getattr(result.data, "passphrase", None)
+        return val if val else None
+    return None  # declined / cancelled
 
 
 # --- structured, agent-friendly errors --------------------------------------------------
@@ -295,51 +370,11 @@ def _wallet_or_error() -> "tuple[backend.AgentWallet | None, dict | None]":
 
 
 # --- tools (the agent's entire surface) -------------------------------------------------
-@mcp.tool()
-def pay_merchant(merchant: str, amount: int, memo: str = "", confirmation: str = "") -> dict:
-    """Pay a merchant from the agent's on-chain budget.
-
-    The payment is adjudicated by the Tari Ootle validator against the budget's on-chain rules
-    (per-transaction cap, daily cap, merchant whitelist, revocation). Outcomes:
-
-      * accepted -> ``{"ok": true, "status": "accepted", "spent_in_window": <int>,
-        "receipt": {"merchant", "amount", "unit", "remaining_balance", "remaining_in_window",
-        "paid_at"}, ...}`` — the receipt covers who was paid, how much, what's left, and when.
-      * rejected -> ``{"ok": false, "status": "rejected", "reason": "<validator's reason>", ...}``
-        (a normal, expected outcome — the agent cannot override it)
-      * PENDING  -> ``{"ok": null, "status": "pending", "tx_id": <str|null>, "action_required": ...}``
-        The payment was SUBMITTED but its on-chain outcome is not yet known (a network blip or a slow
-        finalization); the transaction MAY have gone through. **Do NOT call pay_merchant again for
-        this payment — that can pay the merchant twice.** Call ``get_payment_status(tx_id)`` to learn
-        the real outcome (or, if tx_id is null, wait and check ``get_budget_status`` / ask a human
-        before any retry).
-      * setup/chain problem -> ``{"ok": false, "error_type": ..., "error": ..., "hint": ...}``
-
-    Args:
-        merchant: the merchant's account component address (see ``list_merchants``).
-        amount:   amount to pay, in BASE UNITS (µT; 1 XTR = 1,000,000 µT). Integer — so one whole XTR
-                  is ``1000000``, not ``1``. The per-tx and daily caps use the same base units.
-        memo:     optional note / invoice reference carried on chain with the payment.
-        confirmation: the human's pay passphrase. REQUIRED only when this budget is configured to
-                  require a human confirmation (AGENTPAY_PAY_PASSPHRASE[_SHA256]); otherwise leave it
-                  empty. If a payment is refused with ``confirmation_required: true``, ASK the human
-                  for their passphrase and call again with it here — never guess or reuse a wrong one.
-    """
-    # Human-confirmation gate (opt-in, configured in the dashboard Settings; env is a fallback): refuse
-    # BEFORE any chain submit if a passphrase is required and missing/wrong. A guardrail against the
-    # agent paying without a human's say-so.
-    _required, _ok = _pay_confirmation_check(confirmation)
-    if _required and not _ok:
-        return {
-            "ok": False, "status": "rejected", "merchant": merchant, "amount": amount, "memo": memo,
-            "reason": "payment confirmation required: the human's pay passphrase was missing or incorrect",
-            "confirmation_required": True,
-            "action_required": (
-                "This budget requires a human confirmation passphrase for every payment. Ask the human "
-                "for their AgentPay pay passphrase, then call pay_merchant again with it in the "
-                "`confirmation` argument. Do NOT guess it or retry with the same wrong value."
-            ),
-        }
+def _pay_and_build(merchant: str, amount: int, memo: str):
+    """Do the actual on-chain pay (via the wallet) and build the tool result: the JSON receipt and,
+    for an accepted pay, an inline PNG receipt. ``merchant`` is an already-resolved component address.
+    Returns the dict result, or ``[Image, dict]`` when a receipt image was rendered. Never raises a
+    chain traceback at the agent. The confirmation gate runs in ``pay_merchant`` BEFORE this helper."""
     w, err = _wallet_or_error()
     if err:
         return err
@@ -399,6 +434,72 @@ def pay_merchant(merchant: str, amount: int, memo: str = "", confirmation: str =
 
 
 @mcp.tool()
+async def pay_merchant(merchant: str, amount: int, memo: str = "", confirmation: str = "",
+                       ctx: Context | None = None) -> dict:
+    """Pay a merchant from the agent's on-chain budget.
+
+    The payment is adjudicated by the Tari Ootle validator against the budget's on-chain rules
+    (per-transaction cap, daily cap, merchant whitelist, revocation). Outcomes:
+
+      * accepted -> ``{"ok": true, "status": "accepted", "spent_in_window": <int>,
+        "receipt": {"merchant", "amount", "unit", "remaining_balance", "remaining_in_window",
+        "paid_at"}, ...}`` — the receipt covers who was paid, how much, what's left, and when.
+      * rejected -> ``{"ok": false, "status": "rejected", "reason": "<validator's reason>", ...}``
+        (a normal, expected outcome — the agent cannot override it)
+      * merchant unknown -> ``{"ok": false, "error_type": "merchant_unknown", "known_merchants": [...]}``
+        the name/address could not be resolved; ask the human — do NOT guess another address.
+      * PENDING  -> ``{"ok": null, "status": "pending", "tx_id": <str|null>, "action_required": ...}``
+        The payment was SUBMITTED but its on-chain outcome is not yet known (a network blip or a slow
+        finalization); the transaction MAY have gone through. **Do NOT call pay_merchant again for
+        this payment — that can pay the merchant twice.** Call ``get_payment_status(tx_id)`` to learn
+        the real outcome (or, if tx_id is null, wait and check ``get_budget_status`` / ask a human
+        before any retry).
+      * setup/chain problem -> ``{"ok": false, "error_type": ..., "error": ..., "hint": ...}``
+
+    Args:
+        merchant: the merchant's NAME (as shown by ``list_merchants``) or its ``component_…`` account
+                  address. A name is resolved to an address via the dashboard's merchant book; an
+                  unknown name is refused (with the known merchants) rather than paid to a wrong party.
+        amount:   amount to pay, in BASE UNITS (µT; 1 XTR = 1,000,000 µT). Integer — so one whole XTR
+                  is ``1000000``, not ``1``. The per-tx and daily caps use the same base units.
+        memo:     optional note / invoice reference carried on chain with the payment.
+        confirmation: USUALLY LEAVE EMPTY. When the budget requires a human confirmation, your app
+                  prompts the human for their pay passphrase directly (out of band) — do NOT ask the
+                  human to type it into the chat, and do NOT put it here. This argument exists only as
+                  a fallback for hosts that cannot show that prompt; if a payment is refused with
+                  ``confirmation_required: true`` and your app never prompted, you may ask the human
+                  and retry with it here. Never guess it or reuse a wrong value.
+    """
+    # 1) Resolve a merchant NAME (dashboard book) or a component_… address to a payable address.
+    address, merr = _resolve_merchant(merchant)
+    if merr:
+        return merr
+    # 2) Human-confirmation gate (opt-in; configured in the dashboard Settings, env is a fallback):
+    #    refuse BEFORE any chain submit unless a human confirms. A guardrail against the agent paying
+    #    without a human's say-so (a mis-decision or a prompt injection).
+    _required, _ok = _pay_confirmation_check(confirmation)
+    if _required and not _ok:
+        # Prefer OUT-OF-BAND confirmation: ask the HOST to collect the passphrase so it never enters
+        # the chat transcript. Only if that is unavailable or not accepted do we refuse (the agent may
+        # then retry with `confirmation`, the fallback path).
+        entered = await _elicit_confirmation(ctx)
+        if entered is not None and _pay_confirmation_check(entered)[1]:
+            return _pay_and_build(address, amount, memo)
+        return {
+            "ok": False, "status": "rejected", "merchant": merchant, "amount": amount, "memo": memo,
+            "reason": "payment confirmation required: a human must confirm this payment",
+            "confirmation_required": True,
+            "action_required": (
+                "This budget requires a human confirmation for every payment. Your app should prompt "
+                "the human for their AgentPay pay passphrase directly (it is NOT shared with you). If "
+                "your app cannot show that prompt, ask the human and retry with their passphrase in the "
+                "`confirmation` argument. Do NOT guess it or retry with the same wrong value."
+            ),
+        }
+    return _pay_and_build(address, amount, memo)
+
+
+@mcp.tool()
 def get_payment_status(tx_id: str) -> dict:
     """Resolve the on-chain outcome of a previously submitted payment by its transaction id.
 
@@ -438,17 +539,22 @@ def get_budget_status() -> dict:
 
 @mcp.tool()
 def list_merchants() -> dict:
-    """List the merchant addresses the agent is allowed to pay — the component's ON-CHAIN whitelist,
-    read live (what the validator enforces at pay time), not a client-configured list.
+    """List the merchants the agent is allowed to pay — the component's ON-CHAIN whitelist, read live
+    (what the validator enforces at pay time), each annotated with its friendly NAME from the
+    dashboard's merchant book when one is configured.
 
-    Returns ``{"ok": true, "merchants": [...]}`` or a structured error object."""
+    Returns ``{"ok": true, "merchants": [{"address": ..., "name": <str|null>}, ...]}`` (addresses the
+    chain will accept now), or a structured error object. Pay by either the name or the address with
+    ``pay_merchant``."""
     w, err = _wallet_or_error()
     if err:
         return err
     try:
-        merchants = w.list_merchants()
+        addrs = w.list_merchants()
     except Exception as exc:  # noqa: BLE001 — surface a chain read failure as a structured error
         return _error("chain_error", f"could not read the on-chain whitelist: {exc}", _walletd_hint())
+    names = {str(e["address"]): e.get("name") for e in _merchant_book() if e.get("address")}
+    merchants = [{"address": a, "name": names.get(a)} for a in addrs]
     return {"ok": True, "merchants": merchants}
 
 
