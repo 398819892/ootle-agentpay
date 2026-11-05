@@ -168,6 +168,7 @@ const I18N = {
     stat_spent_hint_daily: (p) => `of ${p.cap} daily cap`,
     stat_tx_hint: "on-chain pay events",
     stat_whitelisted_hint: "approved merchants",
+    stat_go: (p) => `Go to ${p.page}`,
     meter_window: "This window's spend",
     meter_treasury: "Treasury remaining",
     cap_pertx: (p) => `Per-tx cap ${p.n} ${p.unit}`,
@@ -532,6 +533,7 @@ const I18N = {
     stat_spent_hint_daily: (p) => `每日上限 ${p.cap}`,
     stat_tx_hint: "链上支付事件",
     stat_whitelisted_hint: "已批准的商户",
+    stat_go: (p) => `前往${p.page}`,
     meter_window: "本窗口消费",
     meter_treasury: "资金余额",
     cap_pertx: (p) => `单笔上限 ${p.n} ${p.unit}`,
@@ -1329,16 +1331,17 @@ function viewOverview() {
     : "";
 
   const stats = [
-    { label: t("stat_treasury"), icon: "coins", color: "var(--brand)", value: fmt(b.treasury), unit: true, hint: t("stat_treasury_hint", { funded: fmt(b.funded), withdrawn: fmt(b.withdrawn) }) },
-    { label: t("stat_spent_window"), icon: "trend", color: "var(--info)", value: fmt(winSpent), unit: true, hint: w ? t("stat_spent_hint_window", { cap: fmt(winCap), left: fmt(winRemaining) }) : t("stat_spent_hint_daily", { cap: fmt(b.dailyCap) }) },
+    { label: t("stat_treasury"), icon: "coins", color: "var(--brand)", value: fmt(b.treasury), unit: true, hint: t("stat_treasury_hint", { funded: fmt(b.funded), withdrawn: fmt(b.withdrawn) }), nav: "manage" },
+    { label: t("stat_spent_window"), icon: "trend", color: "var(--info)", value: fmt(winSpent), unit: true, hint: w ? t("stat_spent_hint_window", { cap: fmt(winCap), left: fmt(winRemaining) }) : t("stat_spent_hint_daily", { cap: fmt(b.dailyCap) }), nav: "pay" },
     { label: t("stat_tx"), icon: "activity", color: "var(--success)", value: fmt(b.ledger.length), unit: false, hint: t("stat_tx_hint") },
-    { label: t("stat_whitelisted"), icon: "store", color: "var(--warn)", value: fmt(b.whitelist.length), unit: false, hint: t("stat_whitelisted_hint") },
+    { label: t("stat_whitelisted"), icon: "store", color: "var(--warn)", value: fmt(b.whitelist.length), unit: false, hint: t("stat_whitelisted_hint"), nav: "merchants" },
   ]
     .map(
-      (s) => `<div class="stat">
+      (s) => `<div class="stat${s.nav ? " stat--link" : ""}"${s.nav ? ` data-nav="${s.nav}" role="button" tabindex="0" title="${esc(t("stat_go", { page: t("nav_" + s.nav) }))}"` : ""}>
         <div class="stat__top">
           <span class="stat__icon" style="--c:${s.color}">${icon(s.icon, 17)}</span>
           <div class="stat__label">${esc(s.label)}</div>
+          ${s.nav ? `<span class="stat__go" aria-hidden="true">→</span>` : ""}
         </div>
         <div class="stat__value">${s.value} <span class="unit">${s.unit ? UNIT : ""}</span></div>
         <div class="stat__hint">${esc(s.hint)}</div>

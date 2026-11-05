@@ -656,6 +656,24 @@ button {
   box-shadow: var(--shadow-md);
   border-color: var(--border-strong);
 }
+/* a stat tile that navigates on click (treasury -> manage, spent -> pay, whitelist -> merchants) */
+.stat--link {
+  cursor: pointer;
+}
+.stat--link:hover {
+  border-color: var(--brand);
+}
+.stat__go {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  transition: color 0.16s ease, transform 0.16s ease;
+}
+.stat--link:hover .stat__go {
+  color: var(--brand);
+  transform: translateX(2px);
+}
 .stat__top {
   display: flex;
   align-items: center;
