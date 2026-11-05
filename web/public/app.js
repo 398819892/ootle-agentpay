@@ -1355,15 +1355,6 @@ function viewOverview() {
     </div>`;
   };
 
-  const chips = b.whitelist.length
-    ? b.whitelist
-        .map(
-          (m) => `<span class="chip"><span class="chip__dot" style="background:${avatarColor(m.name || m.address)}"></span>
-            ${m.name ? `<b>${esc(m.name)}</b>` : ""}<code>${esc(shorten(m.address, 8, 5))}</code></span>`,
-        )
-        .join("")
-    : `<span class="muted" style="font-size:13px">${esc(t("any_merchant"))}</span>`;
-
   const recent = b.ledger
     .slice(-4)
     .reverse()
@@ -1378,6 +1369,8 @@ function viewOverview() {
        <button class="btn btn--primary btn--sm" data-nav="pay">${icon("send", 15)} ${esc(t("new_payment"))}</button>`,
     ) +
     `<div class="stack">
+      <div class="grid grid--stats">${stats}</div>
+
       <div class="hero">
         <div class="hero__top">
           <div>
@@ -1411,29 +1404,15 @@ function viewOverview() {
         }
       </div>
 
-      <div class="grid grid--stats">${stats}</div>
-
-      <div class="grid grid--2">
-        <div class="card">
-          <div class="card__head"><h3>${esc(t("recent_activity"))}</h3>
-            <button class="btn btn--ghost btn--sm" data-nav="pay">${esc(t("view_all"))} ${icon("send", 14)}</button></div>
-          <div class="card__body" style="padding:8px 0 4px">
-            ${
-              recent
-                ? `<div class="table-wrap"><table class="ledger"><tbody>${recent}</tbody></table></div>`
-                : `<div class="empty" style="padding:30px"><p class="muted">${esc(t("overview_no_payments"))}</p></div>`
-            }
-          </div>
-        </div>
-        <div class="card">
-          <div class="card__head"><h3>${esc(t("whitelist"))}</h3>
-            <button class="btn btn--ghost btn--sm" data-nav="merchants">${esc(t("manage"))} ${icon("store", 14)}</button></div>
-          <div class="card__body">
-            <div class="row row--wrap" style="gap:8px">${chips}</div>
-            <div class="callout mt-18">${icon("info", 18)}
-              <div>${t("overview_callout")}</div>
-            </div>
-          </div>
+      <div class="card">
+        <div class="card__head"><h3>${esc(t("recent_activity"))}</h3>
+          <button class="btn btn--ghost btn--sm" data-nav="pay">${esc(t("view_all"))} ${icon("send", 14)}</button></div>
+        <div class="card__body" style="padding:8px 0 4px">
+          ${
+            recent
+              ? `<div class="table-wrap"><table class="ledger"><tbody>${recent}</tbody></table></div>`
+              : `<div class="empty" style="padding:30px"><p class="muted">${esc(t("overview_no_payments"))}</p></div>`
+          }
         </div>
       </div>
     </div>`
