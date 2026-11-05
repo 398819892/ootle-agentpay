@@ -85,3 +85,18 @@ def test_explicit_endpoint_on_known_preset_still_overrides(monkeypatch):
     assert cfg.walletd_url == "http://127.0.0.1:7777/json_rpc"
     # template/owner still come from the esmeralda preset (not overridden)
     assert cfg.budget_template == config.PRESETS["esmeralda"]["budget_template"]
+
+
+# --- P2: a SET-but-non-integer numeric knob is refused at load(), naming the variable ------------
+
+def test_nan_numeric_config_refuses_start(monkeypatch):
+    monkeypatch.setenv("AGENTPAY_PER_TX_CAP", "1o00")  # a typo, not an int
+    with pytest.raises(ValueError) as ei:
+        config.load([])
+    assert "AGENTPAY_PER_TX_CAP" in str(ei.value)
+
+
+def test_valid_numeric_config_still_loads(monkeypatch):
+    monkeypatch.setenv("AGENTPAY_PER_TX_CAP", "2500")
+    cfg = config.load([])
+    assert cfg.per_tx_cap == 2500

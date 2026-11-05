@@ -23,7 +23,7 @@ function installFetch(script: Record<string, Handler>, calls: any[] = []): any[]
     const h = script[body.method];
     if (h === undefined) throw new Error("unexpected method " + body.method);
     const payload = typeof h === "function" ? h(body) : h;
-    return { json: async () => payload };
+    return { ok: true, status: 200, json: async () => payload };
   };
   return calls;
 }
@@ -58,7 +58,7 @@ test("a thrown fetch on a REAL submit is pending (submitted-but-unknown), not a 
 test("a transport blip during the confirm poll leaves lastTxId set (server → UNKNOWN)", async () => {
   (globalThis as any).fetch = async (_u: string, opts: any) => {
     const b = JSON.parse(opts.body);
-    if (b.method === SUBMIT) return { json: async () => ({ result: { transaction_id: "tx5" } }) };
+    if (b.method === SUBMIT) return { ok: true, status: 200, json: async () => ({ result: { transaction_id: "tx5" } }) };
     throw new Error("socket hang up"); // get_result blips after a successful submit
   };
   const c = new WalletdClient("http://fake", { token: "t", finalizeTries: 2, finalizeDelayMs: 1 });
@@ -132,4 +132,43 @@ test("run throws chainRejected on an InvalidTransaction, never polling it as pen
   });
   const c = new WalletdClient("http://fake", { token: "t", finalizeTries: 2, finalizeDelayMs: 1 });
   await assert.rejects(() => c.run("m", {}), (e: any) => e.chainRejected === true && !e.pending);
+});
+
+// --- F-6: an HTTP 5xx carrying a JSON-RPC error body after a real submit is PENDING, not a failure ---
+// The twin of the Python fix: rpc() must classify by HTTP STATUS, not substring, and never check
+// resp.ok was the bug — a 500 whose body parsed as a JSON-RPC error slipped through as a normal
+// envelope and was judged a definitive "not submitted" rejection → resubmit → double-spend.
+
+test("an HTTP 5xx after a real submit is pending (submitted-but-unknown), not a hard failure (F-6)", async () => {
+  (globalThis as any).fetch = async () => ({
+    ok: false,
+    status: 500,
+    json: async () => ({ error: { code: -32603, message: "internal error" } }),
+  });
+  const c = new WalletdClient("http://fake", { token: "t" });
+  await assert.rejects(() => c.run("m", {}), (e: any) => e.pending === true && !e.chainRejected);
+});
+
+test("a 200 JSON-RPC error after a real submit is STILL a hard reject (only non-2xx is pending)", async () => {
+  // The node answered 200 with a verdict → the tx was not created → a hard failure, unchanged.
+  installFetch({ [SUBMIT]: { error: { message: "amount exceeds the per-transaction cap" } } });
+  const c = new WalletdClient("http://fake", { token: "t" });
+  await assert.rejects(() => c.run("m", {}), (e: any) => e.pending !== true);
+});
+
+test("an HTTP 401 on a real submit is a hard auth failure, never pending (F-6 / D-13)", async () => {
+  (globalThis as any).fetch = async () => ({
+    ok: false,
+    status: 401,
+    json: async () => ({ error: { message: "Expired token" } }),
+  });
+  // An external token is never silently re-minted, so this surfaces rather than retrying.
+  const c = new WalletdClient("http://fake", { token: "ext" });
+  await assert.rejects(() => c.run("m", {}), (e: any) => e.authFailed === true && e.pending !== true);
+});
+
+test("a real submit that returns 200 but no transaction id is pending, not a hard failure (P1)", async () => {
+  installFetch({ [SUBMIT]: { result: {} } }); // success envelope, but no transaction_id / hash
+  const c = new WalletdClient("http://fake", { token: "t" });
+  await assert.rejects(() => c.run("m", {}), (e: any) => e.pending === true);
 });

@@ -40,7 +40,7 @@ const {
   PORT, HOST, WALLETD_URL, BUDGET_TEMPLATE, OWNER, NETWORK, TOKEN_SYMBOL, PUBLIC_DIR, STATE_FILE,
   FINALIZE_TRIES, FINALIZE_DELAY_MS, DASHBOARD_PASSWORD, AUTH_ON, AUTO_CREATE_MERCHANTS, REQUIRE_KEY_SESSIONS,
   SESSION_SECRET, SESSION_TTL_MS, COOKIE_NAME, TRUSTED_PROXY, ALLOWED_ORIGINS, ADMIN_PASSWORD, STEP_UP_ON,
-  CONFIRM_TTL_MS, LOGIN_MAX_FAILS, LOGIN_LOCK_MS, ALLOWED_HOSTS, HOST_CHECK_ON, hostnameOf,
+  CONFIRM_TTL_MS, LOGIN_MAX_FAILS, LOGIN_LOCK_MS, ALLOWED_HOSTS, HOST_CHECK_ON, hostnameOf, numEnv,
 } = require("./settings");
 const { httpError, toAmount, big, clampStr, sendJson, readBody, parseCookies } = require("./http_util");
 const { applySecurityHeaders } = require("./security_headers");
@@ -175,7 +175,7 @@ const claims = createClaimStore(CLAIMS_DIR);
 // How long a loser in a cross-process race waits for the winner's outcome to land in the shared
 // journal before giving up and reporting `unknown` (never a resubmit). Scaled off the finalize
 // budget so it comfortably covers a slow winner, with a floor and an env override.
-const CLAIM_WAIT_MS = Number(process.env.AGENTPAY_CLAIM_WAIT_MS || Math.max(5000, FINALIZE_TRIES * FINALIZE_DELAY_MS + 2000));
+const CLAIM_WAIT_MS = numEnv("AGENTPAY_CLAIM_WAIT_MS", Math.max(5000, FINALIZE_TRIES * FINALIZE_DELAY_MS + 2000), { min: 0 });
 
 // ---- persisted reference/config store (NOT the authority for money — see store.js) -----------
 const { store, saveStore, nameByAddr, snapshotBudget } = createStore({ stateFile: STATE_FILE, budgetTemplate: BUDGET_TEMPLATE, txlog });

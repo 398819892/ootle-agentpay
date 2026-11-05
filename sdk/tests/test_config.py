@@ -13,7 +13,7 @@ import os
 import pytest
 
 from agentpay import config as cfg
-from agentpay.onchain import OnChainBudget, WalletdClient
+from agentpay.onchain import OnChainBudget, WalletdClient, _env_float, _env_int
 
 
 @pytest.fixture(autouse=True)
@@ -79,3 +79,29 @@ def test_budget_from_config_defaults_and_explicit(tmp_path, monkeypatch):
     assert b.owner_account == "o"
     assert b.agent_account == "o"          # defaults to owner
     assert b.component is None
+
+
+# --- P2: a SET-but-non-numeric config var is refused, naming the variable (never silently defaulted)
+
+def test_env_int_unset_or_empty_uses_default(monkeypatch):
+    monkeypatch.delenv("AGENTPAY_SUBMIT_RETRIES", raising=False)
+    assert _env_int("AGENTPAY_SUBMIT_RETRIES", 7) == 7
+    monkeypatch.setenv("AGENTPAY_SUBMIT_RETRIES", "   ")
+    assert _env_int("AGENTPAY_SUBMIT_RETRIES", 7) == 7
+    monkeypatch.setenv("AGENTPAY_SUBMIT_RETRIES", "12")
+    assert _env_int("AGENTPAY_SUBMIT_RETRIES", 7) == 12
+
+
+def test_env_int_nan_config_refuses_start(monkeypatch):
+    monkeypatch.setenv("AGENTPAY_SUBMIT_RETRIES", "4o")  # a typo, not an int
+    with pytest.raises(ValueError) as ei:
+        _env_int("AGENTPAY_SUBMIT_RETRIES", 7)
+    # the error must name the offending variable so the operator can fix it at boot
+    assert "AGENTPAY_SUBMIT_RETRIES" in str(ei.value)
+
+
+def test_env_float_nan_config_refuses_start(monkeypatch):
+    monkeypatch.setenv("AGENTPAY_SUBMIT_RETRY_DELAY", "fast")
+    with pytest.raises(ValueError) as ei:
+        _env_float("AGENTPAY_SUBMIT_RETRY_DELAY", 1.0)
+    assert "AGENTPAY_SUBMIT_RETRY_DELAY" in str(ei.value)

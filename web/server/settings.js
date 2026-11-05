@@ -10,8 +10,39 @@
 const path = require("node:path");
 const crypto = require("node:crypto");
 
+/**
+ * Read a numeric env var, or REFUSE TO START with a clear, variable-named error if it is set to
+ * something non-numeric or out of range. The old `Number(process.env.X || def)` idiom let a typo like
+ * `AGENTPAY_FINALIZE_TRIES=4o` through as `NaN`, which then silently poisons every loop / timeout that
+ * uses it (a `for (i<NaN)` never runs → a real submit is recorded `unknown` without ever waiting). A
+ * misconfigured money daemon must fail loudly at boot, not mis-behave in flight. An unset or empty var
+ * uses `def`; `0` is honoured (unlike `Number(x) || def`) unless it violates `min`. (P2 — NaN config)
+ */
+function numEnv(name, def, { min, max, integer = false } = {}) {
+  const rawVal = process.env[name];
+  if (rawVal === undefined) return def;
+  const raw = String(rawVal).trim();
+  // An empty / whitespace-only value is "unset" → default. (Note `Number("   ")` is 0, not NaN, in
+  // JS, so a whitespace var would otherwise sneak through as 0 rather than using the default.)
+  if (raw === "") return def;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    throw new Error(`Invalid config: ${name}=${JSON.stringify(raw)} is not a number`);
+  }
+  if (integer && !Number.isInteger(n)) {
+    throw new Error(`Invalid config: ${name}=${JSON.stringify(raw)} must be an integer`);
+  }
+  if (min !== undefined && n < min) {
+    throw new Error(`Invalid config: ${name}=${n} must be >= ${min}`);
+  }
+  if (max !== undefined && n > max) {
+    throw new Error(`Invalid config: ${name}=${n} must be <= ${max}`);
+  }
+  return n;
+}
+
 // ---- configuration (env, defaults = local swarm) ---------------------------------------------
-const PORT = Number(process.env.PORT || 8787);
+const PORT = numEnv("PORT", 8787, { min: 1, max: 65535, integer: true });
 // Bind to LOOPBACK by default. A custodial wallet UI must not be reachable from the network unless
 // the operator deliberately exposes it (behind TLS / a reverse proxy). To listen on all interfaces,
 // set HOST=0.0.0.0 EXPLICITLY — and then put HTTPS in front of it (see docs/security.md). On WSL2,
@@ -47,8 +78,8 @@ const STATE_FILE = process.env.AGENTPAY_STATE_FILE || path.resolve(__dirname, "s
 // `unknown` (submitted, not yet confirmed) and handed to the reconciler. Kept modest so the UI
 // stays responsive; a tx that misses the window is NEVER counted as success — it is settled later
 // by its tx id. Tune via env (set TRIES very low to exercise the unknown path on purpose).
-const FINALIZE_TRIES = Number(process.env.AGENTPAY_FINALIZE_TRIES || 40);
-const FINALIZE_DELAY_MS = Number(process.env.AGENTPAY_FINALIZE_DELAY_MS || 1500);
+const FINALIZE_TRIES = numEnv("AGENTPAY_FINALIZE_TRIES", 40, { min: 1, integer: true });
+const FINALIZE_DELAY_MS = numEnv("AGENTPAY_FINALIZE_DELAY_MS", 1500, { min: 0 });
 
 // ---- authentication -------------------------------------------------------------------------
 // The backend is a *hosted* wallet (it signs through walletd), so a public deployment with no
@@ -78,7 +109,7 @@ const REQUIRE_KEY_SESSIONS = process.env.AGENTPAY_REQUIRE_KEY_SESSIONS !== "fals
 // Secret for signing the session cookie. Provide SESSION_SECRET in production so sessions survive
 // restarts and are stable across replicas; otherwise we mint an ephemeral one per process.
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
-const SESSION_TTL_MS = (Number(process.env.SESSION_TTL_HOURS) || 12) * 3600 * 1000;
+const SESSION_TTL_MS = numEnv("SESSION_TTL_HOURS", 12, { min: 1 }) * 3600 * 1000;
 const COOKIE_NAME = "ap_session";
 // Set COOKIE_SECURE=true behind HTTPS to force the Secure flag; otherwise it is inferred from the
 // X-Forwarded-Proto a TLS-terminating proxy sets (so cookies still work on plain-http localhost).
@@ -143,7 +174,7 @@ const HOST_CHECK_ON =
 // be set so that holding a read/operate session is not the same as being able to move funds.
 const ADMIN_PASSWORD = process.env.AGENTPAY_ADMIN_PASSWORD || DASHBOARD_PASSWORD;
 const STEP_UP_ON = AUTH_ON;
-const CONFIRM_TTL_MS = (Number(process.env.CONFIRM_TTL_SECONDS) || 120) * 1000;
+const CONFIRM_TTL_MS = numEnv("CONFIRM_TTL_SECONDS", 120, { min: 1 }) * 1000;
 
 
 // Simple per-IP throttle on failed logins (see throttle.js).
@@ -156,4 +187,5 @@ module.exports = {
   SESSION_SECRET, SESSION_TTL_MS, COOKIE_NAME, COOKIE_SECURE_ENV, TRUSTED_PROXY, ALLOWED_ORIGINS,
   ALLOWED_HOSTS, HOST_CHECK_ON, hostnameOf,
   ADMIN_PASSWORD, STEP_UP_ON, CONFIRM_TTL_MS, LOGIN_MAX_FAILS, LOGIN_LOCK_MS,
+  numEnv,
 };

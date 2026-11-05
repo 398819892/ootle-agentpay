@@ -75,13 +75,16 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _env_int(name: str, default: int) -> int:
+    # An unset / empty var uses the default; a SET-but-non-integer value is refused, not silently
+    # swallowed — a typo in a cap / port / window would otherwise leave the agent running on a
+    # surprise default instead of what the operator configured. Fail loud, naming the variable. (P2)
     v = os.environ.get(name)
     if v is None or not v.strip():
         return default
     try:
         return int(v)
     except ValueError:
-        return default
+        raise ValueError(f"Invalid config: {name}={v.strip()!r} is not an integer") from None
 
 
 def _split_whitelist(raw: str) -> list[str]:

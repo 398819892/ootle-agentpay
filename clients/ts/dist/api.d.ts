@@ -67,7 +67,8 @@ export interface PayParams {
     invoiceId?: string;
     agentTag?: string;
     /** Idempotency key — a repeat with the same key never double-spends and returns the first receipt.
-     *  Strongly recommended; defaults to a random key per call if omitted. */
+     *  If omitted it is derived from `invoiceId` (so a retry with the same invoiceId is safe); if BOTH
+     *  are omitted a fresh random key is used per call, which is NOT retry-safe — pass one for retries. */
     idempotencyKey?: string;
 }
 export declare class AgentPayApiClient {
@@ -79,8 +80,10 @@ export declare class AgentPayApiClient {
     /**
      * Make a capped payment. Returns the receipt even when the chain REJECTS it (receipt.status
      * === "rejected" with a reason) — a 402 is a verdict, not a transport error. Transport/validation
-     * failures throw AgentPayApiError. Pass `idempotencyKey` (or let it default) so a retry after a
-     * network blip is safe: the same key returns the original receipt instead of paying twice.
+     * failures throw AgentPayApiError. The idempotency key makes a retry after a network blip safe (the
+     * same key returns the original receipt instead of paying twice): pass `idempotencyKey` explicitly,
+     * or an `invoiceId` from which it is derived deterministically. With NEITHER, a fresh random key is
+     * used per call — so an identical retry would pay twice; never rely on the random default for retries.
      */
     pay(params: PayParams): Promise<{
         receipt: Receipt;

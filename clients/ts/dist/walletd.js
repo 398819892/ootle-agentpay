@@ -153,7 +153,28 @@ class WalletdClient {
                 body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
                 signal: controller.signal,
             });
-            out = (await resp.json());
+            // Classify by HTTP STATUS first (F-6), never by the error text. A JSON-RPC daemon answers 200
+            // even for RPC-level errors, so a non-2xx is a transport/server failure (overload / internal
+            // fault → 5xx, bad token → 401 …), NOT a clean node verdict. Parse the body if there is one, then
+            // TAG the status so the real-submit path can treat a 5xx as ambiguous (pending) rather than a
+            // definitive rejection that would invite a double-spending resubmit.
+            let body;
+            let parseErr;
+            try {
+                body = await resp.json();
+            }
+            catch (e) {
+                parseErr = e;
+            }
+            if (!resp.ok) {
+                out = (body && typeof body === "object" ? body : {});
+                out._httpStatus = resp.status;
+            }
+            else {
+                if (parseErr)
+                    throw parseErr; // a malformed 2xx body is a genuine failure, as before
+                out = body;
+            }
         }
         finally {
             clearTimeout(timer);
@@ -297,6 +318,22 @@ class WalletdClient {
             err.pending = true;
             throw err;
         }
+        // F-6: classify by HTTP STATUS before the error text. `rpc()` tags any non-2xx with `_httpStatus`.
+        const httpStatus = resp._httpStatus;
+        if (httpStatus !== undefined && !(httpStatus >= 200 && httpStatus < 300)) {
+            if (httpStatus === 401 || httpStatus === 403) {
+                // Auth layer rejected the request BEFORE dispatch (bad / expired token): the method never ran,
+                // so a REAL submit that hits this definitely did NOT land → hard failure, never pending.
+                const err = new errors_1.ChainError(`submit rejected: HTTP ${httpStatus}${resp.error?.message ? ": " + resp.error.message : ""}`);
+                err.authFailed = true;
+                throw err;
+            }
+            // 5xx / other non-2xx on a REAL submit: the server erred AFTER we handed it the manifest — the tx
+            // may already exist → pending (reconcile by tx id), never a hard reject that invites a double-spend.
+            const err = new errors_1.ChainError(`submit returned HTTP ${httpStatus}; outcome unknown${resp.error?.message ? ": " + resp.error.message : ""}`);
+            err.pending = true;
+            throw err;
+        }
         if (resp.error && isTransient(resp.error.message ?? "")) {
             const err = new errors_1.ChainError(`submit may or may not have landed (transient error, not resubmitted): ${resp.error.message}`);
             err.pending = true; // unknown: reconcile, never auto-resubmit (H5)
@@ -325,8 +362,14 @@ class WalletdClient {
             throw err;
         }
         const txId = r.result?.transaction_id ?? r.result?.hash;
-        if (!txId)
-            throw new errors_1.ChainError("submit_manifest did not return a transaction id");
+        if (!txId) {
+            // The submit returned 200 but we cannot identify the tx: it MAY have landed, so it is UNKNOWN
+            // (pending) — reconcile by a later get_result scan — never a hard failure, which would invite a
+            // blind, double-spending resubmit. Mirrors the Python SDK's `run()` no-tx-id guard. (P1 / H5)
+            const err = new errors_1.ChainError("submit_manifest returned no usable transaction id; outcome unknown");
+            err.pending = true;
+            throw err;
+        }
         this.lastTxId = String(txId);
         return this.lastTxId;
     }

@@ -7,6 +7,7 @@
 "use strict";
 
 const { big } = require("./http_util");
+const { numEnv } = require("./settings");
 const { findComponentState, cborHex, parseBudgetState } = require("./substate");
 
 // ---- chain-discovered payment ledger (pure helpers) --------------------------------------------
@@ -244,7 +245,7 @@ function createChainReads({ store, walletd, conn, txlog, OnChainBudget, windowSt
   // AGENTPAY_CHAIN_LEDGER=0 (then the feed is journal-only, the pre-feature behaviour); tune the
   // cache with AGENTPAY_CHAIN_LEDGER_TTL_MS (default 15s).
   const CHAIN_LEDGER_ON = process.env.AGENTPAY_CHAIN_LEDGER !== "0";
-  const CHAIN_LEDGER_TTL_MS = Number(process.env.AGENTPAY_CHAIN_LEDGER_TTL_MS || 15000);
+  const CHAIN_LEDGER_TTL_MS = numEnv("AGENTPAY_CHAIN_LEDGER_TTL_MS", 15000, { min: 0 });
   const chainPayCache = new Map(); // component -> { at, value }
   /** Cached `{ rows, tsByTxId }` for a component, or null when disabled. Throws on a walletd failure. */
   async function chainPayScan(component) {

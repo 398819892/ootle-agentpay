@@ -35,12 +35,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const os = require("node:os");
+const { numEnv } = require("./settings");
 
 // A claim whose owner never resolved it and is older than this is "stale" — surfaced for operator
 // attention, but NEVER auto-reclaimed (reclaiming could double-spend if the owner did submit before
 // dying without recording a tx id). Conservative on purpose: we favour "never double-spend" over
 // "always available". Tunable for tests.
-const STALE_MS = Number(process.env.AGENTPAY_CLAIM_STALE_MS || 10 * 60 * 1000);
+const STALE_MS = numEnv("AGENTPAY_CLAIM_STALE_MS", 10 * 60 * 1000, { min: 0 });
 
 /** Filesystem-safe, fixed-length marker filename for an arbitrary idempotency key. */
 function fileFor(dir, key) {

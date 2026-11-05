@@ -158,3 +158,76 @@ def test_real_submit_without_txid_is_pending_not_polled():
     with pytest.raises(ChainError) as ei:
         RpcFake({SUBMIT: {"result": {}}}).run("m", {})
     assert getattr(ei.value, "pending", False) is True
+
+
+# --- F-6: an HTTP 5xx carrying a JSON-RPC error body after a real submit is PENDING, not a reject ---
+# The double-spend class the sixth-round review named: walletd forwards the signed manifest to the
+# indexer, the indexer (or walletd) then errors INTERNALLY (HTTP 500) and answers with a JSON-RPC
+# error envelope. The tx may already have been created. Judging that envelope as a definitive node
+# rejection ("not submitted → safe to resubmit") double-pays. It must be classified by HTTP STATUS,
+# not by the error text, and surfaced as `pending`.
+
+def test_run_http_5xx_after_submit_is_pending_not_failure():
+    # `_rpc` tags a non-2xx-with-body envelope with `_http_status`; run() must treat it as pending.
+    c = RpcFake({SUBMIT: {"error": {"code": -32603, "message": "internal error"}, "_http_status": 500}})
+    with pytest.raises(ChainError) as ei:
+        c.run("m", {})
+    assert getattr(ei.value, "pending", False) is True
+    # Must NOT be flagged as a definitive chain rejection — that is what would invite a resubmit.
+    assert getattr(ei.value, "chain_rejected", False) is False
+
+
+def test_run_http_200_error_is_still_a_hard_reject():
+    # Contrast: a genuine 200 JSON-RPC error IS the node's verdict (it answered, the tx was not
+    # created) → a hard reject, unchanged. Only non-2xx becomes pending.
+    c = RpcFake({SUBMIT: {"error": {"code": -32000, "message": "amount exceeds the per-transaction cap"}}})
+    with pytest.raises(ChainError) as ei:
+        c.run("m", {})
+    assert getattr(ei.value, "pending", False) is False
+
+
+def _http_error(code: int, body: bytes):
+    import io
+    import urllib.error
+
+    return urllib.error.HTTPError("http://fake", code, "err", {}, io.BytesIO(body))
+
+
+def test_rpc_tags_5xx_with_body_and_raises_bare_5xx(monkeypatch):
+    import agentpay.onchain as oc
+
+    c = WalletdClient("http://fake")
+    c._token = "t"
+
+    # 5xx WITH a JSON-RPC error body → returned as an envelope TAGGED with the HTTP status (so the
+    # real-submit path can promote it to pending) rather than raising.
+    monkeypatch.setattr(oc.urllib.request, "urlopen",
+                        lambda *_a, **_k: (_ for _ in ()).throw(
+                            _http_error(500, b'{"error": {"message": "boom"}}')))
+    env = c._rpc("transactions.submit_manifest", {})
+    assert env.get("_http_status") == 500
+    assert env.get("error", {}).get("message") == "boom"
+
+    # 5xx with NO readable JSON body → a structured ChainError (the real-submit path promotes a thrown
+    # error to pending); it must NOT be an auth failure.
+    monkeypatch.setattr(oc.urllib.request, "urlopen",
+                        lambda *_a, **_k: (_ for _ in ()).throw(_http_error(502, b"<html>bad gateway</html>")))
+    with pytest.raises(ChainError) as ei:
+        c._rpc("transactions.submit_manifest", {})
+    assert getattr(ei.value, "auth_failed", False) is False
+
+
+def test_rpc_401_with_body_is_auth_failed_not_a_normal_envelope(monkeypatch):
+    # Regression for a latent bug the fix also closes: a 401 whose body happened to parse as a
+    # JSON-RPC envelope must STILL be treated as an auth failure (checked before any body is returned),
+    # not slip through as a normal envelope.
+    import agentpay.onchain as oc
+
+    c = WalletdClient("http://fake")
+    c._token = "t"
+    monkeypatch.setattr(oc.urllib.request, "urlopen",
+                        lambda *_a, **_k: (_ for _ in ()).throw(
+                            _http_error(401, b'{"error": {"message": "Expired token"}}')))
+    with pytest.raises(ChainError) as ei:
+        c._rpc("transactions.submit_manifest", {})
+    assert getattr(ei.value, "auth_failed", False) is True

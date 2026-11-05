@@ -74,11 +74,18 @@ class AgentPayApiClient {
     /**
      * Make a capped payment. Returns the receipt even when the chain REJECTS it (receipt.status
      * === "rejected" with a reason) — a 402 is a verdict, not a transport error. Transport/validation
-     * failures throw AgentPayApiError. Pass `idempotencyKey` (or let it default) so a retry after a
-     * network blip is safe: the same key returns the original receipt instead of paying twice.
+     * failures throw AgentPayApiError. The idempotency key makes a retry after a network blip safe (the
+     * same key returns the original receipt instead of paying twice): pass `idempotencyKey` explicitly,
+     * or an `invoiceId` from which it is derived deterministically. With NEITHER, a fresh random key is
+     * used per call — so an identical retry would pay twice; never rely on the random default for retries.
      */
     async pay(params) {
-        const idem = params.idempotencyKey || `pay_${randomId()}`;
+        // N-new-1: a per-call random default is NOT retry-safe — a caller that retries `pay({merchant,
+        // amount})` after a lost response would mint a NEW key and double-spend. Derive the key from
+        // `invoiceId` when present so a retry with the same invoice dedups; fall back to random only when
+        // the caller supplied no stable identifier at all.
+        const idem = params.idempotencyKey ||
+            (params.invoiceId ? `pay_${params.invoiceId}` : `pay_${randomId()}`);
         const body = { merchant: params.merchant, amount: String(params.amount) };
         if (params.memo !== undefined)
             body.memo = params.memo;

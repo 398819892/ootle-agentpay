@@ -157,13 +157,17 @@ _SUBMIT_RETRY_DELAY = 12  # seconds
 
 
 def _env_int(name: str, default: int) -> int:
+    # An unset / empty var uses the default; a SET-but-non-integer value is a misconfiguration we
+    # refuse rather than silently swallow (the old `return default` hid a typo like `=4o`, leaving a
+    # money daemon running on surprise defaults — e.g. a retry/timeout budget that is not what was
+    # configured). Fail loud, naming the variable, so it is fixed at boot. (P2 — NaN/invalid config)
     v = os.environ.get(name, "").strip()
     if not v:
         return default
     try:
         return int(v)
     except ValueError:
-        return default
+        raise ValueError(f"Invalid config: {name}={v!r} is not an integer") from None
 
 
 def _env_float(name: str, default: float) -> float:
@@ -173,7 +177,7 @@ def _env_float(name: str, default: float) -> float:
     try:
         return float(v)
     except ValueError:
-        return default
+        raise ValueError(f"Invalid config: {name}={v!r} is not a number") from None
 
 
 def _is_transient(message: str) -> bool:
@@ -260,32 +264,46 @@ class WalletdClient:
             with urllib.request.urlopen(req, timeout=120) as r:
                 envelope = json.loads(r.read())
         except urllib.error.HTTPError as e:
-            # A JSON-RPC daemon normally answers 200 even for RPC-level errors; a non-2xx means an
-            # HTTP-layer failure (bad token → 401, overload → 5xx …). If the error body still carries a
-            # JSON-RPC envelope, hand it back untouched so the normal `error`/transient-retry handling
-            # applies; otherwise surface a structured ChainError instead of a bare HTTPError.
+            # A JSON-RPC daemon normally answers 200 even for RPC-level errors, so a non-2xx is an
+            # HTTP-/transport-layer failure (bad token → 401, overload / internal fault → 5xx …), NOT a
+            # clean node verdict. Read the body once, then classify by HTTP STATUS first (F-6) — never by
+            # the error text — so the real-submit path can tell "server erred, the tx may already exist"
+            # (→ pending) from a genuine 200 node rejection (→ hard reject).
             raw = b""
             try:
                 raw = e.read()
             except Exception:
                 pass
+            parsed = None
             try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict) and ("error" in parsed or "result" in parsed):
-                    return parsed
+                p = json.loads(raw)
+                if isinstance(p, dict) and ("error" in p or "result" in p):
+                    parsed = p
             except Exception:
                 pass
-            snippet = raw.decode("utf-8", "replace")[:200].strip()
-            err = ChainError(
-                f"walletd HTTP {e.code} for {method}" + (f": {snippet}" if snippet else "")
-            )
             # 401/403 = the auth layer rejected the request BEFORE dispatch (bad / expired token): the
-            # method never ran, so a REAL submit that hits this definitely did NOT land. Flag it so the
-            # submit path surfaces it as a hard failure, not `pending` (which would wrongly tell a caller
-            # "it may have landed, go reconcile"). Mirrors the TS D-13 guard.
+            # method never ran, so a REAL submit that hits this definitely did NOT land. Hard failure,
+            # never `pending` (which would wrongly tell a caller "it may have landed, go reconcile").
+            # Mirrors the TS D-13 guard. Checked BEFORE returning any body, so a 401 WITH a JSON body is
+            # still treated as auth-failed rather than slipping through as a normal envelope.
             if e.code in (401, 403):
+                amsg = (_err_message(parsed.get("error")) if parsed and parsed.get("error") is not None
+                        else raw.decode("utf-8", "replace")[:200].strip())
+                err = ChainError(f"walletd HTTP {e.code} for {method}" + (f": {amsg}" if amsg else ""))
                 err.auth_failed = True
-            raise err from e
+                raise err from e
+            # Any other non-2xx that still carries a JSON-RPC body: hand it back, but TAG the HTTP status
+            # so the real-submit path treats a 5xx as ambiguous (pending), not a definitive rejection.
+            # Reads and dry-runs ignore `_http_status` — their behaviour is unchanged. (F-6)
+            if parsed is not None:
+                parsed["_http_status"] = e.code
+                return parsed
+            # non-2xx with no readable JSON body → structured ChainError; the real-submit path promotes a
+            # thrown error to `pending` (submitted-but-unknown), never a blind resubmit. (D-1)
+            snippet = raw.decode("utf-8", "replace")[:200].strip()
+            raise ChainError(
+                f"walletd HTTP {e.code} for {method}" + (f": {snippet}" if snippet else "")
+            ) from e
         except urllib.error.URLError as e:
             # Connection refused / DNS / socket timeout: the daemon was unreachable. The real-submit
             # path promotes a thrown transport error to `pending` (never a blind resubmit).
@@ -390,6 +408,19 @@ class WalletdClient:
                 pe.pending = True  # unknown: reconcile, never auto-resubmit (H5)
             raise pe from e
         err = resp.get("error")
+        # F-6: classify by HTTP STATUS before the error text. `_rpc` tags any non-2xx that still carried
+        # a JSON-RPC body with `_http_status` (401/403 were already raised as auth failures upstream). On
+        # a REAL submit a 5xx / other non-2xx means the server erred AFTER we handed it the manifest — the
+        # tx may already exist — so it is `pending` (reconcile by tx id), NEVER a hard reject that `run()`
+        # would turn into a blind, double-spending resubmit.
+        http_status = resp.get("_http_status")
+        if http_status is not None and not (200 <= http_status < 300):
+            e = ChainError(
+                f"submit returned HTTP {http_status}; outcome unknown"
+                + (f": {_err_message(err)}" if err is not None else "")
+            )
+            e.pending = True  # unknown: reconcile, never auto-resubmit (H5 / F-6)
+            raise e
         if err is not None and _is_transient(_err_message(err)):
             e = ChainError(
                 "submit may or may not have landed (transient error, not resubmitted): " + _err_message(err)
