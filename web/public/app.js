@@ -1358,7 +1358,7 @@ function viewOverview() {
   const recent = b.ledger
     .slice(-4)
     .reverse()
-    .map((e) => ledgerRow(e))
+    .map((e) => fullLedgerRow(e))
     .join("");
 
   return (
@@ -1410,7 +1410,9 @@ function viewOverview() {
         <div class="card__body" style="padding:8px 0 4px">
           ${
             recent
-              ? `<div class="table-wrap"><table class="ledger"><tbody>${recent}</tbody></table></div>`
+              ? `<div class="table-wrap"><table class="ledger">
+                  <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th><th>${esc(t("th_time"))} / ${esc(t("th_source"))}</th></tr></thead>
+                  <tbody>${recent}</tbody></table></div>`
               : `<div class="empty" style="padding:30px"><p class="muted">${esc(t("overview_no_payments"))}</p></div>`
           }
         </div>
@@ -1435,21 +1437,6 @@ function viaBadge(via) {
   const label = via === "api" ? t("via_api") : via === "chain" ? t("via_chain") : t("via_manual");
   const tip = via === "api" ? t("via_api_tip") : via === "chain" ? t("via_chain_tip") : t("via_manual_tip");
   return `<span class="badge badge--src ${mod}" title="${esc(tip)}">${esc(label)}</span>`;
-}
-
-function ledgerRow(e) {
-  const name = e.merchantName;
-  return `<tr>
-    <td><div class="merchant">
-      <span class="avatar" style="background:${avatarColor(name || e.merchant)}">${initials(name, e.merchant)}</span>
-      <div><div style="font-weight:600">${name ? esc(name) : esc(t("merchant_fallback"))}</div>
-        <div class="muted" style="font-size:12px;font-family:var(--mono)">${esc(shorten(e.merchant, 8, 5))}</div></div>
-    </div></td>
-    <td class="amount">−${fmt(e.amount)} <span class="muted" style="font-weight:500">${UNIT}</span></td>
-    <td><span class="memo" title="${esc(e.onchainMemo || e.memo)}">${esc(e.memo || "—")}</span>
-      <div class="muted" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px">
-        <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap">${icon("clock", 11)} ${esc(fmtTs(e.ts))}</span>${viaBadge(e.via)}</div></td>
-  </tr>`;
 }
 
 /* ---- views: CREATE -------------------------------------------------------- */
@@ -1627,7 +1614,7 @@ function viewPay() {
             ${
               ledger
                 ? `<div class="table-wrap"><table class="ledger">
-                    <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th><th>${esc(t("th_source"))}</th><th>${esc(t("th_time"))}</th></tr></thead>
+                    <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th><th>${esc(t("th_time"))} / ${esc(t("th_source"))}</th></tr></thead>
                     <tbody>${ledger}</tbody></table></div>`
                 : `<div class="empty" style="padding:40px"><div class="empty__icon">${icon("activity", 26)}</div>
                    <h3>${esc(t("pay_no_payments_title"))}</h3><p>${t("pay_no_payments_body")}</p></div>`
@@ -1648,8 +1635,9 @@ function fullLedgerRow(e) {
     </div></td>
     <td class="amount">−${fmt(e.amount)} <span class="muted" style="font-weight:500">${UNIT}</span></td>
     <td><span class="memo" title="${esc(e.onchainMemo || e.memo)}">${esc(e.memo || "—")}</span></td>
-    <td>${viaBadge(e.via)}</td>
-    <td class="muted" style="font-size:12px;white-space:nowrap;font-family:var(--mono)">${esc(fmtTs(e.ts))}</td>
+    <td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">
+      <span class="muted" style="font-size:12px;white-space:nowrap;font-family:var(--mono)">${esc(fmtTs(e.ts))}</span>
+      ${viaBadge(e.via)}</div></td>
   </tr>`;
 }
 
