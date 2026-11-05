@@ -18,7 +18,14 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
+
+
+def _now_iso() -> str:
+    """Local wall-clock time, to the second, when a payment was accepted (the chain's own
+    finalize timestamp is not exposed by walletd, so we stamp acceptance here)."""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 # Make the repo's SDK (`agentpay.onchain`) importable without a manual PYTHONPATH, however this
 # package is launched. We try, in order: an explicit AGENTPAY_SDK_PATH; the repo layout relative
@@ -70,6 +77,10 @@ class PayResult:
     spent_in_window: int | None = None
     status: str = "accepted"        # "accepted" | "rejected" | "pending"
     tx_id: str | None = None        # set when known, so the agent can call get_payment_status
+    # Receipt fields, filled on an accepted pay (best-effort; None if the post-pay chain read failed):
+    balance: int | None = None              # the budget's remaining funds (vault balance) after this pay
+    remaining_in_window: int | None = None  # how much is still spendable in the current daily window
+    paid_at: str | None = None              # local ISO-8601 timestamp of acceptance
 
 
 @dataclass
@@ -136,7 +147,25 @@ class AgentWallet:
         spent_in_window = None
         if events:
             spent_in_window = int(events[0].get("spent_in_window", self.budget.spent))
-        return PayResult(True, merchant, amount, memo, spent_in_window=spent_in_window, status="accepted")
+        # Build the receipt figures from the chain AFTER the pay: the vault's remaining balance and
+        # how much is left in the current window. Best-effort — the pay already succeeded, so a failed
+        # follow-up read must not turn a good payment into an error; those fields just come back None.
+        balance = remaining_in_window = None
+        try:
+            chain = self.budget.read_onchain_state()
+            bal = chain.get("balance")
+            if isinstance(bal, int) and not isinstance(bal, bool):
+                balance = bal
+            daily = chain.get("daily_cap")
+            spent = chain.get("spent_in_window")
+            if isinstance(daily, int) and isinstance(spent, int):
+                remaining_in_window = max(daily - spent, 0)
+                if spent_in_window is None:
+                    spent_in_window = spent
+        except Exception:  # noqa: BLE001 — receipt is best-effort; never fail an accepted pay
+            pass
+        return PayResult(True, merchant, amount, memo, spent_in_window=spent_in_window, status="accepted",
+                         balance=balance, remaining_in_window=remaining_in_window, paid_at=_now_iso())
 
     def status(self) -> dict[str, Any]:
         """What the agent is allowed to know about its own budget.

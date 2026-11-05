@@ -140,7 +140,9 @@ def pay_merchant(merchant: str, amount: int, memo: str = "") -> dict:
     The payment is adjudicated by the Tari Ootle validator against the budget's on-chain rules
     (per-transaction cap, daily cap, merchant whitelist, revocation). Outcomes:
 
-      * accepted -> ``{"ok": true, "status": "accepted", "spent_in_window": <int>, ...}``
+      * accepted -> ``{"ok": true, "status": "accepted", "spent_in_window": <int>,
+        "receipt": {"merchant", "amount", "unit", "remaining_balance", "remaining_in_window",
+        "paid_at"}, ...}`` — the receipt covers who was paid, how much, what's left, and when.
       * rejected -> ``{"ok": false, "status": "rejected", "reason": "<validator's reason>", ...}``
         (a normal, expected outcome — the agent cannot override it)
       * PENDING  -> ``{"ok": null, "status": "pending", "tx_id": <str|null>, "action_required": ...}``
@@ -178,6 +180,18 @@ def pay_merchant(merchant: str, amount: int, memo: str = "") -> dict:
         )
     elif r.ok:
         out["spent_in_window"] = r.spent_in_window
+        # A receipt for the accepted payment: who was paid, how much, what's left, and when.
+        # Amounts are base units (µT). `remaining_balance` is the budget's funds left after this pay
+        # (the vault balance); `remaining_in_window` is how much is still spendable this window. Both
+        # may be null if the post-pay chain read momentarily failed — the payment still went through.
+        out["receipt"] = {
+            "merchant": r.merchant,                  # 商户姓名 — the merchant as paid
+            "amount": r.amount,                      # 付款金额 — this payment
+            "unit": "µT",
+            "remaining_balance": r.balance,          # 剩余金额 — budget funds left (vault balance)
+            "remaining_in_window": r.remaining_in_window,
+            "paid_at": r.paid_at,                    # 付款时间 — local time of acceptance
+        }
     else:
         out["reason"] = r.reason
         out["rejected_by"] = "Tari Ootle validator (on-chain budget rule)"

@@ -110,6 +110,38 @@ def test_non_integer_amount_status_is_rejected():
     assert r.status == "rejected"
 
 
+class _StateBudget(StubBudget):
+    """Accepts the pay and exposes post-pay on-chain state, so the receipt can be built."""
+    def __init__(self, state, events=None):
+        super().__init__(events=events or [])
+        self._state = state
+
+    def read_onchain_state(self):
+        return self._state
+
+
+def test_accepted_pay_carries_receipt_fields():
+    # An accepted pay reads the chain after it lands and fills the receipt: remaining balance
+    # (vault), remaining-in-window (daily_cap - spent), spent_in_window, and a paid_at timestamp.
+    state = {"balance": 7500, "daily_cap": 2000, "spent_in_window": 1200}
+    w = backend.AgentWallet(_StateBudget(state), per_tx_cap=1000, daily_cap=2000, whitelist=[MERCHANT])
+    r = w.pay_merchant(MERCHANT, 300)
+    assert r.ok is True and r.status == "accepted"
+    assert r.balance == 7500                 # 剩余金额 — the budget's remaining funds
+    assert r.remaining_in_window == 800      # 2000 daily_cap - 1200 spent
+    assert r.spent_in_window == 1200
+    assert isinstance(r.paid_at, str) and len(r.paid_at) >= 10
+
+
+def test_receipt_fields_none_when_post_pay_read_fails():
+    # The pay already succeeded, so a failed post-pay read must not break it — the receipt figures
+    # just come back None, while paid_at is still stamped.
+    r = _wallet(events=[]).pay_merchant(MERCHANT, 10)  # StubBudget has no read_onchain_state
+    assert r.ok is True and r.status == "accepted"
+    assert r.balance is None and r.remaining_in_window is None
+    assert isinstance(r.paid_at, str)
+
+
 def test_payment_status_maps_three_states():
     w = _wallet()
     w.budget.client = StubClient(("accept", None))
