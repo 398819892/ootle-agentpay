@@ -1411,7 +1411,7 @@ function viewOverview() {
           ${
             recent
               ? `<div class="table-wrap"><table class="ledger">
-                  <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th><th>${esc(t("th_time"))} / ${esc(t("th_source"))}</th></tr></thead>
+                  <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th><th>${esc(t("th_source"))} / ${esc(t("th_time"))}</th></tr></thead>
                   <tbody>${recent}</tbody></table></div>`
               : `<div class="empty" style="padding:30px"><p class="muted">${esc(t("overview_no_payments"))}</p></div>`
           }
@@ -1429,6 +1429,9 @@ function fmtTs(ts) {
   const p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
+// Split the full timestamp into its date ("YYYY-MM-DD") and clock ("HH:MM:SS") halves.
+function fmtDate(ts) { const s = fmtTs(ts); return s === "—" ? "—" : s.split(" ")[0]; }
+function fmtClock(ts) { const s = fmtTs(ts); return s === "—" ? "" : s.split(" ")[1]; }
 
 // A small tag showing how a pay was initiated: 人工 (dashboard/owner), API (integration key),
 // or 链上 (external client — MCP/SDK/another dashboard — found on chain, not journaled here).
@@ -1614,7 +1617,7 @@ function viewPay() {
             ${
               ledger
                 ? `<div class="table-wrap"><table class="ledger">
-                    <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th><th>${esc(t("th_time"))} / ${esc(t("th_source"))}</th></tr></thead>
+                    <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th><th>${esc(t("th_source"))} / ${esc(t("th_time"))}</th></tr></thead>
                     <tbody>${ledger}</tbody></table></div>`
                 : `<div class="empty" style="padding:40px"><div class="empty__icon">${icon("activity", 26)}</div>
                    <h3>${esc(t("pay_no_payments_title"))}</h3><p>${t("pay_no_payments_body")}</p></div>`
@@ -1636,8 +1639,11 @@ function fullLedgerRow(e) {
     <td class="amount">−${fmt(e.amount)} <span class="muted" style="font-weight:500">${UNIT}</span></td>
     <td><span class="memo" title="${esc(e.onchainMemo || e.memo)}">${esc(e.memo || "—")}</span></td>
     <td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">
-      <span class="muted" style="font-size:12px;white-space:nowrap;font-family:var(--mono)">${esc(fmtTs(e.ts))}</span>
-      ${viaBadge(e.via)}</div></td>
+      ${viaBadge(e.via)}
+      <div class="muted" style="font-size:12px;font-family:var(--mono);line-height:1.35">
+        <div style="white-space:nowrap">${esc(fmtClock(e.ts))}</div>
+        <div style="white-space:nowrap">${esc(fmtDate(e.ts))}</div>
+      </div></div></td>
   </tr>`;
 }
 
