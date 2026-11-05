@@ -1341,7 +1341,6 @@ function viewOverview() {
         <div class="stat__top">
           <span class="stat__icon" style="--c:${s.color}">${icon(s.icon, 17)}</span>
           <div class="stat__label">${esc(s.label)}</div>
-          ${s.nav ? `<span class="stat__go" aria-hidden="true">→</span>` : ""}
         </div>
         <div class="stat__value">${s.value} <span class="unit">${s.unit ? UNIT : ""}</span></div>
         <div class="stat__hint">${esc(s.hint)}</div>

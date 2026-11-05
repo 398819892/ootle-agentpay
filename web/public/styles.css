@@ -649,6 +649,7 @@ button {
   border-radius: var(--radius);
   padding: 18px;
   box-shadow: var(--shadow-sm);
+  text-align: center;
   transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
 }
 .stat:hover {
@@ -663,19 +664,10 @@ button {
 .stat--link:hover {
   border-color: var(--brand);
 }
-.stat__go {
-  color: var(--text-muted);
-  font-size: 15px;
-  line-height: 1;
-  transition: color 0.16s ease, transform 0.16s ease;
-}
-.stat--link:hover .stat__go {
-  color: var(--brand);
-  transform: translateX(2px);
-}
 .stat__top {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
 }
 /* a soft, colored icon chip — the main "lively" touch; each tile sets --c inline */
@@ -716,6 +708,7 @@ button {
   font-variant-numeric: tabular-nums;
   display: flex;
   align-items: baseline;
+  justify-content: center;
   gap: 6px;
 }
 .stat__value .unit {
