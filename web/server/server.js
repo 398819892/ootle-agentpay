@@ -24,6 +24,7 @@
 "use strict";
 
 const http = require("node:http");
+const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
@@ -57,6 +58,7 @@ const { createDashboard } = require("./dashboard");
 const { createKeySessions } = require("./key_sessions");
 const { createOps } = require("./ops");
 const { createApiV1 } = require("./api_v1");
+const { createReceipts } = require("./receipts");
 
 // ---- locate and load the committed TS client (its compiled dist) -----------------------------
 const CLIENT_DIR = path.resolve(__dirname, "..", "..", "clients", "ts", "dist");
@@ -91,6 +93,23 @@ const rate = createRateLimiter({
 
 // ---- web-security building blocks, wired to this process's config ----------------------------
 const serveStatic = createStaticServer(PUBLIC_DIR);
+// Stored copies of the MCP's payment-receipt images, so the web UI can list and download them (an
+// inline MCP image has no "download" affordance). Kept next to the state file. Presentation only.
+const receipts = createReceipts({ dir: path.join(path.dirname(STATE_FILE), "receipts") });
+function serveReceipt(req, res, urlPath) {
+  const m = /^\/receipt\/([0-9a-z]+-[0-9a-f]{8})\.png$/.exec(urlPath);
+  const fp = m && receipts.filePath(m[1]);
+  if (!fp) return sendJson(res, 404, { error: "no such receipt" });
+  fs.readFile(fp, (err, data) => {
+    if (err) return sendJson(res, 404, { error: "no such receipt" });
+    res.writeHead(200, {
+      "Content-Type": "image/png",
+      "Cache-Control": "no-store",
+      "Content-Disposition": `inline; filename="${m[1]}.png"`,
+    });
+    res.end(data);
+  });
+}
 const { revokedSids, pruneRevokedSids, signSession, verifySession, isAuthed, passwordMatches, setSessionCookie, clearSessionCookie } =
   createSessions({ secret: SESSION_SECRET, cookieName: COOKIE_NAME, authOn: AUTH_ON, password: DASHBOARD_PASSWORD });
 const { csrfTokenFor, csrfTokenOk, originAllowed, hasRequestBody, contentTypeIsJson } = createCsrf({
@@ -261,6 +280,27 @@ const api = {
     return await dashboardState();
   },
 
+  // Receipt images: the MCP uploads the PNG it renders (base64) so the dashboard can list + serve it
+  // for download; the web UI reads the list. Presentation only — never a money authority.
+  "GET /api/receipts": () => ({ receipts: receipts.list() }),
+  async "POST /api/receipts"(body) {
+    const b64 = body && typeof body.png_base64 === "string" ? body.png_base64 : "";
+    if (!b64) throw httpError(400, "png_base64 is required.");
+    let png;
+    try {
+      png = Buffer.from(b64, "base64");
+    } catch {
+      throw httpError(400, "png_base64 is not valid base64.");
+    }
+    let entry;
+    try {
+      entry = receipts.save(body, png);
+    } catch (e) {
+      throw httpError(400, e.message || "could not store the receipt.");
+    }
+    return { url: entry.url, id: entry.id };
+  },
+
   "POST /api/reset": (body, ctx) => authz.execute("resetLocal", body, ctx),
   "POST /api/freeze": (body, ctx) => authz.execute("freeze", body, ctx),
   "POST /api/unfreeze": (body, ctx) => authz.execute("unfreeze", body, ctx),
@@ -287,6 +327,8 @@ const server = http.createServer(async (req, res) => {
   // Machine-to-machine API: dispatched BEFORE the browser session/CSRF/auth gate (it authenticates
   // with an API key, not a cookie), so it neither relies on nor weakens the dashboard's gate.
   if (urlPath === V1 || urlPath.startsWith(V1 + "/")) return handleApiV1(req, res, urlPath);
+  // Stored receipt images are served from their own dir (not PUBLIC_DIR), by a strict id pattern.
+  if (req.method === "GET" && urlPath.startsWith("/receipt/")) return serveReceipt(req, res, urlPath);
   if (!urlPath.startsWith("/api/")) return serveStatic(req, res);
 
   const key = `${req.method} ${urlPath}`;

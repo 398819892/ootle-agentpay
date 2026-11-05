@@ -1881,3 +1881,71 @@ table.ledger {
 .codeblock--cli .codeblock__body {
   color: var(--text-muted);
 }
+
+/* ---- receipts gallery ---------------------------------------------------- */
+.muted {
+  color: var(--text-muted);
+}
+.rcpt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.rcpt {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.rcpt__thumb {
+  display: block;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  line-height: 0;
+}
+.rcpt__thumb img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.rcpt__body {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.rcpt__amount {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.rcpt__unit {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.rcpt__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.rcpt__k {
+  color: var(--text-muted);
+  flex: none;
+}
+.rcpt__v {
+  color: var(--text);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rcpt__dl {
+  margin-top: 8px;
+  align-self: flex-start;
+}

@@ -24,9 +24,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
+from datetime import datetime
+from pathlib import Path
 
 from . import backend, config
 from .receipt_image import render_receipt_png
@@ -62,6 +65,71 @@ def _receipt_lang() -> str:
     _RECEIPT_LANG_CACHE["val"] = lang
     _RECEIPT_LANG_CACHE["at"] = now
     return lang
+
+
+# ---- saving the receipt image to a downloadable file ------------------------------------------
+# The MCP returns the receipt inline, but an inline image has no "download" affordance in most MCP
+# hosts. So we also WRITE each receipt to a PNG file the user can open / save, and hand the path back
+# in the JSON result. The folder is AGENTPAY_RECEIPT_DIR, defaulting to ~/agentpay-receipts.
+def _receipt_dir() -> Path:
+    d = os.environ.get("AGENTPAY_RECEIPT_DIR", "").strip()
+    return Path(d) if d else Path.home() / "agentpay-receipts"
+
+
+def _save_receipt_png(png: bytes, *, merchant=None, paid_at=None) -> str | None:
+    """Write the receipt PNG to a file and return its absolute path, or None on any failure (saving
+    is a convenience — a write error must never break an accepted payment)."""
+    try:
+        when = None
+        if paid_at:
+            try:
+                when = datetime.fromisoformat(str(paid_at))
+            except ValueError:
+                when = None
+        when = when or datetime.now()
+        tag = ""
+        m = str(merchant or "")
+        if m:
+            tag = "-" + re.sub(r"[^0-9A-Za-z]", "", m)[-8:]
+        name = f"receipt-{when.strftime('%Y%m%d-%H%M%S')}{tag}.png"
+        d = _receipt_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / name
+        # avoid clobbering a same-second receipt
+        i = 1
+        while path.exists():
+            path = d / f"receipt-{when.strftime('%Y%m%d-%H%M%S')}{tag}-{i}.png"
+            i += 1
+        path.write_bytes(png)
+        return str(path)
+    except Exception:  # noqa: BLE001 - saving is best-effort; never fail a good pay on a file error
+        return None
+
+
+def _upload_receipt_to_dashboard(png: bytes, meta: dict) -> str | None:
+    """POST the receipt PNG (base64) + its figures to the dashboard, which stores it and serves it
+    back at a download URL (surfaced on the dashboard's 回执 / Receipts page). Returns the absolute
+    URL, or None if the dashboard is unreachable or declines — best-effort, so it never blocks a pay.
+    Uses the same AGENTPAY_DASHBOARD_URL the receipt-language read uses."""
+    import base64
+    base = os.environ.get("AGENTPAY_DASHBOARD_URL", "http://127.0.0.1:8787").rstrip("/")
+    body = json.dumps({
+        "png_base64": base64.b64encode(png).decode("ascii"),
+        "payer": meta.get("payer"), "merchant": meta.get("merchant"),
+        "amount": meta.get("amount"), "unit": meta.get("unit", "µT"),
+        "remaining_balance": meta.get("remaining_balance"),
+        "remaining_in_window": meta.get("remaining_in_window"),
+        "paid_at": meta.get("paid_at"),
+    }).encode("utf-8")
+    req = urllib.request.Request(f"{base}/api/receipts", data=body, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        rel = data.get("url")
+        return f"{base}{rel}" if isinstance(rel, str) and rel.startswith("/") else None
+    except Exception:  # noqa: BLE001 - dashboard down / declined: skip the URL, keep the pay + file
+        return None
 
 try:
     from mcp.server.fastmcp import FastMCP, Image
@@ -221,6 +289,7 @@ def pay_merchant(merchant: str, amount: int, memo: str = "") -> dict:
         # (the vault balance); `remaining_in_window` is how much is still spendable this window. Both
         # may be null if the post-pay chain read momentarily failed — the payment still went through.
         out["receipt"] = {
+            "payer": r.payer,                        # 付款方 — the paying budget's on-chain component
             "merchant": r.merchant,                  # 商户姓名 — the merchant as paid
             "amount": r.amount,                      # 付款金额 — this payment
             "unit": "µT",
@@ -237,9 +306,17 @@ def pay_merchant(merchant: str, amount: int, memo: str = "") -> dict:
         png = render_receipt_png(
             merchant=r.merchant, amount=r.amount, memo=r.memo,
             remaining_balance=r.balance, remaining_in_window=r.remaining_in_window,
-            paid_at=r.paid_at, lang=_receipt_lang(),
+            paid_at=r.paid_at, lang=_receipt_lang(), payer=r.payer,
         )
         if png:
+            # 1) a downloadable file on disk, 2) the dashboard's own copy with a download URL — both
+            #    best-effort, so a save/upload hiccup never turns a good payment into an error.
+            path = _save_receipt_png(png, merchant=r.merchant, paid_at=r.paid_at)
+            if path:
+                out["receipt"]["image_path"] = path
+            url = _upload_receipt_to_dashboard(png, out["receipt"])
+            if url:
+                out["receipt"]["download_url"] = url
             return [Image(data=png, format="png"), out]
     return out
 

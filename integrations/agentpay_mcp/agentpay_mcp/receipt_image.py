@@ -64,21 +64,22 @@ def _short_merchant(m) -> str:
 # language. The dashboard's Settings page picks which one the agent gets back (see server.py).
 def _labels(lang):
     if lang == "zh":
-        return {"subtitle": "付款回执", "ok": "付款成功", "merchant": "商户", "memo": "备注",
-                "balance": "剩余金额", "window": "本窗口剩余", "time": "付款时间",
+        return {"subtitle": "付款回执", "ok": "付款成功", "payer": "付款方", "merchant": "商户",
+                "memo": "备注", "balance": "剩余金额", "window": "本窗口剩余", "time": "付款时间",
                 "foot": "Tari Ootle 验证者 · 链上已确认"}
     if lang == "en":
-        return {"subtitle": "Payment Receipt", "ok": "Payment successful", "merchant": "Merchant",
-                "memo": "Memo", "balance": "Balance", "window": "Window left", "time": "Time",
-                "foot": "Tari Ootle validator · confirmed on-chain"}
-    return {"subtitle": "付款回执 · Payment Receipt", "ok": "付款成功", "merchant": "商户  Merchant",
-            "memo": "备注  Memo", "balance": "剩余金额  Balance", "window": "本窗口剩余  Window left",
-            "time": "付款时间  Time", "foot": "Tari Ootle validator · 链上已确认"}
+        return {"subtitle": "Payment Receipt", "ok": "Payment successful", "payer": "Payer",
+                "merchant": "Merchant", "memo": "Memo", "balance": "Balance", "window": "Window left",
+                "time": "Time", "foot": "Tari Ootle validator · confirmed on-chain"}
+    return {"subtitle": "付款回执 · Payment Receipt", "ok": "付款成功", "payer": "付款方  Payer",
+            "merchant": "商户  Merchant", "memo": "备注  Memo", "balance": "剩余金额  Balance",
+            "window": "本窗口剩余  Window left", "time": "付款时间  Time",
+            "foot": "Tari Ootle validator · 链上已确认"}
 
 
 def render_receipt_png(*, merchant, amount, memo="", remaining_balance=None,
                        remaining_in_window=None, paid_at=None, unit="µT",
-                       lang="both") -> Optional[bytes]:
+                       lang="both", payer=None) -> Optional[bytes]:
     """Return a PNG receipt as bytes, or ``None`` if it cannot be rendered.
 
     ``lang`` is "zh", "en" or "both" (anything else falls back to bilingual).
@@ -107,6 +108,7 @@ def render_receipt_png(*, merchant, amount, memo="", remaining_balance=None,
         f_foot = _font(_REGULAR, 12 * S)
 
         rows = [
+            (L["payer"], _short_merchant(payer)),
             (L["merchant"], _short_merchant(merchant)),
             (L["memo"], str(memo) if memo else "—"),
             (L["balance"], f"{_fmt_amount(remaining_balance)} {unit}"),

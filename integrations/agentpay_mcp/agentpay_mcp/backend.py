@@ -81,6 +81,7 @@ class PayResult:
     balance: int | None = None              # the budget's remaining funds (vault balance) after this pay
     remaining_in_window: int | None = None  # how much is still spendable in the current daily window
     paid_at: str | None = None              # local ISO-8601 timestamp of acceptance
+    payer: str | None = None                # the paying budget's on-chain component (who paid)
 
 
 @dataclass
@@ -165,7 +166,8 @@ class AgentWallet:
         except Exception:  # noqa: BLE001 — receipt is best-effort; never fail an accepted pay
             pass
         return PayResult(True, merchant, amount, memo, spent_in_window=spent_in_window, status="accepted",
-                         balance=balance, remaining_in_window=remaining_in_window, paid_at=_now_iso())
+                         balance=balance, remaining_in_window=remaining_in_window, paid_at=_now_iso(),
+                         payer=self.component or None)
 
     def status(self) -> dict[str, Any]:
         """What the agent is allowed to know about its own budget.

@@ -135,6 +135,14 @@ const I18N = {
 
     /* connect */
     nav_connect: "Connect AI",
+    nav_receipts: "Receipts",
+    receipts_sub: "The payment receipts the AI agent was given, saved here to view and download.",
+    receipts_empty: "No receipts yet. They appear here after the agent makes a payment over MCP.",
+    receipt_download: "Download",
+    receipt_to: "Paid to",
+    receipt_from: "Payer",
+    receipt_at: "Time",
+    receipts_load_failed: "Could not load receipts",
     nav_settings: "Settings",
     settings_sub: "Defaults for this dashboard and the agent's payment receipts.",
     set_ui_lang: "Interface language",
@@ -511,6 +519,14 @@ const I18N = {
 
     /* connect */
     nav_connect: "接入",
+    nav_receipts: "回执",
+    receipts_sub: "AI 代理收到的付款回执,存在这里可查看和下载。",
+    receipts_empty: "还没有回执。代理通过 MCP 付款后,回执会出现在这里。",
+    receipt_download: "下载",
+    receipt_to: "收款方",
+    receipt_from: "付款方",
+    receipt_at: "时间",
+    receipts_load_failed: "加载回执失败",
     nav_settings: "设置",
     settings_sub: "设置本控制台与代理付款回执的默认项。",
     set_ui_lang: "界面语言",
@@ -891,6 +907,9 @@ const P = {
   plug: '<path d="M9 2v6M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0V8Z"/><path d="M12 17v4"/>',
   settings:
     '<circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l1.7-1.3-1.8-3.1-2 .8a7.6 7.6 0 0 0-2.6-1.5L14.3 3h-3.6l-.3 2.1a7.6 7.6 0 0 0-2.6 1.5l-2-.8-1.8 3.1 1.7 1.3a7.6 7.6 0 0 0 0 3l-1.7 1.3 1.8 3.1 2-.8a7.6 7.6 0 0 0 2.6 1.5l.3 2.1h3.6l.3-2.1a7.6 7.6 0 0 0 2.6-1.5l2 .8 1.8-3.1-1.7-1.3Z"/>',
+  receipt:
+    '<path d="M6 2h12v20l-3-2-3 2-3-2-3 2V2Z"/><path d="M9 7h6M9 11h6M9 15h4"/>',
+  download: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/>',
 };
 function icon(name, size = 18) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ""}</svg>`;
@@ -1206,6 +1225,7 @@ const NAV = [
   { id: "pay", key: "nav_pay", icon: "send" },
   { id: "merchants", key: "nav_merchants", icon: "store" },
   { id: "connect", key: "nav_connect", icon: "plug" },
+  { id: "receipts", key: "nav_receipts", icon: "receipt" },
   { id: "settings", key: "nav_settings", icon: "settings" },
 ];
 
@@ -1339,6 +1359,51 @@ function viewSettings() {
       </div>
     </div>`
   );
+}
+
+/* ---- views: RECEIPTS ------------------------------------------------------ */
+// The payment-receipt images the MCP rendered and uploaded. The list comes from /api/receipts
+// (fetched in wireReceipts); each card previews the PNG and offers it for download.
+function viewReceipts() {
+  return (
+    pageHead(t("nav_receipts"), t("receipts_sub")) +
+    `<div id="receipts-list" aria-busy="true"><div class="muted" style="padding:8px 2px">…</div></div>`
+  );
+}
+
+function receiptCard(r) {
+  const url = esc(r.url);
+  const amount = r.amount != null ? Number(r.amount).toLocaleString("en-US") : "—";
+  const when = r.paid_at ? new Date(r.paid_at) : null;
+  const whenStr = when && !isNaN(when) ? when.toLocaleString() : esc(r.paid_at || r.saved_at || "");
+  const row = (label, val) =>
+    `<div class="rcpt__row"><span class="rcpt__k">${esc(label)}</span><span class="rcpt__v" title="${esc(val)}">${esc(shorten(val, 12, 6))}</span></div>`;
+  return `<div class="rcpt">
+    <a class="rcpt__thumb" href="${url}" target="_blank" rel="noopener" aria-label="${esc(t("receipt_download"))}"><img src="${url}" alt="" loading="lazy"/></a>
+    <div class="rcpt__body">
+      <div class="rcpt__amount">${esc(amount)} <span class="rcpt__unit">${esc(r.unit || UNIT)}</span></div>
+      ${row(t("receipt_to"), r.merchant || "—")}
+      ${row(t("receipt_from"), r.payer || "—")}
+      <div class="rcpt__row"><span class="rcpt__k">${esc(t("receipt_at"))}</span><span class="rcpt__v">${esc(whenStr)}</span></div>
+      <a class="btn btn--secondary btn--sm rcpt__dl" href="${url}" download="receipt-${esc(r.id)}.png">${icon("download", 15)} ${esc(t("receipt_download"))}</a>
+    </div>
+  </div>`;
+}
+
+async function wireReceipts() {
+  const box = el("receipts-list");
+  if (!box) return;
+  try {
+    const r = await api("/api/receipts");
+    const list = (r && r.receipts) || [];
+    box.removeAttribute("aria-busy");
+    box.innerHTML = list.length
+      ? `<div class="rcpt-grid">${list.map(receiptCard).join("")}</div>`
+      : `<div class="card"><div class="empty"><div class="empty__icon">${icon("receipt", 26)}</div><p>${esc(t("receipts_empty"))}</p></div></div>`;
+  } catch (e) {
+    box.removeAttribute("aria-busy");
+    box.innerHTML = `<div class="banner">${icon("alert", 20)}<div class="banner__text"><b>${esc(t("receipts_load_failed"))}</b>${esc(e.message || "")}</div></div>`;
+  }
 }
 
 /* ---- views: OVERVIEW ------------------------------------------------------ */
@@ -2015,6 +2080,9 @@ function render() {
     case "settings":
       body = viewSettings();
       break;
+    case "receipts":
+      body = viewReceipts();
+      break;
     default:
       body = viewOverview();
   }
@@ -2142,6 +2210,7 @@ function wire() {
   if (S.view === "pay" && S.data.budget) wirePay();
   if (S.view === "merchants" && S.data.budget) wireMerchants();
   if (S.view === "settings") wireSettings();
+  if (S.view === "receipts") wireReceipts();
 }
 
 function wireSettings() {
