@@ -26,9 +26,10 @@ import json
 import sys
 
 from . import backend, config
+from .receipt_image import render_receipt_png
 
 try:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp import FastMCP, Image
 except ImportError:  # pragma: no cover - friendly message when deps are missing
     sys.stderr.write(
         "The 'mcp' package is not installed. Install this server, e.g.:\n"
@@ -195,6 +196,16 @@ def pay_merchant(merchant: str, amount: int, memo: str = "") -> dict:
     else:
         out["reason"] = r.reason
         out["rejected_by"] = "Tari Ootle validator (on-chain budget rule)"
+    # For an accepted pay, also return a rendered PNG receipt alongside the JSON (best-effort: if the
+    # image can't be drawn — e.g. Pillow missing — we just return the JSON, so the tool never fails).
+    if r.ok:
+        png = render_receipt_png(
+            merchant=r.merchant, amount=r.amount, memo=r.memo,
+            remaining_balance=r.balance, remaining_in_window=r.remaining_in_window,
+            paid_at=r.paid_at,
+        )
+        if png:
+            return [Image(data=png, format="png"), out]
     return out
 
 

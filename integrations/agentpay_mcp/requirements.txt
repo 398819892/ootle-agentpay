@@ -5,3 +5,5 @@
 # gives the `agentpay-mcp` console script). This file is the legacy venv path for environments
 # without build tooling: install into a venv local to this directory (see README.md).
 mcp>=1.2,<2
+# Renders the PNG payment receipt (optional — the receipt degrades to JSON/text if absent).
+pillow>=10

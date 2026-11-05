@@ -19,7 +19,10 @@ classifiers = [
 # The only extra runtime dependency: the MCP framework. The on-chain SDK (`agentpay.onchain`)
 # ships with this repo and is stdlib-only; it is bridged onto sys.path at runtime (repo layout
 # or AGENTPAY_SDK_PATH) rather than pulled from PyPI, so it is intentionally not listed here.
-dependencies = ["mcp>=1.2,<2"]
+# Pillow renders the PNG payment receipt (server.pay_merchant). It is optional at runtime — the
+# receipt module degrades to the JSON/text receipt if it is missing — but declared so a normal
+# install produces image receipts out of the box.
+dependencies = ["mcp>=1.2,<2", "pillow>=10"]
 
 [project.scripts]
 agentpay-mcp = "agentpay_mcp.server:main"
