@@ -1495,26 +1495,81 @@ table.ledger {
 
 /* ---- empty state ---------------------------------------------------------- */
 /* Subscription view — plan chooser cards (billing/§11, merged into the dashboard). */
-.plan-grid {
+/* ---- subscription pricing cards (§11) ------------------------------------- */
+.price-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(234px, 1fr));
+  gap: 16px;
+  align-items: stretch;
 }
-.plan-card .card__body {
-  display: grid;
-  gap: 10px;
-  justify-items: start;
+.price-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  padding: 22px 20px;
 }
-.plan-card--current {
+/* the subscriber's current plan: accented border, ring and a faint brand wash */
+.price-card--current {
   border-color: var(--brand);
-  box-shadow: 0 0 0 1px var(--brand) inset;
+  box-shadow: 0 0 0 1px var(--brand), var(--shadow-md);
+  background: color-mix(in srgb, var(--brand) 4%, var(--surface));
 }
-.plan-card__name {
+.price-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.price-card__name {
+  font-size: 15px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
-.plan-card__price {
-  font-size: 1.3rem;
+.price-card__price {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 30px;
   font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.price-card__price .per {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+.price-card__cta {
+  margin: 18px 0 20px;
+}
+.price-card__cta .btn {
+  width: 100%;
+}
+.price-feats {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+.price-feats li {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.price-feats li svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  color: var(--success);
 }
 
 .empty {

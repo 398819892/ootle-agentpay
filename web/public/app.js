@@ -170,6 +170,12 @@ const I18N = {
     sub_current: "Current",
     sub_redirecting: "Opening billing…",
     sub_action_failed: "Could not start billing",
+    sub_custom: "Custom",
+    sub_feat_budgets: "{n} active budgets",
+    sub_feat_budgets_unlimited: "Unlimited active budgets",
+    sub_feat_included_gmv: "{v} µT included volume",
+    sub_feat_gmv_overage: "{pct} GMV overage fee",
+    sub_feat_seat_overage: "{price} per extra budget",
     nav_settings: "Settings",
     settings_sub: "Defaults for this dashboard and the agent's payment receipts.",
     set_ui_lang: "Interface language",
@@ -682,6 +688,12 @@ const I18N = {
     sub_current: "当前",
     sub_redirecting: "正在打开计费…",
     sub_action_failed: "无法开始计费",
+    sub_custom: "定制",
+    sub_feat_budgets: "{n} 个活跃预算",
+    sub_feat_budgets_unlimited: "活跃预算不限",
+    sub_feat_included_gmv: "包含交易额 {v} µT",
+    sub_feat_gmv_overage: "超额交易额费率 {pct}",
+    sub_feat_seat_overage: "每增加一个预算 {price}",
     nav_settings: "设置",
     settings_sub: "设置本控制台与代理付款回执的默认项。",
     set_ui_lang: "界面语言",
@@ -1844,20 +1856,40 @@ function subRender(d) {
     ${subStat(t("sub_volume"), "activity", "var(--brand)", esc(gmv), "")}
   </div>`;
 
-  // Plan chooser — one card per available plan; "Choose" starts a Stripe checkout (or applies free).
-  const plans = (d.plans || []).slice().sort((a, b) => (a.monthly_fee_cents || 0) - (b.monthly_fee_cents || 0));
+  // Plan chooser — one pricing card per available plan; "Choose" starts a Stripe checkout (or applies
+  // free). Every line is derived from the plan's own real fields (fee, seat cap, overage rates) — no
+  // fabricated features. The current plan is highlighted and its button is the disabled "Current".
+  // Order by monthly fee, but push custom/unlimited tiers (enterprise, uncapped seats) to the end.
+  const planRank = (p) => (p.code === "enterprise" || (p.max_active_budgets != null && p.max_active_budgets < 0) ? Infinity : (p.monthly_fee_cents || 0));
+  const plans = (d.plans || []).slice().sort((a, b) => planRank(a) - planRank(b));
   const curCode = sub.plan_code || plan.code || "free";
+  const planFeats = (p) => {
+    const li = (txt) => `<li>${icon("check", 15)}<span>${esc(txt)}</span></li>`;
+    const out = [];
+    const seats = p.max_active_budgets;
+    out.push(li(seats != null && seats < 0 ? t("sub_feat_budgets_unlimited") : t("sub_feat_budgets", { n: seats != null ? seats : 0 })));
+    if (Number(p.included_gmv || 0) > 0) out.push(li(t("sub_feat_included_gmv", { v: fmt(String(p.included_gmv)) })));
+    if (p.gmv_overage_bps > 0) out.push(li(t("sub_feat_gmv_overage", { pct: p.gmv_overage_bps / 100 + "%" })));
+    if (p.seat_overage_cents > 0) out.push(li(t("sub_feat_seat_overage", { price: subMoney(p.seat_overage_cents) })));
+    return out.join("");
+  };
   const planCards = plans.map((p) => {
     const cur = p.code === curCode;
-    const price = p.monthly_fee_cents ? `${subMoney(p.monthly_fee_cents)}${t("sub_price_month")}` : t("sub_free");
-    return `<div class="card plan-card${cur ? " plan-card--current" : ""}">
-      <div class="card__body">
-        <div class="plan-card__name">${esc(p.name || p.code)}</div>
-        <div class="plan-card__price">${esc(price)}</div>
-        <button class="btn ${cur ? "btn--secondary" : "btn--primary"} btn--sm" data-sub-choose="${esc(p.code)}"${cur ? " disabled" : ""}>
+    const isEnt = p.code === "enterprise";
+    const priceBig = isEnt ? esc(t("sub_custom")) : (p.monthly_fee_cents ? esc(subMoney(p.monthly_fee_cents)) : esc(t("sub_free")));
+    const per = !isEnt && p.monthly_fee_cents ? `<span class="per">${esc(t("sub_price_month"))}</span>` : "";
+    return `<div class="price-card${cur ? " price-card--current" : ""}">
+      <div class="price-card__head">
+        <span class="price-card__name">${esc(p.name || p.code)}</span>
+        ${cur ? `<span class="badge badge--ok">${esc(t("sub_current"))}</span>` : ""}
+      </div>
+      <div class="price-card__price">${priceBig} ${per}</div>
+      <div class="price-card__cta">
+        <button class="btn ${cur ? "btn--secondary" : "btn--primary"} btn--block" data-sub-choose="${esc(p.code)}"${cur ? " disabled" : ""}>
           ${cur ? esc(t("sub_current")) : esc(t("sub_choose"))}
         </button>
       </div>
+      <ul class="price-feats">${planFeats(p)}</ul>
     </div>`;
   }).join("");
 
@@ -1888,7 +1920,7 @@ function subRender(d) {
     ${cards}
     <section>
       <div class="page-head"><div><h2 style="margin:0;font-size:1.05rem">${esc(t("sub_change_plan"))}</h2></div><div class="row">${actions}</div></div>
-      <div class="plan-grid">${planCards}</div>
+      <div class="price-grid">${planCards}</div>
     </section>
     <section>
       <h2 style="margin:0 0 12px;font-size:1.05rem">${esc(t("sub_invoices_title"))}</h2>
