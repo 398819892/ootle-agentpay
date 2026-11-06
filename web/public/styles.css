@@ -36,10 +36,10 @@
   --info: #2563c9;
   --info-tint: #e8f0fd;
 
-  /* shape + depth — card 12 / input 8 (§2); shadows kept light */
-  --radius: 12px;
-  --radius-sm: 8px;
-  --radius-lg: 16px;
+  /* shape + depth — square cards: no rounded corners on containers/controls */
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-lg: 0px;
   --shadow-xs: 0 1px 2px rgba(23, 32, 51, 0.05);
   --shadow-sm: 0 1px 2px rgba(23, 32, 51, 0.05), 0 1px 3px rgba(23, 32, 51, 0.04);
   --shadow-md: 0 2px 8px rgba(23, 32, 51, 0.06), 0 1px 2px rgba(23, 32, 51, 0.04);
@@ -181,7 +181,7 @@ button {
 :focus-visible {
   outline: none;
   box-shadow: var(--ring);
-  border-radius: 8px;
+  border-radius: 0;
 }
 ::selection {
   background: var(--brand-tint);
@@ -256,7 +256,7 @@ button {
   width: 34px;
   height: 34px;
   flex: none;
-  border-radius: 10px;
+  border-radius: 0;
   display: grid;
   place-content: center;
   background: var(--brand);
@@ -372,14 +372,14 @@ button {
   gap: 2px;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
 }
 .theme-toggle button {
   border: none;
   background: none;
   color: var(--text-faint);
   padding: 5px 9px;
-  border-radius: 7px;
+  border-radius: 0;
   cursor: pointer;
   display: grid;
   place-content: center;
@@ -689,7 +689,7 @@ button {
   flex: none;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: 0;
   display: grid;
   place-content: center;
   color: var(--c, var(--brand));
@@ -1000,7 +1000,7 @@ button {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 0;
   overflow: hidden;
 }
 .merch-row {
@@ -1064,7 +1064,7 @@ button {
   font-size: 13px;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 4px 6px 4px 10px;
   color: var(--text);
   max-width: 100%;
@@ -1084,7 +1084,7 @@ button {
   color: var(--text-faint);
   cursor: pointer;
   padding: 4px;
-  border-radius: 6px;
+  border-radius: 0;
   display: grid;
   place-content: center;
   transition: background 0.14s, color 0.14s;
@@ -1111,7 +1111,7 @@ button {
   font-size: 14px;
   font-weight: 600;
   padding: 10px 16px;
-  border-radius: 10px;
+  border-radius: 0;
   border: 1px solid transparent;
   cursor: pointer;
   transition: background 0.14s, border-color 0.14s, color 0.14s, transform 0.06s, box-shadow 0.14s;
@@ -1403,7 +1403,7 @@ table.ledger {
 .avatar {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: 0;
   flex: none;
   display: grid;
   place-content: center;
@@ -1527,7 +1527,7 @@ table.ledger {
 .empty__icon {
   width: 56px;
   height: 56px;
-  border-radius: 16px;
+  border-radius: 0;
   display: grid;
   place-content: center;
   background: var(--brand-tint);
@@ -1552,7 +1552,7 @@ table.ledger {
   background: linear-gradient(90deg, var(--surface-2), var(--surface-hover), var(--surface-2));
   background-size: 200% 100%;
   animation: shimmer 1.3s linear infinite;
-  border-radius: 8px;
+  border-radius: 0;
 }
 @keyframes shimmer {
   to {
@@ -1691,7 +1691,7 @@ table.ledger {
 .modal__icon {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: 0;
   display: grid;
   place-content: center;
   margin-bottom: 16px;
@@ -2078,7 +2078,7 @@ table.ledger {
   flex: none;
   width: 22px;
   height: 22px;
-  border-radius: 7px;
+  border-radius: 0;
   display: grid;
   place-content: center;
 }
@@ -2222,13 +2222,31 @@ table.ledger {
 }
 
 /* ---- Receipts table (§3.6) ------------------------------------------------ */
+/* Fixed columns + per-cell truncation so long merchant/payer tokens (component
+   ids, full addresses) never overflow and overlap the next column. */
 .ledger--receipts {
-  table-layout: auto;
+  table-layout: fixed;
+  min-width: 820px;
 }
 .ledger--receipts th,
 .ledger--receipts td {
-  width: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+/* column proportions: receipt / merchant / amount / payer / time / action */
+.ledger--receipts th:nth-child(1),
+.ledger--receipts td:nth-child(1) { width: 15%; }
+.ledger--receipts th:nth-child(2),
+.ledger--receipts td:nth-child(2) { width: 23%; }
+.ledger--receipts th:nth-child(3),
+.ledger--receipts td:nth-child(3) { width: 12%; }
+.ledger--receipts th:nth-child(4),
+.ledger--receipts td:nth-child(4) { width: 16%; }
+.ledger--receipts th:nth-child(5),
+.ledger--receipts td:nth-child(5) { width: 18%; }
+.ledger--receipts th:nth-child(6),
+.ledger--receipts td:nth-child(6) { width: 16%; text-align: right; }
 .rcpt-tr {
   cursor: pointer;
 }
@@ -2236,7 +2254,7 @@ table.ledger {
   flex: none;
   width: 40px;
   height: 40px;
-  border-radius: 8px;
+  border-radius: 0;
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--surface-2);
