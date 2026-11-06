@@ -41,6 +41,7 @@ const {
   FINALIZE_TRIES, FINALIZE_DELAY_MS, DASHBOARD_PASSWORD, AUTH_ON, AUTO_CREATE_MERCHANTS, REQUIRE_KEY_SESSIONS,
   SESSION_SECRET, SESSION_TTL_MS, COOKIE_NAME, TRUSTED_PROXY, ALLOWED_ORIGINS, ADMIN_PASSWORD, STEP_UP_ON,
   CONFIRM_TTL_MS, LOGIN_MAX_FAILS, LOGIN_LOCK_MS, ALLOWED_HOSTS, HOST_CHECK_ON, hostnameOf, numEnv,
+  BILLING_URL, BILLING_KEY, BILLING_TENANT, BILLING_TIMEOUT_MS, BILLING_ENABLED,
 } = require("./settings");
 const { httpError, toAmount, big, clampStr, sendJson, readBody, parseCookies } = require("./http_util");
 const { applySecurityHeaders } = require("./security_headers");
@@ -59,6 +60,7 @@ const { createKeySessions } = require("./key_sessions");
 const { createOps } = require("./ops");
 const { createApiV1 } = require("./api_v1");
 const { createReceipts } = require("./receipts");
+const { createBillingHook } = require("./billing_hook");
 
 // ---- locate and load the committed TS client (its compiled dist) -----------------------------
 const CLIENT_DIR = path.resolve(__dirname, "..", "..", "clients", "ts", "dist");
@@ -346,10 +348,16 @@ const api = {
   "POST /api/unfreeze": (body, ctx) => authz.execute("unfreeze", body, ctx),
 };
 
+// ---- billing integration hook (spec §11) — optional, OFF unless configured; never blocks funds ----
+const billing = createBillingHook({
+  enabled: BILLING_ENABLED, baseUrl: BILLING_URL, internalKey: BILLING_KEY, tenantId: BILLING_TENANT,
+  timeoutMs: BILLING_TIMEOUT_MS,
+});
+
 // ---- machine-to-machine integration API (/api/v1/*), API-key authenticated — see api_v1.js ----
 const { V1, handleApiV1 } = createApiV1({
   OPS, authz, apiKeys, store, txlog, audit, nameByAddr, clientIp, serialize, reconcileRecord, dashboardState, chainMessage,
-  issueConfirmToken, stepUpOn: STEP_UP_ON, newInvoiceId, publicDir: PUBLIC_DIR, keySessionInfo, keysWithSessions,
+  issueConfirmToken, stepUpOn: STEP_UP_ON, newInvoiceId, publicDir: PUBLIC_DIR, keySessionInfo, keysWithSessions, billing,
 });
 
 // Last-resort safety net: an unexpected rejection/exception in an async request handler must not
@@ -597,6 +605,7 @@ server.listen(PORT, HOST, () => {
     }`,
   );
   console.log(`  ├─ step-up ${STEP_UP_ON ? "ON — high-risk actions need a fresh confirmation" : "OFF (no password set)"}`);
+  console.log(`  ├─ billing ${BILLING_ENABLED ? `ON → ${BILLING_URL} (tenant ${BILLING_TENANT}; usage metering only, never custody)` : "OFF (no AGENTPAY_BILLING_URL/KEY/TENANT)"}`);
   console.log(`  ├─ frozen  ${store.frozen ? "YES — fund-moving actions are blocked" : "no"}`);
   console.log(`  ├─ audit   ${audit.file}`);
   if (AUTH_ON && !process.env.SESSION_SECRET) {

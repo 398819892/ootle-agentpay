@@ -5,11 +5,31 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { httpError, sendJson, readBody } = require("./http_util");
+const { noopHook } = require("./billing_hook");
 
 function createApiV1({
   OPS, authz, apiKeys, store, txlog, audit, nameByAddr, clientIp, serialize, reconcileRecord, dashboardState, chainMessage,
   issueConfirmToken, stepUpOn: STEP_UP_ON, newInvoiceId, publicDir: PUBLIC_DIR, keySessionInfo, keysWithSessions,
+  billing = noopHook(),
 }) {
+  // The gateway manages ONE on-chain budget per deployment; its component id is stable, so we resolve it
+  // once (lazily) and cache it for usage reporting. Only ever consulted when billing is enabled.
+  let cachedComponent = null;
+  async function billingComponent() {
+    if (cachedComponent) return cachedComponent;
+    try {
+      const st = await dashboardState();
+      cachedComponent = (st.budget && st.budget.component) || null;
+    } catch { /* leave null; reporting is skipped until a component is known */ }
+    return cachedComponent;
+  }
+  /** Fire-and-forget confirmed-usage report (no await on the response path; never throws). */
+  function reportUsageSafe(type, { amount = null, txId = null, occurredAt = null } = {}) {
+    if (!billing.enabled) return;
+    billingComponent()
+      .then((component) => { if (component) return billing.reportUsage({ chainComponent: component, type, amount, txId, occurredAt }); })
+      .catch(() => { /* reporting failures are non-fatal and already logged in the hook */ });
+  }
   // ================================================================================================
   // Machine-to-machine integration API (/api/v1/*) — API-key authenticated.
   //
@@ -248,6 +268,12 @@ function createApiV1({
         const receipt = receiptOf(rec);
         const status =
           rec && rec.status === "confirmed" ? 201 : rec && rec.status === "rejected" ? 402 : 202; // pending/unknown
+        // §11: meter a freshly-confirmed payment (not a replay — billing also dedupes by pay:txId).
+        if (billing.enabled && !replayed && rec && rec.status === "confirmed" && rec.txId) {
+          const amt = rec.event && rec.event.amount != null ? String(rec.event.amount)
+            : rec.params && rec.params.amount != null ? String(rec.params.amount) : null;
+          reportUsageSafe("pay", { amount: amt, txId: rec.txId, occurredAt: rec.updatedAt || rec.createdAt });
+        }
         return sendJson(res, status, { receipt, replayed });
       }
       if (sub === "/payments" && method === "GET") {
@@ -296,8 +322,20 @@ function createApiV1({
       }
       if (sub === "/budgets" && method === "POST") {
         if (denyIfNotAdmin("createBudget")) return;
+        // §11: quota check BEFORE opening a budget. Fail-open — a billing outage (degraded) never blocks.
+        if (billing.enabled) {
+          const q = await billing.checkQuota({ op: "create_budget" });
+          if (q && q.allow === false && !q.degraded) {
+            return sendJson(res, 402, { error: "Your plan's active-budget limit is reached.", code: q.reason || "quota_exceeded", upgradeTo: q.upgradeTo || null });
+          }
+        }
         await serialize(() => executeAsKey("createBudget", body, ctx));
         const st = await dashboardState();
+        // §11: bind the newly-opened budget to this tenant (fire-and-forget).
+        if (billing.enabled && st.budget && st.budget.component) {
+          cachedComponent = st.budget.component;
+          billing.bindBudget({ chainComponent: st.budget.component, label: body.label || null }).catch(() => {});
+        }
         return sendJson(res, 201, { budget: v1Budget(st) });
       }
       if (sub === "/budget/limits" && method === "POST") {
@@ -305,6 +343,7 @@ function createApiV1({
         const r = await serialize(() =>
           executeAsKey("setLimits", { perTxCap: body.perTxCap, dailyCap: body.dailyCap }, ctx),
         );
+        reportUsageSafe("config", { txId: r && r.txId }); // §11: a caps change is a config event
         const st = await dashboardState();
         // 200 once the chain confirmed; 202 when submitted but not yet confirmed (reconciled later).
         return sendJson(res, r && r.pending ? 202 : 200, {
@@ -322,6 +361,7 @@ function createApiV1({
       if (sub === "/merchants" && method === "POST") {
         if (denyIfNotAdmin("addMerchant")) return;
         await serialize(() => executeAsKey("addMerchant", { merchant: body.merchant }, ctx));
+        reportUsageSafe("config"); // §11: whitelist change is a config event
         const st = await dashboardState();
         return sendJson(res, 201, { merchants: (st.budget && st.budget.whitelist) || [] });
       }
@@ -333,6 +373,7 @@ function createApiV1({
         if (denyIfNotAdmin("removeMerchant")) return;
         const merchant = decodeURIComponent(sub.slice("/merchants/".length)).trim();
         const r = await serialize(() => executeAsKey("removeMerchant", { merchant }, ctx));
+        reportUsageSafe("config", { txId: r && r.txId }); // §11: whitelist change is a config event
         const st = await dashboardState();
         return sendJson(res, r && r.pending ? 202 : 200, {
           removed: (r && r.removed) || null,
@@ -393,6 +434,7 @@ function createApiV1({
         if (!before.issued) return sendJson(res, 404, { error: `API key ${JSON.stringify(id)} has no on-chain session to revoke.` });
         if (before.revoked) return sendJson(res, 200, { id, session: before, revoked: true, already: true });
         const r = await serialize(() => executeAsKey("revokeSession", { session }, ctx));
+        reportUsageSafe("revoke", { txId: r && r.txId }); // §11: on-chain session revoke
         return sendJson(res, r && r.pending ? 202 : 200, {
           id,
           session: keySessionInfo(store.budget, id),

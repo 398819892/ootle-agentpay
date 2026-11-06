@@ -79,3 +79,6 @@ docs/Ootle_*.md
 
 # Shared AgentPay config — real deployment values (templates: agentpay.config.example.json is tracked)
 agentpay.config.json
+
+# Proprietary billing/SaaS backend - NOT under the repo's BSD-3-Clause license; keep it out of this (public) repo.
+/billing/

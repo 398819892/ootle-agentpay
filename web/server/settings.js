@@ -181,11 +181,24 @@ const CONFIRM_TTL_MS = numEnv("CONFIRM_TTL_SECONDS", 120, { min: 1 }) * 1000;
 const LOGIN_MAX_FAILS = Number(process.env.LOGIN_MAX_FAILS) || 8;
 const LOGIN_LOCK_MS = (Number(process.env.LOGIN_LOCK_MINUTES) || 10) * 60 * 1000;
 
+// ---- billing integration (spec §11) ----------------------------------------------------------
+// Optional, OFF by default. The gateway reports confirmed usage and binds opened budgets to the
+// SEPARATE billing/SaaS service (its own process, own license) over an internal key. These knobs never
+// touch custody: billing holds no keys and a billing outage never blocks a fund operation (fail-open).
+// Enabled only when the URL, the internal key, and this deployment's tenant id are ALL set (and not
+// explicitly disabled). A single-tenant deployment points AGENTPAY_BILLING_TENANT at its one tenant.
+const BILLING_URL = process.env.AGENTPAY_BILLING_URL || "";
+const BILLING_KEY = process.env.AGENTPAY_BILLING_KEY || "";
+const BILLING_TENANT = process.env.AGENTPAY_BILLING_TENANT || "";
+const BILLING_TIMEOUT_MS = numEnv("AGENTPAY_BILLING_TIMEOUT_MS", 2000, { min: 1, integer: true });
+const BILLING_ENABLED = Boolean(BILLING_URL && BILLING_KEY && BILLING_TENANT) && process.env.AGENTPAY_BILLING_ENABLED !== "false";
+
 module.exports = {
   PORT, HOST, WALLETD_URL, BUDGET_TEMPLATE, OWNER, NETWORK, TOKEN_SYMBOL, PUBLIC_DIR, STATE_FILE,
   FINALIZE_TRIES, FINALIZE_DELAY_MS, DASHBOARD_PASSWORD, AUTH_ON, AUTO_CREATE_MERCHANTS, REQUIRE_KEY_SESSIONS,
   SESSION_SECRET, SESSION_TTL_MS, COOKIE_NAME, COOKIE_SECURE_ENV, TRUSTED_PROXY, ALLOWED_ORIGINS,
   ALLOWED_HOSTS, HOST_CHECK_ON, hostnameOf,
   ADMIN_PASSWORD, STEP_UP_ON, CONFIRM_TTL_MS, LOGIN_MAX_FAILS, LOGIN_LOCK_MS,
+  BILLING_URL, BILLING_KEY, BILLING_TENANT, BILLING_TIMEOUT_MS, BILLING_ENABLED,
   numEnv,
 };
