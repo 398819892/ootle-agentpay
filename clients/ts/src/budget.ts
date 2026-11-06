@@ -19,6 +19,11 @@ export const XTR = "XTR";
 const NATIVE_KEYWORD = "TARI";
 const NATIVE_ALIASES = new Set(["XTR", "TARI"]);
 
+// Short retry budget for READ-ONLY status dry-runs (readInfo/readWindow): a jittery public-testnet
+// indexer should stall a status query for a few seconds, not the full ~6 min a REAL submit tolerates.
+// (6th-round review, batch 2)
+const READ_DRYRUN_RETRY = { tries: 3, delayMs: 2_000 } as const;
+
 /**
  * Whether owner-badge manifests open an explicit proof authorization window.
  *
@@ -75,6 +80,32 @@ function amt(x: AmountInput): string {
 /** Parse an amount to a BigInt (exact, no float rounding). */
 function big(x: AmountInput): bigint {
   return BigInt(amt(x));
+}
+
+const U64_MAX = (1n << 64n) - 1n;
+
+/**
+ * Normalise a `u64` field (e.g. `epochs_per_window`) to a plain decimal-integer string for a manifest
+ * `…u64` literal, rejecting negatives, non-integers, NaN and anything outside the u64 range. Without
+ * this, `Math.floor(epochsPerWindow)` would splice `-5u64` / `NaNu64` / `1e+21u64` and the failure
+ * would only surface deep in the manifest parser. Mirrors `amt()`'s guard and the Python `_check_u64`.
+ * (6th-round review, batch 2)
+ */
+function u64(x: number | bigint | string, field = "value"): string {
+  if (typeof x === "bigint") {
+    if (x < 0n) throw new ChainError(`${field} cannot be negative: ${x}`);
+    if (x > U64_MAX) throw new ChainError(`${field} exceeds the u64 range: ${x}`);
+    return x.toString();
+  }
+  if (typeof x === "string") {
+    const s = x.trim();
+    if (!/^\d+$/.test(s)) throw new ChainError(`invalid ${field} (expected a non-negative integer): ${x}`);
+    if (BigInt(s) > U64_MAX) throw new ChainError(`${field} exceeds the u64 range: ${x}`);
+    return s;
+  }
+  if (!Number.isInteger(x) || x < 0) throw new ChainError(`invalid ${field} (expected a non-negative integer): ${x}`);
+  if (!Number.isSafeInteger(x)) throw new ChainError(`unsafe ${field} (pass large values as a string/bigint): ${x}`);
+  return String(x);
 }
 
 // --- manifest value validation (injection guard, issue #7) ------------------------------------
@@ -376,7 +407,7 @@ export class OnChainBudget {
       '    let mut owner = var!["owner"];\n' +
       `    let funds = owner.withdraw(${this.resourceArg()}, amount!(${amt(fund)}));\n` +
       `    let (comp, owner_badge, agent_badge) = AgentBudget::new(` +
-      `funds, amount!(${amt(perTxCap)}), amount!(${amt(dailyCap)}), ${Math.floor(epochsPerWindow)}u64, [${wl}]);\n` +
+      `funds, amount!(${amt(perTxCap)}), amount!(${amt(dailyCap)}), ${u64(epochsPerWindow, "epochs_per_window")}u64, [${wl}]);\n` +
       "    owner.deposit(owner_badge);\n" +
       "    owner.deposit(agent_badge);\n" +
       "}\n";
@@ -531,7 +562,7 @@ export class OnChainBudget {
    * recurring per-window allowance — there is no on-chain timer (see the template docs).
    */
   async setWindow(epochsPerWindow: number): Promise<void> {
-    await this.ownerCall(`set_window(${Math.floor(epochsPerWindow)}u64)`);
+    await this.ownerCall(`set_window(${u64(epochsPerWindow, "epochs_per_window")}u64)`);
     this.spent = "0";
   }
 
@@ -744,7 +775,9 @@ export class OnChainBudget {
   async readInfo(): Promise<BudgetInfo> {
     if (!this.component) throw new ChainError("budget component is not set");
     const manifest = 'fn main() {\n    let budget = var!["budget"];\n    budget.get_info();\n}\n';
-    const r = await this.client.dryRun(manifest, { budget: this.component });
+    // A status read must not inherit the real-submit retry budget (~6 min): give the read-only dry-run
+    // a short budget so a jittery indexer stalls it for seconds, not minutes. (6th-round review, batch 2)
+    const r = await this.client.dryRun(manifest, { budget: this.component }, undefined, READ_DRYRUN_RETRY);
     const payload = infoEventPayload(r);
     if (!payload) throw new ChainError("get_info dry-run did not expose an info event");
     return parseInfoPayload(payload);

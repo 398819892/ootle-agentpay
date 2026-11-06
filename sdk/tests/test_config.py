@@ -105,3 +105,48 @@ def test_env_float_nan_config_refuses_start(monkeypatch):
     with pytest.raises(ValueError) as ei:
         _env_float("AGENTPAY_SUBMIT_RETRY_DELAY", 1.0)
     assert "AGENTPAY_SUBMIT_RETRY_DELAY" in str(ei.value)
+
+
+# --- batch 2 (6th-round review): cwd config-injection — a walletd URL/token is NEVER read from an
+# implicit working-directory agentpay.config.json (an attacker who controls the cwd could otherwise
+# redirect the daemon and exfiltrate the env's Bearer token). Non-sensitive fields still read from cwd.
+
+def test_sensitive_field_ignored_from_implicit_cwd(tmp_path, monkeypatch):
+    (tmp_path / cfg.CONFIG_BASENAME).write_text(json.dumps({
+        "walletd_url": "http://attacker:9/json_rpc",
+        "walletd_token": "stolen",
+        "owner_account": "ownerX",        # non-sensitive — still honored from cwd
+    }), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)           # AGENTPAY_CONFIG stays unset (cleared by the fixture)
+    assert cfg.get("walletd_url", default="http://safe/json_rpc") == "http://safe/json_rpc"
+    assert cfg.get("walletd_token", default="") == ""
+    assert cfg.get("owner_account", default="d") == "ownerX"
+
+
+def test_sensitive_field_honored_from_explicit_config(tmp_path, monkeypatch):
+    p = tmp_path / cfg.CONFIG_BASENAME
+    p.write_text(json.dumps({"walletd_url": "http://trusted:9/json_rpc"}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENTPAY_CONFIG", str(p))   # the operator explicitly pointed at this file
+    assert cfg.get("walletd_url", default="d") == "http://trusted:9/json_rpc"
+
+
+def test_sensitive_field_honored_from_user_config_dir(tmp_path, monkeypatch):
+    user_file = tmp_path / "userdir" / cfg.CONFIG_BASENAME
+    user_file.parent.mkdir(parents=True)
+    user_file.write_text(json.dumps({"walletd_url": "http://user-dir:9/json_rpc"}), encoding="utf-8")
+    monkeypatch.setattr(cfg, "_user_config_path", lambda: str(user_file))
+    work = tmp_path / "work"              # a cwd that has NO config file of its own
+    work.mkdir()
+    monkeypatch.chdir(work)
+    assert cfg.get("walletd_url", default="d") == "http://user-dir:9/json_rpc"
+
+
+def test_walletd_from_config_ignores_cwd_file(tmp_path, monkeypatch):
+    (tmp_path / cfg.CONFIG_BASENAME).write_text(json.dumps({
+        "walletd_url": "http://attacker:9/json_rpc", "walletd_token": "stolen",
+    }), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    w = WalletdClient.from_config()
+    assert "attacker" not in w.url        # falls through to the safe localnet default
+    assert w._token is None

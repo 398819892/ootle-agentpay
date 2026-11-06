@@ -16,14 +16,16 @@ directory. See examples/demo_devnet.py for an end-to-end run against a local swa
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from .errors import ChainError, PolicyViolation
 from .invoice import encode_memo
@@ -140,6 +142,33 @@ def _check_amount(x: Any) -> str:
             raise ChainError(f"invalid amount (expected a non-negative integer): {x!r}")
         return s
     raise ChainError(f"invalid amount type: {type(x).__name__}")
+
+
+_U64_MAX = (1 << 64) - 1
+
+
+def _check_u64(x: Any, field: str = "value") -> str:
+    """Normalise a ``u64`` field (e.g. ``epochs_per_window``) to a decimal-integer string for a
+    manifest ``…u64`` literal, rejecting negatives, non-integers, floats/NaN and anything outside the
+    u64 range. Without this, ``int(epochs_per_window)`` would splice ``-5u64`` / ``1000000...u64`` and
+    the failure would only surface deep in the manifest parser; a bool or a huge value could also ride
+    through. Mirrors ``_check_amount``'s guard for the ``amount!(…)`` fields. (6th-round review, batch 2)"""
+    if isinstance(x, bool):                       # bool is an int subclass — reject explicitly
+        raise ChainError(f"invalid {field}: {x!r}")
+    if isinstance(x, int):
+        if x < 0:
+            raise ChainError(f"{field} cannot be negative: {x}")
+        if x > _U64_MAX:
+            raise ChainError(f"{field} exceeds the u64 range: {x}")
+        return str(x)
+    if isinstance(x, str):
+        s = x.strip()
+        if not re.fullmatch(r"\d+", s):
+            raise ChainError(f"invalid {field} (expected a non-negative integer): {x!r}")
+        if int(s) > _U64_MAX:
+            raise ChainError(f"{field} exceeds the u64 range: {x!r}")
+        return s
+    raise ChainError(f"invalid {field} type: {type(x).__name__}")
 
 # Transient public-testnet (esmeralda) indexer errors worth retrying a manifest submit through.
 # A local swarm never produces these, so retry logic below stays dormant there.
@@ -349,7 +378,10 @@ class WalletdClient:
         r = self._rpc("accounts.create", {"account_name": name, "custom_access_rules": None,
                                            "max_fee": None, "is_default": False, "key_id": None})
         if "error" in r:
-            raise ChainError(r["error"]["message"])
+            # Read the message through `_err_message`, not `r["error"]["message"]`: walletd can return a
+            # bare-string `error` (not a `{code,message}` object), on which the blind index raises
+            # TypeError — the project's own N-5 rule. (6th-round review, batch 2)
+            raise ChainError(_err_message(r["error"]) or "accounts.create failed")
         return r["result"]["account"]["component_address"]
 
     def fund(self, name: str, amount: int = 1_000_000, max_fee: int = 50_000) -> None:
@@ -370,7 +402,9 @@ class WalletdClient:
         """Fetch a substate (component / resource / vault) by its address. Read-only."""
         r = self._rpc("substates.get", {"substate_id": substate_id})
         if "error" in r:
-            raise ChainError(r["error"].get("message", "substates.get failed"))
+            # `_err_message`, not `r["error"].get(...)`: a bare-string `error` has no `.get` and would
+            # raise AttributeError on a read, same N-5 shape as `create_account`. (6th-round review, batch 2)
+            raise ChainError(_err_message(r["error"]) or "substates.get failed")
         return r["result"]
 
     # -- transactions ---------------------------------------------------------------
@@ -765,6 +799,25 @@ class LedgerEntry:
     tx_kind: str  # "pay" | "pay_via_escrow"
 
 
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _synchronized(method: _F) -> _F:
+    """Serialize a method on the instance's ``self._lock`` (a re-entrant lock).
+
+    The chain is the authority on caps/whitelist, so a race here can never double-spend — but two
+    threads paying / reconfiguring the SAME ``OnChainBudget`` instance can still corrupt its local
+    mirror (``spent``, ``ledger``, the account-address cache, the whitelist/caps snapshot) and make the
+    friendly client-side pre-check lie. We take a re-entrant lock so nested calls
+    (``pay`` -> ``_refresh_policy_from_chain`` -> ``_account_var``) don't deadlock. Distinct instances
+    hold distinct locks, so budgets stay independent. (6th-round review, batch 2 — concurrency)"""
+    @functools.wraps(method)
+    def wrapper(self: "OnChainBudget", *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper  # type: ignore[return-value]
+
+
 @dataclass
 class OnChainBudget:
     """A budget instance backed by an on-chain AgentBudget component.
@@ -814,6 +867,9 @@ class OnChainBudget:
         self._proof_windows_guessed = not _proof_windows_env_set()
         # Cache of account NAME -> component address resolutions (see `_account_var`).
         self._account_addr_cache: dict[str, str] = {}
+        # Serializes pay / owner mutations / policy refresh on THIS instance so concurrent callers do
+        # not corrupt the local mirror (see `_synchronized`). Re-entrant: `pay` nests locked helpers.
+        self._lock = threading.RLock()
 
     @classmethod
     def from_config(cls, client: "WalletdClient", *, budget_template: str | None = None,
@@ -843,6 +899,7 @@ class OnChainBudget:
         splice (same injection guard as every other spliced value)."""
         return _NATIVE_KEYWORD if self.resource in _NATIVE_ALIASES else f'address!("{_check_resource(self.resource)}")'
 
+    @_synchronized
     def _account_var(self, account: str) -> str:
         """Resolve an account reference for a manifest ``var!`` binding. A ``component_…`` address is
         passed through unchanged; a human account NAME (such as the ``"default"`` that ``owner_account``
@@ -870,7 +927,7 @@ class OnChainBudget:
             '    let mut owner = var!["owner"];\n'
             f'    let funds = owner.withdraw({self._resource_arg()}, amount!({_check_amount(fund)}));\n'
             f'    let (comp, owner_badge, agent_badge) = AgentBudget::new('
-            f'funds, amount!({_check_amount(per_tx_cap)}), amount!({_check_amount(daily_cap)}), {int(epochs_per_window)}u64, [{wl}]);\n'
+            f'funds, amount!({_check_amount(per_tx_cap)}), amount!({_check_amount(daily_cap)}), {_check_u64(epochs_per_window, "epochs_per_window")}u64, [{wl}]);\n'
             '    owner.deposit(owner_badge);\n'
             '    owner.deposit(agent_badge);\n'
             '}\n'
@@ -954,10 +1011,12 @@ class OnChainBudget:
             state["daily_cap_worst_case"] = daily_cap * 2
         return state
 
+    @_synchronized
     def revoke(self) -> None:
         self._owner_call("revoke()")
         self.revoked = True
 
+    @_synchronized
     def withdraw(self, amount: int) -> None:
         manifest = (
             'fn main() {\n'
@@ -971,11 +1030,13 @@ class OnChainBudget:
         )
         self._run_owner(manifest, {"owner": self.owner_account, "budget": self.component})
 
+    @_synchronized
     def add_merchant(self, merchant: str) -> None:
         self._owner_call(f'add_merchant(address!("{_check_component(merchant)}"))')
         if merchant not in self.whitelist:
             self.whitelist.append(merchant)
 
+    @_synchronized
     def remove_merchant(self, merchant: str) -> None:
         """Owner removes `merchant` from the on-chain whitelist (template ``remove_merchant``,
         owner-badge gated). The address stops being payable once the tx finalizes; the local
@@ -983,6 +1044,7 @@ class OnChainBudget:
         self._owner_call(f'remove_merchant(address!("{_check_component(merchant)}"))')
         self.whitelist = [m for m in self.whitelist if m != merchant]
 
+    @_synchronized
     def set_limits(self, per_tx_cap: int, daily_cap: int) -> None:
         """Owner changes both caps in one on-chain call (template ``set_limits``, owner-badge gated).
         The new per-tx cap binds on the very next ``pay``; the daily cap applies to the current
@@ -992,6 +1054,7 @@ class OnChainBudget:
         self.per_tx_cap = int(p)
         self.daily_cap = int(d)
 
+    @_synchronized
     def issue_agent_badge(self, session: str, *, to_account: str | None = None) -> str:
         """Owner mints a new agent session badge labelled `session` and deposits it into `to_account`
         (defaults to this budget's agent account). The new badge can `pay` within the same on-chain
@@ -1018,6 +1081,7 @@ class OnChainBudget:
                                                       # that badge was burned (its NFT still exists)
         return session
 
+    @_synchronized
     def revoke_session(self, session: str) -> None:
         """Owner revokes a single agent session badge. Other sessions keep working; use `revoke()`
         for the global kill switch."""
@@ -1025,12 +1089,14 @@ class OnChainBudget:
         if session not in self.revoked_sessions:
             self.revoked_sessions.append(session)
 
+    @_synchronized
     def set_window(self, epochs_per_window: int) -> None:
         """Owner reconfigures the rolling allowance window (and restarts it now). The daily cap is the
         recurring per-window allowance — see the module/template docs on there being no on-chain timer."""
-        self._owner_call(f"set_window({int(epochs_per_window)}u64)")
+        self._owner_call(f'set_window({_check_u64(epochs_per_window, "epochs_per_window")}u64)')
         self.spent = 0
 
+    @_synchronized
     def top_up(self, amount: int, *, from_account: str | None = None) -> None:
         """Add `amount` to the budget's vault, funded from `from_account` (defaults to the owner).
         `top_up` is open on the template, so a keeper account can replenish the budget on its own
@@ -1108,6 +1174,7 @@ class OnChainBudget:
             '}\n'
         )
 
+    @_synchronized
     def pay(self, merchant: str, amount: int, *, memo: str = "", session: str | None = None) -> dict:
         """The agent pays a whitelisted merchant. The client-side checks below are only an early,
         friendly error — the chain enforces the real limits regardless of what this client does.
@@ -1172,6 +1239,7 @@ class OnChainBudget:
         memo = encode_memo(invoice_id, agent_tag)["Message"]
         return self.pay(merchant, amount, memo=memo, session=session)
 
+    @_synchronized
     def _refresh_policy_from_chain(self) -> bool:
         """Best-effort: pull the fields the pre-check tests (caps, whitelist, revoked, spend-in-window)
         from the AUTHORITATIVE on-chain state, overwriting the display copy this client was attached

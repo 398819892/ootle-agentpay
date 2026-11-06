@@ -58,6 +58,14 @@ _REPO_DEFAULTS = os.path.join(os.path.abspath(os.path.join(_HERE, "..", "..", ".
 
 CONFIG_BASENAME = "agentpay.config.json"
 
+# Fields that point the daemon at a wallet / carry its bearer token. An *implicit* working-directory
+# ``agentpay.config.json`` is attacker-controllable (you run a tool from a directory someone else
+# populated): if it could set ``walletd_url``, the Bearer token from your environment would be sent to
+# that URL. So these are honored ONLY from an explicit ``AGENTPAY_CONFIG`` path or the per-user config
+# directory, never from a cwd file. Non-sensitive fields (template / account / network) still read from
+# cwd for dev convenience. (6th-round review, batch 2 — cwd config-injection)
+_SENSITIVE_FIELDS = frozenset({"walletd_url", "walletd_token"})
+
 
 def _user_config_path() -> str:
     """OS-conventional location of the per-user ``agentpay.config.json`` (mirrors claude_install)."""
@@ -103,6 +111,25 @@ def load_file() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _from_implicit_cwd() -> bool:
+    """True when the config file in effect is the IMPLICIT working-directory file (no explicit
+    ``AGENTPAY_CONFIG``). Such a file is untrusted, so sensitive fields are not read from it."""
+    if os.environ.get("AGENTPAY_CONFIG"):
+        return False
+    path = config_path()
+    if not path:
+        return False
+    return os.path.abspath(path) == os.path.abspath(os.path.join(os.getcwd(), CONFIG_BASENAME))
+
+
+def _file_value(key: str):
+    """The config-file value for ``key``, except that a sensitive field is ignored when it would come
+    from an implicit working-directory file (see ``_SENSITIVE_FIELDS``)."""
+    if key in _SENSITIVE_FIELDS and _from_implicit_cwd():
+        return None
+    return load_file().get(key)
+
+
 def _defaults_templates() -> dict:
     try:
         with open(_REPO_DEFAULTS, encoding="utf-8") as f:
@@ -138,7 +165,7 @@ def get(key: str, default: str = "", *, explicit: str | None = None, template_na
     env_val = _env(key)
     if env_val is not None:
         return env_val
-    file_val = load_file().get(key)
+    file_val = _file_value(key)
     if file_val not in (None, ""):
         return str(file_val)
     if template_name:

@@ -93,7 +93,10 @@ export declare class WalletdClient {
         limit?: number;
     }): Promise<any[]>;
     private submitManifest;
-    dryRun(manifest: string, variables: Record<string, string>, maxFee?: number): Promise<RpcResponse>;
+    dryRun(manifest: string, variables: Record<string, string>, maxFee?: number, retry?: {
+        tries?: number;
+        delayMs?: number;
+    }): Promise<RpcResponse>;
     /**
      * Submit a manifest for real (no waiting) and return its transaction id. Also records it as
      * `lastTxId`. Splitting submit from the finalize-wait lets a caller persist the tx id to a

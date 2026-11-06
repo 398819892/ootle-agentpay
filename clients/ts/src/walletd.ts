@@ -331,6 +331,7 @@ export class WalletdClient {
   // -- transactions ---------------------------------------------------------------
   private async submitManifest(
     manifest: string, variables: Record<string, string>, maxFee: number, dryRun: boolean,
+    retry?: { tries?: number; delayMs?: number },
   ): Promise<RpcResponse> {
     const params = { manifest, variables, max_fee: maxFee, dry_run: dryRun };
     // A transient error (connection / 30s indexer timeout seen on esmeralda) is ambiguous for a
@@ -341,12 +342,18 @@ export class WalletdClient {
     // caller to reconcile by tx id rather than blindly resubmit. A template/policy rejection is
     // returned immediately either way. A local swarm never produces transient errors.
     if (dryRun) {
+      // A dry run changes no state, so retrying a transient indexer error is safe. A REAL submit uses
+      // the full `SUBMIT_RETRIES` budget (~6 min) because losing a write is costly; a READ-ONLY status
+      // dry-run (readInfo/readWindow) passes a short budget so a jittery indexer stalls a status query
+      // for seconds, not minutes. (6th-round review, batch 2 — read-only dry-run retry)
+      const tries = retry?.tries ?? SUBMIT_RETRIES;
+      const delayMs = retry?.delayMs ?? SUBMIT_RETRY_DELAY_MS;
       let last: RpcResponse = {};
-      for (let i = 0; i < SUBMIT_RETRIES; i++) {
+      for (let i = 0; i < tries; i++) {
         last = await this.rpc("transactions.submit_manifest", params);
         const err = last.error;
         if (!err || !isTransient(err.message ?? "")) return last;
-        await sleep(SUBMIT_RETRY_DELAY_MS);
+        if (i < tries - 1) await sleep(delayMs);
       }
       return last;
     }
@@ -396,8 +403,9 @@ export class WalletdClient {
 
   async dryRun(
     manifest: string, variables: Record<string, string>, maxFee = 200_000,
+    retry?: { tries?: number; delayMs?: number },
   ): Promise<RpcResponse> {
-    return this.submitManifest(manifest, variables, maxFee, true);
+    return this.submitManifest(manifest, variables, maxFee, true, retry);
   }
 
   /**

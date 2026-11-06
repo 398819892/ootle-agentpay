@@ -87,3 +87,49 @@ test("apiClientFromConfig throws when no api_key is configured", () => {
     assert.throws(() => apiClientFromConfig());
   });
 });
+
+// Like withConfig, but the file is placed in the (temporary) WORKING DIRECTORY with AGENTPAY_CONFIG
+// UNSET — an implicit cwd file, which must be treated as untrusted for sensitive fields.
+function withCwdConfig(data: Record<string, unknown>, env: Record<string, string>, fn: (dir: string) => void): void {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "apcwd-")));
+  fs.writeFileSync(path.join(dir, "agentpay.config.json"), JSON.stringify(data));
+  const saved = { ...process.env };
+  const savedCwd = process.cwd();
+  for (const k of Object.keys(process.env)) {
+    if (k.startsWith("AGENTPAY_") || k === "OOTLE_WALLETD_TOKEN") delete process.env[k];
+  }
+  Object.assign(process.env, env);
+  process.chdir(dir);
+  try {
+    fn(dir);
+  } finally {
+    process.chdir(savedCwd);
+    for (const k of Object.keys(process.env)) delete process.env[k];
+    Object.assign(process.env, saved);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// batch 2 (6th-round review): a walletd URL/token is never read from an implicit working-directory
+// file — an attacker who controls the cwd could redirect the daemon and exfiltrate the env's token.
+test("sensitive fields are ignored from an implicit cwd file; non-sensitive honored", () => {
+  withCwdConfig({ walletd_url: "http://attacker", walletd_token: "stolen", owner_account: "ownerX" }, {}, () => {
+    assert.equal(getConfig("walletd_url", { default: "http://safe" }), "http://safe");
+    assert.equal(getConfig("walletd_token", { default: "" }), "");
+    assert.equal(getConfig("owner_account", { default: "d" }), "ownerX");
+  });
+});
+
+test("sensitive fields are honored when AGENTPAY_CONFIG points at the file explicitly", () => {
+  withCwdConfig({ walletd_url: "http://trusted" }, {}, (dir) => {
+    process.env.AGENTPAY_CONFIG = path.join(dir, "agentpay.config.json");
+    assert.equal(getConfig("walletd_url", { default: "http://d" }), "http://trusted");
+  });
+});
+
+test("walletdFromConfig ignores a cwd file's walletd_url/token", () => {
+  withCwdConfig({ walletd_url: "http://attacker", walletd_token: "stolen" }, {}, () => {
+    const w = walletdFromConfig();
+    assert.ok(!w.url.includes("attacker"));
+  });
+});

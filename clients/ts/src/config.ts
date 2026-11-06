@@ -41,6 +41,13 @@ const ENV_ALIASES: Partial<Record<ConfigKey, string[]>> = { walletd_token: ["OOT
 
 const CONFIG_BASENAME = "agentpay.config.json";
 
+// Fields that point the daemon at a wallet / carry its bearer token. An *implicit* working-directory
+// `agentpay.config.json` is attacker-controllable: if it could set `walletd_url`, the Bearer token from
+// the environment would be sent to that URL. So these are honored ONLY from an explicit AGENTPAY_CONFIG
+// path or the per-user config directory, never a cwd file. Keep in lock-step with config.py
+// `_SENSITIVE_FIELDS` / config.js `SENSITIVE_FIELDS`. (6th-round review, batch 2)
+const SENSITIVE_FIELDS = new Set<ConfigKey>(["walletd_url", "walletd_token"]);
+
 function env(): Record<string, string | undefined> {
   return (typeof process !== "undefined" && process.env) || {};
 }
@@ -96,6 +103,25 @@ export function loadConfig(): Record<string, unknown> {
   }
 }
 
+/** True when the config file in effect is the IMPLICIT working-directory file (no explicit
+ * AGENTPAY_CONFIG). Such a file is untrusted, so sensitive fields are not read from it. */
+function fromImplicitCwd(): boolean {
+  const mods = nodeMods();
+  if (!mods) return false;
+  if (env().AGENTPAY_CONFIG) return false;
+  const p = configPath();
+  if (!p) return false;
+  const { path } = mods;
+  return path.resolve(p) === path.resolve(path.join(process.cwd(), CONFIG_BASENAME));
+}
+
+/** The config-file value for `key`, except a sensitive field is ignored when it would come from an
+ * implicit working-directory file (see SENSITIVE_FIELDS). */
+function fileValue(key: ConfigKey): unknown {
+  if (SENSITIVE_FIELDS.has(key) && fromImplicitCwd()) return undefined;
+  return loadConfig()[key];
+}
+
 function defaultsTemplates(): Record<string, string> {
   const mods = nodeMods();
   if (!mods) return {};
@@ -130,7 +156,7 @@ export function getConfig(key: ConfigKey, opts: GetOptions = {}): string {
   if (opts.explicit !== undefined && opts.explicit !== null && opts.explicit !== "") return String(opts.explicit);
   const e = envValue(key);
   if (e) return e;
-  const file = loadConfig()[key];
+  const file = fileValue(key);
   if (file !== undefined && file !== null && file !== "") return String(file);
   if (opts.templateName) {
     const tmpl = defaultsTemplates()[opts.templateName];

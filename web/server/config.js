@@ -43,6 +43,14 @@ const ENV_ALIASES = { walletd_token: ["OOTLE_WALLETD_TOKEN"] };
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const CONFIG_BASENAME = "agentpay.config.json";
 
+// Fields that point the daemon at a wallet / carry its bearer token. An *implicit* working-directory
+// `agentpay.config.json` is attacker-controllable (you run a tool from a directory someone else
+// populated): if it could set `walletd_url`, the Bearer token from your environment would be sent to
+// that URL. So these are honored ONLY from an explicit `AGENTPAY_CONFIG` path or the per-user config
+// directory, never from a cwd file. Non-sensitive fields still read from cwd for dev convenience.
+// Keep in lock-step with agentpay/config.py `_SENSITIVE_FIELDS`. (6th-round review, batch 2)
+const SENSITIVE_FIELDS = new Set(["walletd_url", "walletd_token"]);
+
 function userConfigPath() {
   if (process.platform === "win32") {
     const base = process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming");
@@ -75,6 +83,22 @@ function loadFile() {
   }
 }
 
+/** True when the config file in effect is the IMPLICIT working-directory file (no explicit
+ * AGENTPAY_CONFIG). Such a file is untrusted, so sensitive fields are not read from it. */
+function fromImplicitCwd() {
+  if (process.env.AGENTPAY_CONFIG) return false;
+  const p = configPath();
+  if (!p) return false;
+  return path.resolve(p) === path.resolve(path.join(process.cwd(), CONFIG_BASENAME));
+}
+
+/** The config-file value for `key`, except a sensitive field is ignored when it would come from an
+ * implicit working-directory file (see SENSITIVE_FIELDS). */
+function fileValue(key) {
+  if (SENSITIVE_FIELDS.has(key) && fromImplicitCwd()) return undefined;
+  return loadFile()[key];
+}
+
 function defaultsTemplates() {
   try {
     return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "defaults.json"), "utf8")).templates || {};
@@ -97,7 +121,7 @@ function get(key, { default: dflt = "", explicit = undefined, templateName = und
   if (explicit !== undefined && explicit !== null && explicit !== "") return String(explicit);
   const env = envValue(key);
   if (env) return env;
-  const file = loadFile()[key];
+  const file = fileValue(key);
   if (file !== undefined && file !== null && file !== "") return String(file);
   if (templateName) {
     const tmpl = defaultsTemplates()[templateName];
