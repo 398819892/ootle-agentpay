@@ -1451,6 +1451,29 @@ table.ledger {
 }
 
 /* ---- empty state ---------------------------------------------------------- */
+/* Subscription view — plan chooser cards (billing/§11, merged into the dashboard). */
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+.plan-card .card__body {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.plan-card--current {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 1px var(--brand) inset;
+}
+.plan-card__name {
+  font-weight: 600;
+}
+.plan-card__price {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
 .empty {
   text-align: center;
   padding: 56px 24px;

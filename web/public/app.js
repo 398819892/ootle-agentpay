@@ -143,6 +143,33 @@ const I18N = {
     receipt_from: "Payer",
     receipt_at: "Time",
     receipts_load_failed: "Could not load receipts",
+    nav_subscription: "Subscription",
+    sub_sub: "Your AgentPay plan, usage this period, and invoices. Billing meters activity only — it never holds keys or moves funds.",
+    sub_unconfigured_title: "Billing is not set up",
+    sub_unconfigured_body: "This deployment has no billing backend configured. Set AGENTPAY_BILLING_URL, AGENTPAY_BILLING_KEY and AGENTPAY_BILLING_TENANT to enable subscriptions.",
+    sub_unavailable_title: "Billing is temporarily unavailable",
+    sub_unavailable_body: "Could not reach the billing service. Your on-chain budget and payments are unaffected — only this subscription view is offline.",
+    sub_plan: "Current plan",
+    sub_status: "Status",
+    sub_free: "Free",
+    sub_price_month: "/mo",
+    sub_renews: "Renews",
+    sub_seats: "Active budgets",
+    sub_usage_title: "This period",
+    sub_payments: "Payments",
+    sub_volume: "Volume (µT)",
+    sub_dues: "Amount due",
+    sub_invoices_title: "Invoices",
+    sub_invoices_empty: "No invoices yet.",
+    sub_inv_period: "Period",
+    sub_inv_amount: "Amount",
+    sub_inv_status: "Status",
+    sub_change_plan: "Change plan",
+    sub_manage_billing: "Manage billing",
+    sub_choose: "Choose",
+    sub_current: "Current",
+    sub_redirecting: "Opening billing…",
+    sub_action_failed: "Could not start billing",
     nav_settings: "Settings",
     settings_sub: "Defaults for this dashboard and the agent's payment receipts.",
     set_ui_lang: "Interface language",
@@ -539,6 +566,33 @@ const I18N = {
     receipt_from: "付款方",
     receipt_at: "时间",
     receipts_load_failed: "加载回执失败",
+    nav_subscription: "订阅",
+    sub_sub: "你的 AgentPay 套餐、本周期用量与账单。计费只做用量统计 —— 从不持有密钥,也不动用资金。",
+    sub_unconfigured_title: "尚未配置计费",
+    sub_unconfigured_body: "本部署未配置计费后端。设置 AGENTPAY_BILLING_URL、AGENTPAY_BILLING_KEY 和 AGENTPAY_BILLING_TENANT 即可启用订阅。",
+    sub_unavailable_title: "计费暂时不可用",
+    sub_unavailable_body: "无法连接计费服务。你的链上预算与支付不受影响 —— 只是订阅视图暂时离线。",
+    sub_plan: "当前套餐",
+    sub_status: "状态",
+    sub_free: "免费",
+    sub_price_month: "/月",
+    sub_renews: "续费日",
+    sub_seats: "活跃预算",
+    sub_usage_title: "本周期",
+    sub_payments: "支付笔数",
+    sub_volume: "金额(µT)",
+    sub_dues: "应付金额",
+    sub_invoices_title: "账单",
+    sub_invoices_empty: "暂无账单。",
+    sub_inv_period: "周期",
+    sub_inv_amount: "金额",
+    sub_inv_status: "状态",
+    sub_change_plan: "更换套餐",
+    sub_manage_billing: "管理账单",
+    sub_choose: "选择",
+    sub_current: "当前",
+    sub_redirecting: "正在打开计费…",
+    sub_action_failed: "无法开始计费",
     nav_settings: "设置",
     settings_sub: "设置本控制台与代理付款回执的默认项。",
     set_ui_lang: "界面语言",
@@ -1250,6 +1304,7 @@ const NAV = [
   { id: "merchants", key: "nav_merchants", icon: "store" },
   { id: "connect", key: "nav_connect", icon: "plug" },
   { id: "receipts", key: "nav_receipts", icon: "receipt" },
+  { id: "subscription", key: "nav_subscription", icon: "wallet" },
   { id: "settings", key: "nav_settings", icon: "settings" },
 ];
 
@@ -1442,6 +1497,152 @@ async function wireReceipts() {
   } catch (e) {
     box.removeAttribute("aria-busy");
     box.innerHTML = `<div class="banner">${icon("alert", 20)}<div class="banner__text"><b>${esc(t("receipts_load_failed"))}</b>${esc(e.message || "")}</div></div>`;
+  }
+}
+
+/* ---- views: SUBSCRIPTION --------------------------------------------------- */
+// This deployment's own AgentPay subscription, merged into the dashboard. The data comes from the
+// SEPARATE billing service via the server-side proxy (/api/subscription) — billing meters usage only
+// and never touches keys or funds. Fetched lazily in wireSubscription, like receipts.
+function viewSubscription() {
+  return (
+    pageHead(t("nav_subscription"), t("sub_sub")) +
+    `<div id="sub-root" aria-busy="true"><div class="muted" style="padding:8px 2px">…</div></div>`
+  );
+}
+
+function subMoney(cents) {
+  const n = Number(cents || 0) / 100;
+  return "$" + n.toFixed(2);
+}
+
+function subStatusBadge(status) {
+  const map = { active: "ok", trialing: "ok", open: "warn", past_due: "danger", canceled: "danger", unpaid: "danger", suspended: "danger", invoiced: "ok", closed: "ok" };
+  const mod = map[status];
+  return `<span class="badge${mod ? " badge--" + mod : " badge--muted"}">${esc(status || "—")}</span>`;
+}
+
+function subStat(label, icn, color, value, hint) {
+  return `<div class="stat">
+    <div class="stat__top">
+      <span class="stat__icon" style="--c:${color}">${icon(icn, 17)}</span>
+      <div class="stat__label">${esc(label)}</div>
+    </div>
+    <div class="stat__value">${value}</div>
+    <div class="stat__hint">${hint || ""}</div>
+  </div>`;
+}
+
+function subRender(d) {
+  const plan = d.plan || {};
+  const sub = d.subscription || {};
+  const u = d.usage_summary || {};
+  const planName = plan.name || (plan.code === "free" ? t("sub_free") : plan.code || t("sub_free"));
+  const fee = plan.monthly_fee_cents ? `${subMoney(plan.monthly_fee_cents)}${t("sub_price_month")}` : t("sub_free");
+  const maxSeats = u.maxActiveBudgets != null ? (u.maxActiveBudgets < 0 ? "∞" : u.maxActiveBudgets) : "—";
+  const gmv = u.gmv != null ? fmt(String(u.gmv)) : "0";
+  const renews = sub.current_period_end ? new Date(sub.current_period_end) : null;
+  const renewsStr = renews && !isNaN(renews) ? renews.toLocaleDateString() : "";
+
+  const cards = `<div class="grid grid--stats">
+    ${subStat(t("sub_plan"), "wallet", "var(--brand)", `${esc(planName)} <span class="unit">${esc(fee)}</span>`, "")}
+    ${subStat(t("sub_status"), "shield", "var(--success)", subStatusBadge(sub.status || "active"), renewsStr ? esc(`${t("sub_renews")} ${renewsStr}`) : "")}
+    ${subStat(t("sub_seats"), "grid", "var(--brand)", `${esc(String(u.activeCount != null ? u.activeCount : 0))} <span class="unit">/ ${esc(String(maxSeats))}</span>`, "")}
+    ${subStat(t("sub_volume"), "activity", "var(--brand)", esc(gmv), "")}
+  </div>`;
+
+  // Plan chooser — one card per available plan; "Choose" starts a Stripe checkout (or applies free).
+  const plans = (d.plans || []).slice().sort((a, b) => (a.monthly_fee_cents || 0) - (b.monthly_fee_cents || 0));
+  const curCode = sub.plan_code || plan.code || "free";
+  const planCards = plans.map((p) => {
+    const cur = p.code === curCode;
+    const price = p.monthly_fee_cents ? `${subMoney(p.monthly_fee_cents)}${t("sub_price_month")}` : t("sub_free");
+    return `<div class="card plan-card${cur ? " plan-card--current" : ""}">
+      <div class="card__body">
+        <div class="plan-card__name">${esc(p.name || p.code)}</div>
+        <div class="plan-card__price">${esc(price)}</div>
+        <button class="btn ${cur ? "btn--secondary" : "btn--primary"} btn--sm" data-sub-choose="${esc(p.code)}"${cur ? " disabled" : ""}>
+          ${cur ? esc(t("sub_current")) : esc(t("sub_choose"))}
+        </button>
+      </div>
+    </div>`;
+  }).join("");
+
+  // Invoices (immutable period snapshots from settlement), newest first.
+  const invoices = (d.invoices || []).slice().reverse();
+  const invRows = invoices.map((p) => {
+    const start = p.period_start ? new Date(p.period_start) : null;
+    const end = p.period_end ? new Date(p.period_end) : null;
+    const period = start && !isNaN(start)
+      ? `${start.toLocaleDateString()}${end && !isNaN(end) ? " – " + end.toLocaleDateString() : ""}`
+      : esc(p.period_start || "—");
+    return `<tr>
+      <td>${esc(period)}</td>
+      <td style="text-align:right">${subMoney(p.total_cents)}</td>
+      <td>${subStatusBadge(p.status)}</td>
+    </tr>`;
+  }).join("");
+  const invTable = invoices.length
+    ? `<div class="table-wrap"><table class="ledger">
+        <thead><tr><th>${esc(t("sub_inv_period"))}</th><th style="text-align:right">${esc(t("sub_inv_amount"))}</th><th>${esc(t("sub_inv_status"))}</th></tr></thead>
+        <tbody>${invRows}</tbody>
+      </table></div>`
+    : `<div class="card"><div class="empty"><p>${esc(t("sub_invoices_empty"))}</p></div></div>`;
+
+  const actions = `<button class="btn btn--secondary btn--sm" data-sub-portal>${icon("wallet", 15)} ${esc(t("sub_manage_billing"))}</button>`;
+
+  return `<div class="stack">
+    ${cards}
+    <section>
+      <div class="page-head"><div><h2 style="margin:0;font-size:1.05rem">${esc(t("sub_change_plan"))}</h2></div><div class="row">${actions}</div></div>
+      <div class="plan-grid">${planCards}</div>
+    </section>
+    <section>
+      <h2 style="margin:0 0 12px;font-size:1.05rem">${esc(t("sub_invoices_title"))}</h2>
+      ${invTable}
+    </section>
+  </div>`;
+}
+
+async function wireSubscription() {
+  const box = el("sub-root");
+  if (!box) return;
+  const infoCard = (titleKey, bodyKey, ic) =>
+    `<div class="card"><div class="empty"><div class="empty__icon">${icon(ic, 26)}</div><h3>${esc(t(titleKey))}</h3><p>${esc(t(bodyKey))}</p></div></div>`;
+  try {
+    const d = await api("/api/subscription");
+    box.removeAttribute("aria-busy");
+    if (!d || d.configured === false) { box.innerHTML = infoCard("sub_unconfigured_title", "sub_unconfigured_body", "wallet"); return; }
+    if (d.ok === false) { box.innerHTML = infoCard("sub_unavailable_title", "sub_unavailable_body", "alert"); return; }
+    box.innerHTML = subRender(d);
+    box.querySelectorAll("[data-sub-choose]").forEach((b) => b.addEventListener("click", () => subChoose(b.dataset.subChoose)));
+    const portal = box.querySelector("[data-sub-portal]");
+    if (portal) portal.addEventListener("click", subPortal);
+  } catch (e) {
+    box.removeAttribute("aria-busy");
+    box.innerHTML = `<div class="banner">${icon("alert", 20)}<div class="banner__text"><b>${esc(t("sub_unavailable_title"))}</b>${esc(e.message || "")}</div></div>`;
+  }
+}
+
+async function subChoose(planCode) {
+  try {
+    const r = await api("/api/subscription/checkout", { planCode });
+    if (r && r.checkout_url) { toast("info", t("sub_redirecting")); window.location.href = r.checkout_url; return; }
+    // free downgrade (no redirect) — just refresh the panel
+    toast("success", t("nav_subscription"));
+    wireSubscription();
+  } catch (e) {
+    toast("error", t("sub_action_failed"), e.message || "");
+  }
+}
+
+async function subPortal() {
+  try {
+    const r = await api("/api/subscription/portal");
+    if (r && r.portal_url) { toast("info", t("sub_redirecting")); window.location.href = r.portal_url; return; }
+    toast("error", t("sub_action_failed"));
+  } catch (e) {
+    toast("error", t("sub_action_failed"), e.message || "");
   }
 }
 
@@ -2122,6 +2323,9 @@ function render() {
     case "receipts":
       body = viewReceipts();
       break;
+    case "subscription":
+      body = viewSubscription();
+      break;
     default:
       body = viewOverview();
   }
@@ -2250,6 +2454,7 @@ function wire() {
   if (S.view === "merchants" && S.data.budget) wireMerchants();
   if (S.view === "settings") wireSettings();
   if (S.view === "receipts") wireReceipts();
+  if (S.view === "subscription") wireSubscription();
 }
 
 function wireSettings() {

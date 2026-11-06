@@ -28,6 +28,9 @@ function noopHook() {
     reportUsage: async () => ({ skipped: true }),
     bindBudget: async () => ({ skipped: true }),
     checkQuota: async () => ({ allow: true, degraded: false, skipped: true }),
+    tenantOverview: async () => ({ ok: false, configured: false }),
+    subscriptionCheckout: async () => { throw Object.assign(new Error("Billing is not configured."), { code: "billing_unconfigured", status: 503 }); },
+    subscriptionPortal: async () => { throw Object.assign(new Error("Billing is not configured."), { code: "billing_unconfigured", status: 503 }); },
   };
 }
 
@@ -111,7 +114,47 @@ function createBillingHook({ enabled = false, baseUrl = "", internalKey = "", te
     }
   }
 
-  return { enabled: true, reportUsage, bindBudget, checkQuota };
+  /**
+   * Read this gateway's own tenant subscription view for the dashboard "Subscription" panel.
+   * Read-only and non-fatal: on any error (or billing down) resolves to { ok:false, configured:true }
+   * so the dashboard can show "temporarily unavailable" without breaking the page.
+   */
+  async function tenantOverview() {
+    try {
+      const r = await request("GET", `/internal/tenant/overview?tenant_id=${encodeURIComponent(tenantId)}`);
+      if (r.status === 200 && r.json) return { ok: true, configured: true, ...r.json };
+      warn(`tenantOverview → HTTP ${r.status}`);
+      return { ok: false, configured: true, status: r.status };
+    } catch (e) {
+      warn(`tenantOverview failed: ${e.message}`);
+      return { ok: false, configured: true, error: e.message };
+    }
+  }
+
+  /**
+   * Start a Stripe Checkout for a plan change. Unlike the metering calls this is user-initiated and its
+   * result (a redirect URL) matters, so it surfaces errors instead of swallowing them.
+   */
+  async function subscriptionCheckout({ planCode, userEmail = null } = {}) {
+    const r = await request("POST", "/internal/subscription/checkout", { tenant_id: tenantId, plan_code: planCode, user_email: userEmail });
+    if (r.status >= 200 && r.status < 300 && r.json) return r.json;
+    const e = new Error((r.json && r.json.error && r.json.error.message) || `Billing returned HTTP ${r.status}.`);
+    e.code = (r.json && r.json.error && r.json.error.code) || "billing_error";
+    e.status = r.status >= 400 && r.status < 500 ? r.status : 502;
+    throw e;
+  }
+
+  /** Open the Stripe billing portal for this tenant. User-initiated; surfaces errors. */
+  async function subscriptionPortal() {
+    const r = await request("POST", "/internal/subscription/portal", { tenant_id: tenantId });
+    if (r.status >= 200 && r.status < 300 && r.json) return r.json;
+    const e = new Error((r.json && r.json.error && r.json.error.message) || `Billing returned HTTP ${r.status}.`);
+    e.code = (r.json && r.json.error && r.json.error.code) || "billing_error";
+    e.status = r.status >= 400 && r.status < 500 ? r.status : 502;
+    throw e;
+  }
+
+  return { enabled: true, reportUsage, bindBudget, checkQuota, tenantOverview, subscriptionCheckout, subscriptionPortal };
 }
 
 module.exports = { createBillingHook, noopHook };

@@ -234,6 +234,21 @@ const api = {
     return await dashboardState();
   },
 
+  // ---- subscription (spec §11) — the main dashboard's own billing view ------------------------
+  // One deployment = one billing tenant. These proxy to the SEPARATE private billing service with the
+  // internal key, so billing logic and data stay server-side and never touch the fund path. Read is
+  // non-fatal ({ configured:false } when AGENTPAY_BILLING_* is unset, or ok:false if billing is down),
+  // so the dashboard degrades gracefully. The checkout/portal actions surface billing errors.
+  async "GET /api/subscription"() {
+    return await billing.tenantOverview();
+  },
+  async "POST /api/subscription/checkout"(body) {
+    return await billing.subscriptionCheckout({ planCode: body.planCode || body.plan_code, userEmail: body.email || null });
+  },
+  async "POST /api/subscription/portal"() {
+    return await billing.subscriptionPortal();
+  },
+
   async "GET /api/audit"(_body, _ctx, query) {
     const limit = Math.max(1, Math.min(500, Number(query && query.limit) || 100));
     return { entries: audit.recent(limit) };

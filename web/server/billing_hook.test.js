@@ -35,8 +35,64 @@ test("disabled config → inert no-op hook", async () => {
     assert.equal(h.enabled, false);
     assert.deepEqual(await h.reportUsage({ chainComponent: "c", type: "pay" }), { skipped: true });
     assert.deepEqual(await h.checkQuota({ op: "create_budget" }), { allow: true, degraded: false, skipped: true });
+    // The merged-dashboard surface is inert too: overview reports unconfigured, actions refuse clearly.
+    assert.deepEqual(await h.tenantOverview(), { ok: false, configured: false });
+    await assert.rejects(() => h.subscriptionCheckout({ planCode: "pro" }), (e) => e.code === "billing_unconfigured");
+    await assert.rejects(() => h.subscriptionPortal(), (e) => e.code === "billing_unconfigured");
   }
   assert.equal(noopHook().enabled, false);
+});
+
+test("enabled: tenantOverview reads this tenant's subscription view", async () => {
+  const mock = mockBilling((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ tenant: { id: "tenant-1", name: "Acme" }, subscription: { status: "active", plan_code: "pro" }, plan: { code: "pro" }, plans: [], invoices: [] }));
+  });
+  await mock.listen();
+  const h = createBillingHook({ enabled: true, baseUrl: `http://127.0.0.1:${mock.port()}`, internalKey: "k", tenantId: "tenant-1" });
+  const d = await h.tenantOverview();
+  assert.equal(d.ok, true);
+  assert.equal(d.configured, true);
+  assert.equal(d.subscription.plan_code, "pro");
+  assert.equal(mock.reqs[0].method, "GET");
+  assert.equal(mock.reqs[0].url, "/internal/tenant/overview?tenant_id=tenant-1");
+  assert.equal(mock.reqs[0].key, "k");
+  mock.close();
+});
+
+test("tenantOverview is non-fatal when billing is down (ok:false, configured:true)", async () => {
+  const h = createBillingHook({ enabled: true, baseUrl: "http://127.0.0.1:1", internalKey: "k", tenantId: "t1", timeoutMs: 200 });
+  const d = await h.tenantOverview();
+  assert.equal(d.ok, false);
+  assert.equal(d.configured, true);
+});
+
+test("enabled: subscriptionCheckout posts the plan + tenant and returns the URL; surfaces errors", async () => {
+  const mock = mockBilling((req, res) => {
+    if (req.url === "/internal/subscription/checkout") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ checkout_url: "https://stripe.test/c/sess_1" }));
+    }
+    res.writeHead(200); res.end(JSON.stringify({ portal_url: "https://stripe.test/p/1" }));
+  });
+  await mock.listen();
+  const h = createBillingHook({ enabled: true, baseUrl: `http://127.0.0.1:${mock.port()}`, internalKey: "k", tenantId: "tenant-1" });
+  const out = await h.subscriptionCheckout({ planCode: "pro", userEmail: "a@b.c" });
+  assert.equal(out.checkout_url, "https://stripe.test/c/sess_1");
+  assert.equal(mock.reqs[0].body.tenant_id, "tenant-1");
+  assert.equal(mock.reqs[0].body.plan_code, "pro");
+  assert.equal(mock.reqs[0].body.user_email, "a@b.c");
+  const portal = await h.subscriptionPortal();
+  assert.equal(portal.portal_url, "https://stripe.test/p/1");
+  mock.close();
+});
+
+test("subscriptionCheckout throws a shaped error on a billing 4xx", async () => {
+  const mock = mockBilling((req, res) => { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: { code: "plan_not_purchasable", message: "no price" } })); });
+  await mock.listen();
+  const h = createBillingHook({ enabled: true, baseUrl: `http://127.0.0.1:${mock.port()}`, internalKey: "k", tenantId: "t1" });
+  await assert.rejects(() => h.subscriptionCheckout({ planCode: "pro" }), (e) => e.code === "plan_not_purchasable" && e.status === 400);
+  mock.close();
 });
 
 test("enabled: reportUsage posts the right body + internal key", async () => {
