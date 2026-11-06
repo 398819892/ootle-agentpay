@@ -56,6 +56,12 @@ function createStepUp({ secret: SESSION_SECRET, adminPassword: ADMIN_PASSWORD, t
         f.dailyCap = s(b.dailyCap);
         break;
       case "issueSession":
+        f.session = s(b.session);
+        // Non-custodial provisioning mints the badge into the agent's OWN account; bind it so a
+        // confirmation for account A can't be replayed to issue to account B. Omitted ⇒ null on both
+        // mint and verify, so the custodial path (mint to the budget's own agent account) is unchanged.
+        f.toAccount = s(b.toAccount);
+        break;
       case "revokeSession":
         f.session = s(b.session);
         break;

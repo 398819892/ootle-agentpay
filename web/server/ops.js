@@ -295,16 +295,25 @@ function createOps({
         // A label can be minted once: `revoke_session` does not burn the badge, so the engine refuses to
         // re-create its NFT. Re-enabling means a NEW label (the API keys use generations, key-<id>.2 …).
         if ((b.sessions || []).includes(session)) throw httpError(400, "That session label already exists.");
+        // Non-custodial provisioning: when `toAccount` is given, the badge is deposited into the agent's
+        // OWN account (it runs its own walletd). Omitted ⇒ the custodial default (the budget's own agent
+        // account). It must NOT be the owner account, which would collapse the key separation back to
+        // custodial. The owner still authorises the mint via the step-up gate (ADMIN tier, above).
+        const toAccount = body.toAccount != null ? String(body.toAccount).trim() : "";
+        if (toAccount && conn && conn.ownerAddr && toAccount === conn.ownerAddr) {
+          throw httpError(400, "The agent account must differ from the owner account.");
+        }
         const key = idemKey(body, "issueSession:" + session);
         let r;
         try {
-          r = await runChainOp(key, "issueSession", b.component, { session }, () => b.issueAgentBadge(session));
+          r = await runChainOp(key, "issueSession", b.component, { session, toAccount: toAccount || undefined },
+            () => b.issueAgentBadge(session, toAccount ? { toAccount } : {}));
         } catch (e) {
           if (e.idempotencyConflict || e.inflightDuplicate) throw e; // preserve the 409 (reused key with different params, or an identical op still in flight)
           throw httpError(422, chainMessage(e));
         }
         ctx.meta.txId = r.record.txId;
-        ctx.meta.params = { session };
+        ctx.meta.params = { session, toAccount: toAccount || undefined };
         if (r.outcome === "unknown") return await pendingResult(r.record, "Issue-session");
         snapshotBudget(b);
         return await dashboardState();

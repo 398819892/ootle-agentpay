@@ -1647,6 +1647,62 @@ table.ledger {
   margin-top: 12px;
 }
 
+/* ---- Get-started: mode chooser + non-custodial provisioning ---------------- */
+.start-mode {
+  margin-bottom: 16px;
+}
+.start-mode__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 3px;
+  gap: 3px;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.seg__btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg__btn:hover {
+  color: var(--text);
+}
+.seg__btn.is-active {
+  background: var(--surface);
+  color: var(--brand);
+  box-shadow: var(--shadow-sm);
+}
+.start-mode__hint {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  margin: 10px 2px 0;
+  max-width: 760px;
+}
+.start-prov {
+  margin-top: 12px;
+  display: grid;
+  gap: 12px;
+  max-width: 460px;
+}
+.start-prov .field {
+  margin: 0;
+}
+
 .empty {
   text-align: center;
   padding: 56px 24px;

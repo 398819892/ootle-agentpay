@@ -150,6 +150,34 @@ const I18N = {
     start_s5_b: "Your agent calls pay_merchant; every payment is enforced against the on-chain hard cap and whitelist. Receipts land on the Receipts page.",
     start_cta_pay: "Try a payment",
     start_cta_receipts: "View receipts",
+    start_mode_label: "Choose how you'll hold the keys",
+    start_mode_custodial: "Custodial (hosted)",
+    start_mode_noncustodial: "Non-custodial (self-hosted)",
+    start_mode_hint_cus: "The simplest start: walletd holds and signs server-side. You sign in and manage limits here; your agent connects to the hosted budget.",
+    start_mode_hint_nc: "You run your own walletd and keep your own keys. The owner issues your agent an on-chain badge with a least-privilege token — the agent can send within the on-chain caps but never holds the owner key or Admin rights.",
+    start_noncustodial_note: "Non-custodial setup: you keep your keys in your OWN walletd. Below, request an agent badge minted into your account; then paste the returned config into your walletd. The agent token is send-only (TransactionSend, TransactionGet) — never Admin.",
+    nc_s2_t: "2 · Run your own walletd & account",
+    nc_s2_b: "Start a Tari Ootle walletd that you control and create (or pick) the account that will hold your agent badge. This account's address is what you enter below — the owner keys and funds stay separate, on the owner side.",
+    nc_s2_env: "Your keys never leave your walletd",
+    nc_s3_t: "3 · Get your agent badge",
+    nc_s3_b: "Enter your agent account address and a label. The owner (operator) mints an agent badge into THAT account — a self-serve, owner-signed on-chain action, gated by the same step-up confirmation as every high-risk operation.",
+    nc_account_label: "Your agent account address",
+    nc_account_ph: "account_… (your own walletd account)",
+    nc_account_err: "Enter the account address to mint the badge into.",
+    nc_label_label: "Session label",
+    nc_label_ph: "e.g. prod-agent-1",
+    nc_label_err: "Use letters, numbers, dot, dash or underscore (max 64).",
+    nc_issue_btn: "Request agent badge",
+    nc_issue_hint: "Requires operator confirmation (step-up). The badge is minted to your account, not held here.",
+    nc_s4_t: "4 · Configure your walletd",
+    nc_s4_b: "Once the badge is issued, paste this into your agent's environment. Fill in your own walletd URL and token; the permissions are send-only by design.",
+    nc_s4_pre: "Your config appears here after the badge is issued in step 3.",
+    nc_env_walletd_ph: "https://your-own-walletd:18000",
+    nc_env_note: "Set AGENTPAY_WALLETD_TOKEN to a token your walletd issues for this account with only TransactionSend and TransactionGet — never Admin.",
+    nc_issued_ok: "Badge issued to {acct}",
+    nc_s5_t: "5 · Let the agent pay",
+    nc_s5_b: "Your agent now signs with its own badge inside your walletd. Every payment is still enforced against the on-chain hard cap and whitelist; receipts land on the Receipts page.",
+    nc_revoke_note: "The owner can revoke the badge at any time",
     nav_create: "Create budget",
     nav_manage: "Manage",
     nav_pay: "Payments",
@@ -694,6 +722,34 @@ const I18N = {
     start_s5_b: "让你的代理调用 pay_merchant;每一笔都按链上硬额度和白名单强制校验。付款回执会出现在「回执」页。",
     start_cta_pay: "试一笔付款",
     start_cta_receipts: "看回执",
+    start_mode_label: "先选择由谁持有密钥",
+    start_mode_custodial: "托管(平台持有)",
+    start_mode_noncustodial: "非托管(自持)",
+    start_mode_hint_cus: "最简单的起步方式:walletd 在服务端持有并签名。你在这里登录、设置额度;你的代理接入托管预算即可。",
+    start_mode_hint_nc: "你自行运行 walletd、自己保管密钥。所有者为你的代理在链上发放一枚权限最小化的凭证——代理可在链上额度内付款,但不持有所有者密钥,也没有 Admin 权限。",
+    start_noncustodial_note: "非托管模式:密钥保存在你自己的 walletd 里。下面申请把代理凭证发放到你的账户,然后把返回的配置粘贴到你的 walletd。代理令牌仅限发送(TransactionSend、TransactionGet)——绝不含 Admin。",
+    nc_s2_t: "2 · 运行你自己的 walletd 和账户",
+    nc_s2_b: "启动一个你自己掌控的 Tari Ootle walletd,并创建(或选定)用来持有代理凭证的账户。这个账户地址就是下面要填的内容——所有者的密钥和资金留在所有者一侧,互相隔离。",
+    nc_s2_env: "密钥不会离开你的 walletd",
+    nc_s3_t: "3 · 领取你的代理凭证",
+    nc_s3_b: "填入你的代理账户地址和一个标签。所有者(运维)会把一枚代理凭证发放到该账户——这是一次自助、由所有者签名的链上操作,受与所有高风险操作相同的二次确认(step-up)门控。",
+    nc_account_label: "你的代理账户地址",
+    nc_account_ph: "account_…(你自己 walletd 的账户)",
+    nc_account_err: "请填入要发放凭证的账户地址。",
+    nc_label_label: "会话标签",
+    nc_label_ph: "例如 prod-agent-1",
+    nc_label_err: "只能用字母、数字、点、短横或下划线(最多 64 位)。",
+    nc_issue_btn: "申请代理凭证",
+    nc_issue_hint: "需要运维二次确认(step-up)。凭证发放到你的账户,不在此托管。",
+    nc_s4_t: "4 · 配置你的 walletd",
+    nc_s4_b: "凭证发放后,把下面的内容粘贴到你代理的环境变量里。填上你自己的 walletd 地址和令牌;权限按设计仅限发送。",
+    nc_s4_pre: "在第 3 步发放凭证后,你的配置会出现在这里。",
+    nc_env_walletd_ph: "https://your-own-walletd:18000",
+    nc_env_note: "把 AGENTPAY_WALLETD_TOKEN 设为你的 walletd 为该账户签发的令牌,只含 TransactionSend 和 TransactionGet——绝不含 Admin。",
+    nc_issued_ok: "凭证已发放到 {acct}",
+    nc_s5_t: "5 · 让代理付款",
+    nc_s5_b: "现在你的代理在自己的 walletd 里用自己的凭证签名。每一笔付款仍按链上硬额度和白名单强制校验;回执会出现在「回执」页。",
+    nc_revoke_note: "所有者可随时吊销该凭证",
     nav_create: "创建预算",
     nav_manage: "管理",
     nav_pay: "支付",
@@ -2779,11 +2835,67 @@ function render() {
 }
 
 /* ---- views: GET STARTED --------------------------------------------------- */
-// A first-run guide for someone who has never used the console. Every step reflects the REAL,
-// custodial model (sign-in by operator password; walletd holds the keys server-side; the browser
-// never connects a wallet) and its live status is read from the already-loaded /api/state — no
-// fabricated flow and no new API calls.
-function viewStart() {
+// A first-run guide for someone who has never used the console. The customer first picks a MODE
+// (custodial / non-custodial) and the steps branch to the REAL flow for that mode — custodial status
+// is read live from the already-loaded /api/state; non-custodial lets the customer request an agent
+// badge minted into THEIR OWN account (an owner-signed, step-up-gated op) and hands back the config
+// to put in their own walletd. No fabricated flow.
+function startMode() {
+  try {
+    return localStorage.getItem("agentpay-mode") === "noncustodial" ? "noncustodial" : "custodial";
+  } catch {
+    return "custodial";
+  }
+}
+let ncProvisioned = null; // {account,label} of the last badge issued in this tab, to re-show the handoff
+
+function startStep(n, done, title, bodyTxt, statusHtml, extraHtml) {
+  return `
+    <li class="start-step${done ? " start-step--done" : ""}">
+      <div class="start-step__num">${done ? icon("check", 16) : n}</div>
+      <div class="start-step__main">
+        <div class="start-step__title">${esc(title)}</div>
+        <p class="start-step__body">${esc(bodyTxt)}</p>
+        ${statusHtml ? `<div class="start-step__status">${statusHtml}</div>` : ""}
+        ${extraHtml || ""}
+      </div>
+    </li>`;
+}
+const startChip = (mod, ic, txt) => `<span class="badge badge--${mod}">${icon(ic, 13)} ${esc(txt)}</span>`;
+
+// The env the customer pastes into THEIR OWN walletd after a badge is issued to their account. Built
+// from real config + the account/label they provisioned; the walletd URL + least-privilege token are
+// theirs to fill. Never grants Admin.
+function ncEnvBlock(account, label) {
+  const d = S.data || {};
+  const cfg = d.config || {};
+  const b = d.budget || null;
+  const comp = (b && b.component) || "component_…";
+  const net = cfg.network || "local";
+  const lines = [
+    "AGENTPAY_COMPONENT=" + comp,
+    "AGENTPAY_AGENT_ACCOUNT=" + account,
+    "AGENTPAY_WALLETD_URL=" + t("nc_env_walletd_ph"),
+    "AGENTPAY_WALLETD_PERMISSIONS=TransactionSend,TransactionGet",
+  ];
+  if (net !== "local") {
+    lines.push("AGENTPAY_NETWORK=" + net);
+    if (cfg.template) lines.push("AGENTPAY_BUDGET_TEMPLATE=" + cfg.template);
+  }
+  const text = lines.join("\n");
+  return `
+    <div class="start-step__status"><span class="badge badge--ok">${icon("check", 13)} ${esc(t("nc_issued_ok", { acct: shorten(account, 10, 6) }))}</span></div>
+    <div class="codeblock mt-12">
+      <div class="codeblock__head">
+        <span class="codeblock__label">.env · ${esc(label)}</span>
+        <button class="icon-btn" data-copy="${esc(text)}" title="${esc(t("copy"))}">${icon("copy", 15)}</button>
+      </div>
+      <pre class="codeblock__body"><code>${esc(text)}</code></pre>
+    </div>
+    <p class="start-step__body" style="margin-top:8px">${esc(t("nc_env_note"))}</p>`;
+}
+
+function startCustodialSteps() {
   const d = S.data || {};
   const cfg = d.config || {};
   const b = d.budget || null;
@@ -2795,48 +2907,112 @@ function viewStart() {
   const connectedAgents = keys || sessions;
   const net = cfg.network || "local";
   const owner = cfg.ownerAccount || "—";
+  const nav = (navTo, ic, label, variant) => `<div class="start-step__cta row row--wrap"><button class="btn btn--${variant || "primary"} btn--sm" data-nav="${navTo}">${icon(ic, 15)} ${esc(label)}</button>`;
 
-  const chip = (mod, ic, txt) => `<span class="badge badge--${mod}">${icon(ic, 13)} ${esc(txt)}</span>`;
-  const step = (n, done, title, bodyTxt, statusHtml, ctaHtml) => `
-    <li class="start-step${done ? " start-step--done" : ""}">
-      <div class="start-step__num">${done ? icon("check", 16) : n}</div>
-      <div class="start-step__main">
-        <div class="start-step__title">${esc(title)}</div>
-        <p class="start-step__body">${esc(bodyTxt)}</p>
-        ${statusHtml ? `<div class="start-step__status">${statusHtml}</div>` : ""}
-        ${ctaHtml ? `<div class="start-step__cta row row--wrap">${ctaHtml}</div>` : ""}
-      </div>
-    </li>`;
-
-  const s1 = step(1, true, t("start_s1_t"), t("start_s1_b"), chip("ok", "check", t("start_s1_done")), "");
-
+  const s1 = startStep(1, true, t("start_s1_t"), t("start_s1_b"), startChip("ok", "check", t("start_s1_done")), "");
   const s2status = connected
-    ? chip("ok", "plug", t("start_chain_on", { net })) + chip("muted", "wallet", t("start_owner", { acct: owner }))
-    : chip("warn", "plug", t("start_chain_off"));
-  const s2 = step(2, connected, t("start_s2_t"), t("start_s2_b"), s2status, "");
-
+    ? startChip("ok", "plug", t("start_chain_on", { net })) + startChip("muted", "wallet", t("start_owner", { acct: owner }))
+    : startChip("warn", "plug", t("start_chain_off"));
+  const s2 = startStep(2, connected, t("start_s2_t"), t("start_s2_b"), s2status, "");
   const s3status = connectedAgents
-    ? chip("ok", "check", t("start_connected_n", { n: connectedAgents }))
-    : chip("muted", "lock", t("start_not_connected"));
-  const s3cta = `<button class="btn btn--primary btn--sm" data-nav="connect">${icon("plug", 15)} ${esc(t("start_cta_connect"))}</button>`;
-  const s3 = step(3, !!connectedAgents, t("start_s3_t"), t("start_s3_b"), s3status, s3cta);
+    ? startChip("ok", "check", t("start_connected_n", { n: connectedAgents }))
+    : startChip("muted", "lock", t("start_not_connected"));
+  const s3 = startStep(3, !!connectedAgents, t("start_s3_t"), t("start_s3_b"), s3status,
+    `<div class="start-step__cta row row--wrap"><button class="btn btn--primary btn--sm" data-nav="connect">${icon("plug", 15)} ${esc(t("start_cta_connect"))}</button></div>`);
+  const s4status = wl > 0 ? startChip("ok", "check", t("start_wl_n", { n: wl })) : startChip("muted", "store", t("start_wl_none"));
+  const s4 = startStep(4, wl > 0, t("start_s4_t"), t("start_s4_b"), s4status,
+    `<div class="start-step__cta row row--wrap"><button class="btn btn--primary btn--sm" data-nav="manage">${icon("shield", 15)} ${esc(t("start_cta_manage"))}</button><button class="btn btn--secondary btn--sm" data-nav="merchants">${icon("store", 15)} ${esc(t("start_cta_merchants"))}</button></div>`);
+  const s5 = startStep(5, false, t("start_s5_t"), t("start_s5_b"), "",
+    `<div class="start-step__cta row row--wrap"><button class="btn btn--primary btn--sm" data-nav="pay">${icon("send", 15)} ${esc(t("start_cta_pay"))}</button><button class="btn btn--secondary btn--sm" data-nav="receipts">${icon("receipt", 15)} ${esc(t("start_cta_receipts"))}</button></div>`);
+  return s1 + s2 + s3 + s4 + s5;
+}
 
-  const s4status = wl > 0 ? chip("ok", "check", t("start_wl_n", { n: wl })) : chip("muted", "store", t("start_wl_none"));
-  const s4cta =
-    `<button class="btn btn--primary btn--sm" data-nav="manage">${icon("shield", 15)} ${esc(t("start_cta_manage"))}</button>` +
-    `<button class="btn btn--secondary btn--sm" data-nav="merchants">${icon("store", 15)} ${esc(t("start_cta_merchants"))}</button>`;
-  const s4 = step(4, wl > 0, t("start_s4_t"), t("start_s4_b"), s4status, s4cta);
+function startNonCustodialSteps() {
+  const s1 = startStep(1, true, t("start_s1_t"), t("start_s1_b"), startChip("ok", "check", t("start_s1_done")), "");
+  const s2 = startStep(2, false, t("nc_s2_t"), t("nc_s2_b"), startChip("muted", "lock", t("nc_s2_env")), "");
+  // Step 3 — provisioning form: enter YOUR agent account + a session label; the owner (operator) mints
+  // an agent badge into that account after the step-up confirmation. The handoff appears in step 4.
+  const provForm = `
+    <div class="start-prov">
+      <div class="field"><label class="field__label" for="nc-account">${esc(t("nc_account_label"))}</label>
+        <input class="input" id="nc-account" placeholder="${esc(t("nc_account_ph"))}" autocomplete="off"/>
+        <div class="field__err" id="nc-account-err">${esc(t("nc_account_err"))}</div></div>
+      <div class="field"><label class="field__label" for="nc-label">${esc(t("nc_label_label"))}</label>
+        <input class="input" id="nc-label" placeholder="${esc(t("nc_label_ph"))}" autocomplete="off" maxlength="48"/>
+        <div class="field__err" id="nc-label-err">${esc(t("nc_label_err"))}</div></div>
+      <button class="btn btn--primary btn--sm" id="nc-issue">${icon("shield", 15)} ${esc(t("nc_issue_btn"))}</button>
+      <p class="start-step__body" style="margin-top:8px">${esc(t("nc_issue_hint"))}</p>
+    </div>`;
+  const s3 = startStep(3, false, t("nc_s3_t"), t("nc_s3_b"), "", provForm);
+  const s4 = startStep(4, false, t("nc_s4_t"), t("nc_s4_b"), "", `<div id="nc-env"><p class="start-step__body muted">${esc(t("nc_s4_pre"))}</p></div>`);
+  const s5 = startStep(5, false, t("nc_s5_t"), t("nc_s5_b"), startChip("muted", "shield", t("nc_revoke_note")), "");
+  return s1 + s2 + s3 + s4 + s5;
+}
 
-  const s5cta =
-    `<button class="btn btn--primary btn--sm" data-nav="pay">${icon("send", 15)} ${esc(t("start_cta_pay"))}</button>` +
-    `<button class="btn btn--secondary btn--sm" data-nav="receipts">${icon("receipt", 15)} ${esc(t("start_cta_receipts"))}</button>`;
-  const s5 = step(5, false, t("start_s5_t"), t("start_s5_b"), "", s5cta);
-
+function viewStart() {
+  const mode = startMode();
+  const seg = (m, label) =>
+    `<button class="seg__btn ${mode === m ? "is-active" : ""}" data-start-mode="${m}">${esc(label)}</button>`;
+  const chooser = `
+    <div class="start-mode">
+      <div class="start-mode__label">${esc(t("start_mode_label"))}</div>
+      <div class="seg" role="group" aria-label="${esc(t("start_mode_label"))}">
+        ${seg("custodial", t("start_mode_custodial"))}${seg("noncustodial", t("start_mode_noncustodial"))}
+      </div>
+      <p class="start-mode__hint">${esc(mode === "noncustodial" ? t("start_mode_hint_nc") : t("start_mode_hint_cus"))}</p>
+    </div>`;
+  const note = mode === "noncustodial" ? t("start_noncustodial_note") : t("start_custodial_note");
+  const steps = mode === "noncustodial" ? startNonCustodialSteps() : startCustodialSteps();
   return (
     pageHead(t("nav_start"), t("start_sub")) +
-    `<div class="callout">${icon("info", 18)}<div>${esc(t("start_custodial_note"))}</div></div>` +
-    `<div class="card"><div class="card__body"><ol class="start-steps">${s1}${s2}${s3}${s4}${s5}</ol></div></div>`
+    chooser +
+    `<div class="callout">${icon("info", 18)}<div>${esc(note)}</div></div>` +
+    `<div class="card"><div class="card__body"><ol class="start-steps">${steps}</ol></div></div>`
   );
+}
+
+// Mode toggle + (non-custodial) badge-provisioning form. The issuance is the real owner-signed
+// `issueSession` op with `toAccount` = the customer's account, gated by the same step-up confirmation
+// as every other high-risk action; on success we show the env handoff for their own walletd.
+function wireStart() {
+  document.querySelectorAll("[data-start-mode]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      try {
+        localStorage.setItem("agentpay-mode", btn.dataset.startMode);
+      } catch {
+        /* ignore */
+      }
+      go("start");
+    }));
+
+  const issueBtn = el("nc-issue");
+  if (!issueBtn) return;
+  // re-show the handoff if a badge was already issued in this tab
+  if (ncProvisioned) {
+    const slot = el("nc-env");
+    if (slot) slot.innerHTML = ncEnvBlock(ncProvisioned.account, ncProvisioned.label);
+  }
+  const labelOk = (v) => /^[A-Za-z0-9_.\-]{1,64}$/.test(v);
+  issueBtn.addEventListener("click", async () => {
+    const account = (el("nc-account").value || "").trim();
+    const label = (el("nc-label").value || "").trim();
+    setErr("nc-account", !account);
+    setErr("nc-label", !labelOk(label));
+    if (!account || !labelOk(label)) return;
+    const gate = await stepUpToken("issueSession", { session: label, toAccount: account });
+    if (!gate) return;
+    await withPending(issueBtn, t("p_issuing"), async () => {
+      try {
+        S.data = await api("/api/sessions", { session: label, toAccount: account, confirmToken: gate.token });
+        ncProvisioned = { account, label };
+        const slot = el("nc-env");
+        if (slot) slot.innerHTML = ncEnvBlock(account, label);
+        toast("success", t("t_badge_issued"), t("nc_issued_ok", { acct: shorten(account, 10, 6) }));
+      } catch (err) {
+        toast("error", t("t_badge_failed"), err.message);
+      }
+    });
+  });
 }
 
 /* ---- views: CONNECT ------------------------------------------------------- */
@@ -2979,6 +3155,7 @@ function wire() {
   if (S.view === "settings") wireSettings();
   if (S.view === "receipts") wireReceipts();
   if (S.view === "subscription") wireSubscription();
+  if (S.view === "start") wireStart();
 }
 
 function wireSettings() {
