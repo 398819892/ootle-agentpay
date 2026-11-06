@@ -124,6 +124,32 @@ const I18N = {
 
     /* nav */
     nav_overview: "Overview",
+    nav_start: "Get started",
+    start_sub: "First steps for a new user — from signing in to your agent's first payment.",
+    start_custodial_note: "This is a hosted (custodial) console: the wallet is held and signed server-side by walletd, and the dashboard is already connected to the chain. You do not connect a wallet in the browser.",
+    start_s1_t: "1 · Sign in",
+    start_s1_b: "You reach this console with the password your provider gave you — there is no self-serve sign-up. Keep that password private.",
+    start_s1_done: "Signed in",
+    start_s2_t: "2 · Wallet is ready",
+    start_s2_b: "The custodial wallet is set up on the server; there is nothing to connect here. When the dashboard shows it is connected to the chain, you are ready.",
+    start_chain_on: "Connected to chain · {net}",
+    start_chain_off: "Not connected to the chain",
+    start_owner: "Custodial account {acct}",
+    start_s3_t: "3 · Connect your AI",
+    start_s3_b: "On the Connect page, copy the MCP config or an API key and wire your AI agent to this budget. The agent attaches to the on-chain budget — it never receives the owner key.",
+    start_connected_n: "{n} access credential(s)",
+    start_not_connected: "No agent connected yet",
+    start_cta_connect: "Go to Connect",
+    start_s4_t: "4 · Set limits & whitelist",
+    start_s4_b: "In Manage, set the per-transaction and daily caps; in Merchants, add the payees the agent may pay. The on-chain hard cap is the real boundary.",
+    start_wl_n: "{n} whitelisted merchant(s)",
+    start_wl_none: "No merchants whitelisted yet",
+    start_cta_manage: "Set limits",
+    start_cta_merchants: "Whitelist",
+    start_s5_t: "5 · Let the agent pay",
+    start_s5_b: "Your agent calls pay_merchant; every payment is enforced against the on-chain hard cap and whitelist. Receipts land on the Receipts page.",
+    start_cta_pay: "Try a payment",
+    start_cta_receipts: "View receipts",
     nav_create: "Create budget",
     nav_manage: "Manage",
     nav_pay: "Payments",
@@ -642,6 +668,32 @@ const I18N = {
 
     /* nav */
     nav_overview: "总览",
+    nav_start: "开始使用",
+    start_sub: "新手第一步 —— 从登录到你的 AI 完成第一笔付款。",
+    start_custodial_note: "这是托管式控制台:钱包由服务端的 walletd 持有并签名,面板已经连接到链。你无需在浏览器里连接钱包。",
+    start_s1_t: "1 · 登录",
+    start_s1_b: "用部署方发给你的口令进入本控制台——没有自助注册。请妥善保管这个口令。",
+    start_s1_done: "已登录",
+    start_s2_t: "2 · 钱包已就绪",
+    start_s2_b: "托管钱包已在服务端配置好,这里无需连接。当面板显示已连接到链,即可开始。",
+    start_chain_on: "已连接到链 · {net}",
+    start_chain_off: "尚未连接到链",
+    start_owner: "托管账户 {acct}",
+    start_s3_t: "3 · 接入你的 AI",
+    start_s3_b: "在「接入」页复制 MCP 配置或 API key,把你的 AI 代理接到这个预算。代理只连到链上预算(component),绝不会拿到所有者钥匙。",
+    start_connected_n: "已接入 {n} 个凭证",
+    start_not_connected: "还没有代理接入",
+    start_cta_connect: "去接入",
+    start_s4_t: "4 · 设额度与白名单",
+    start_s4_b: "在「管理」页设单笔/每日上限,在「商户」页添加代理可付款的白名单。链上硬额度才是真正的边界。",
+    start_wl_n: "{n} 个白名单商户",
+    start_wl_none: "还没有白名单商户",
+    start_cta_manage: "设额度",
+    start_cta_merchants: "设白名单",
+    start_s5_t: "5 · 让代理付款",
+    start_s5_b: "让你的代理调用 pay_merchant;每一笔都按链上硬额度和白名单强制校验。付款回执会出现在「回执」页。",
+    start_cta_pay: "试一笔付款",
+    start_cta_receipts: "看回执",
     nav_create: "创建预算",
     nav_manage: "管理",
     nav_pay: "支付",
@@ -1492,6 +1544,7 @@ async function withPending(btn, label, fn) {
 
 /* ---- navigation ----------------------------------------------------------- */
 const NAV = [
+  { id: "start", key: "nav_start", icon: "zap" },
   { id: "overview", key: "nav_overview", icon: "grid" },
   { id: "manage", key: "nav_manage", icon: "shield" },
   { id: "pay", key: "nav_pay", icon: "send" },
@@ -2703,6 +2756,9 @@ function render() {
     case "merchants":
       body = viewMerchants();
       break;
+    case "start":
+      body = viewStart();
+      break;
     case "connect":
       body = viewConnect();
       break;
@@ -2720,6 +2776,67 @@ function render() {
   }
   app.innerHTML = sidebar() + `<main class="main">${frozenBanner()}${body}</main>`;
   wire();
+}
+
+/* ---- views: GET STARTED --------------------------------------------------- */
+// A first-run guide for someone who has never used the console. Every step reflects the REAL,
+// custodial model (sign-in by operator password; walletd holds the keys server-side; the browser
+// never connects a wallet) and its live status is read from the already-loaded /api/state — no
+// fabricated flow and no new API calls.
+function viewStart() {
+  const d = S.data || {};
+  const cfg = d.config || {};
+  const b = d.budget || null;
+  const api = d.api || {};
+  const connected = !!d.connected;
+  const wl = b && Array.isArray(b.whitelist) ? b.whitelist.length : 0;
+  const keys = (api.agentKeys || []).length;
+  const sessions = b && Array.isArray(b.sessions) ? b.sessions.filter((s) => !s.revoked).length : 0;
+  const connectedAgents = keys || sessions;
+  const net = cfg.network || "local";
+  const owner = cfg.ownerAccount || "—";
+
+  const chip = (mod, ic, txt) => `<span class="badge badge--${mod}">${icon(ic, 13)} ${esc(txt)}</span>`;
+  const step = (n, done, title, bodyTxt, statusHtml, ctaHtml) => `
+    <li class="start-step${done ? " start-step--done" : ""}">
+      <div class="start-step__num">${done ? icon("check", 16) : n}</div>
+      <div class="start-step__main">
+        <div class="start-step__title">${esc(title)}</div>
+        <p class="start-step__body">${esc(bodyTxt)}</p>
+        ${statusHtml ? `<div class="start-step__status">${statusHtml}</div>` : ""}
+        ${ctaHtml ? `<div class="start-step__cta row row--wrap">${ctaHtml}</div>` : ""}
+      </div>
+    </li>`;
+
+  const s1 = step(1, true, t("start_s1_t"), t("start_s1_b"), chip("ok", "check", t("start_s1_done")), "");
+
+  const s2status = connected
+    ? chip("ok", "plug", t("start_chain_on", { net })) + chip("muted", "wallet", t("start_owner", { acct: owner }))
+    : chip("warn", "plug", t("start_chain_off"));
+  const s2 = step(2, connected, t("start_s2_t"), t("start_s2_b"), s2status, "");
+
+  const s3status = connectedAgents
+    ? chip("ok", "check", t("start_connected_n", { n: connectedAgents }))
+    : chip("muted", "lock", t("start_not_connected"));
+  const s3cta = `<button class="btn btn--primary btn--sm" data-nav="connect">${icon("plug", 15)} ${esc(t("start_cta_connect"))}</button>`;
+  const s3 = step(3, !!connectedAgents, t("start_s3_t"), t("start_s3_b"), s3status, s3cta);
+
+  const s4status = wl > 0 ? chip("ok", "check", t("start_wl_n", { n: wl })) : chip("muted", "store", t("start_wl_none"));
+  const s4cta =
+    `<button class="btn btn--primary btn--sm" data-nav="manage">${icon("shield", 15)} ${esc(t("start_cta_manage"))}</button>` +
+    `<button class="btn btn--secondary btn--sm" data-nav="merchants">${icon("store", 15)} ${esc(t("start_cta_merchants"))}</button>`;
+  const s4 = step(4, wl > 0, t("start_s4_t"), t("start_s4_b"), s4status, s4cta);
+
+  const s5cta =
+    `<button class="btn btn--primary btn--sm" data-nav="pay">${icon("send", 15)} ${esc(t("start_cta_pay"))}</button>` +
+    `<button class="btn btn--secondary btn--sm" data-nav="receipts">${icon("receipt", 15)} ${esc(t("start_cta_receipts"))}</button>`;
+  const s5 = step(5, false, t("start_s5_t"), t("start_s5_b"), "", s5cta);
+
+  return (
+    pageHead(t("nav_start"), t("start_sub")) +
+    `<div class="callout">${icon("info", 18)}<div>${esc(t("start_custodial_note"))}</div></div>` +
+    `<div class="card"><div class="card__body"><ol class="start-steps">${s1}${s2}${s3}${s4}${s5}</ol></div></div>`
+  );
 }
 
 /* ---- views: CONNECT ------------------------------------------------------- */

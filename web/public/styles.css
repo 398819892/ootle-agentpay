@@ -1572,6 +1572,81 @@ table.ledger {
   color: var(--success);
 }
 
+/* ---- get-started stepper -------------------------------------------------- */
+.start-steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.start-step {
+  position: relative;
+  display: flex;
+  gap: 16px;
+  padding-bottom: 26px;
+}
+.start-step:last-child {
+  padding-bottom: 0;
+}
+/* vertical connector running through the step markers */
+.start-step::before {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: 34px;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+.start-step:last-child::before {
+  display: none;
+}
+.start-step__num {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-content: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.start-step--done .start-step__num {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.start-step__main {
+  min-width: 0;
+  padding-top: 4px;
+}
+.start-step__title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.start-step__body {
+  margin: 5px 0 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 64ch;
+}
+.start-step__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.start-step__cta {
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .empty {
   text-align: center;
   padding: 56px 24px;
