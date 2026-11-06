@@ -211,6 +211,95 @@ const I18N = {
 
     /* overview */
     overview_sub: "A live view of your agent's on-chain spending budget.",
+    hero_balance_label: "Available balance",
+    onchain_live: "On-chain · live",
+    onchain_offline: "On-chain · offline",
+    last_synced: "Updated {t}",
+    stat_active: "Active agents",
+    stat_active_hint: "Sessions able to spend",
+    cap_whitelist: "{n} whitelisted payees",
+    sec_policy: "Spending policy",
+    sec_policy_sub: "Per-transaction and daily caps, and the spend window.",
+    sec_treasury_sub: "On-chain funds — top up or withdraw to the owner.",
+    sec_sessions_sub: "Agent identities allowed to spend from this budget.",
+    sec_security: "Security controls",
+    sec_security_sub: "High-risk actions — each asks for a second confirmation.",
+    treasury_onchain_note: "On-chain balance; the local view can lag a pending transaction.",
+    window_rule: "Rolling window · {n} epochs",
+    merchant_limits_link: "Manage merchant whitelist",
+    pay_preview: "Payment preview",
+    pay_preview_sub: "Local pre-check",
+    pay_preview_note_title: "On-chain is final.",
+    pay_preview_note_body: "This panel is a local estimate. The on-chain pre-check and the validator decide the outcome — submitted is not confirmed.",
+    risk_whitelist: "Whitelist",
+    risk_wl_ok: "Payee is on the on-chain whitelist.",
+    risk_wl_bad: "Not whitelisted — the validator will reject this.",
+    risk_awaiting: "Select a payee.",
+    risk_pertx: "Per-transaction cap",
+    risk_pertx_detail: "Cap {cap} {unit}.",
+    risk_window: "Window allowance",
+    risk_window_detail: "{left} {unit} left in this window.",
+    risk_authority: "Authority",
+    risk_authority_detail: "Owner-initiated (manual) payment.",
+    risk_confirm: "Human confirmation",
+    risk_confirm_detail: "Required before the payment is submitted.",
+    m_stat_total: "Merchants",
+    m_stat_enabled: "Enabled",
+    m_stat_pending: "Pending",
+    view_detail: "View detail",
+    merchant_detail: "Merchant detail",
+    merchant_status_active: "Approved",
+    drawer_status: "Status",
+    drawer_name: "Name",
+    drawer_address: "Address",
+    drawer_authorization: "Authorization",
+    merchant_auth_note: "On the on-chain payee whitelist, added by the owner.",
+    merchant_detail_note: "Payments to this payee pass the validator's whitelist check.",
+    receipts_title: "Receipts",
+    receipts_search: "Search by merchant, payer, or ID",
+    rcpt_stat_count: "Receipts",
+    rcpt_stat_total: "Total amount",
+    rcpt_stat_latest: "Latest",
+    rcpt_showing: "{n} of {total}",
+    rcpt_th_receipt: "Receipt",
+    rcpt_th_payer: "Payer",
+    rcpt_no_match: "No receipts match your search.",
+    receipt_detail: "Receipt detail",
+    receipt_id: "Receipt ID",
+    receipt_detail_note: "A receipt image the MCP generated as proof of this payment — verify on-chain status in the ledger.",
+    connect_st_network: "Network: {n}",
+    connect_st_api_on: "HTTP API on",
+    connect_st_api_off: "HTTP API off",
+    connect_st_keys: "{n} agent keys",
+    connect_st_comp_ok: "Budget ready",
+    connect_st_comp_none: "No budget yet",
+    connect_steps_title: "How to connect",
+    connect_step1_t: "Pick a method.",
+    connect_step1_b: "MCP for Claude/Cursor, STDIO for other agents, or the HTTP API.",
+    connect_step2_t: "Copy the config.",
+    connect_step2_b: "Use the copy button on the block below — it is generated from this deployment.",
+    connect_step3_t: "Start the service.",
+    connect_step3_b: "Run agentpay-mcp (or point your HTTP client at this origin).",
+    connect_step4_t: "Verify the connection.",
+    connect_step4_b: "List tools / call get_server_info; the status above reflects the live server.",
+    set_sec_general: "General",
+    set_sec_general_sub: "Dashboard language and receipt language.",
+    set_sec_wallet: "Wallet",
+    set_sec_wallet_sub: "The owner account and on-chain budget component.",
+    set_sec_network: "Network",
+    set_sec_network_sub: "Chain endpoint and budget template (server-configured).",
+    set_sec_security: "Security",
+    set_sec_security_sub: "Step-up confirmation for high-risk actions.",
+    set_sec_about: "About",
+    set_sec_about_sub: "What this dashboard is.",
+    set_owner: "Owner account",
+    set_component: "Budget component",
+    set_no_budget: "No budget yet",
+    set_network: "Network",
+    set_walletd: "walletd URL",
+    set_template: "Budget template",
+    set_network_note: "These come from the server environment and are set server-side — the dashboard shows them read-only and never changes them from the UI.",
+    about_body: "AgentPay is an on-chain, hard-limit wallet and gateway for AI agents. This hosted dashboard meters and displays; the real spending limits are enforced by the on-chain validator, which never lets the dashboard move funds beyond them.",
     nobudget_title: "No budget yet",
     overview_empty_body:
       "Open an on-chain budget to give an AI agent a spending allowance that the Tari validators enforce — per-transaction and daily caps, a merchant whitelist, and a kill switch.",
@@ -634,6 +723,95 @@ const I18N = {
 
     /* overview */
     overview_sub: "实时查看代理的链上消费预算。",
+    hero_balance_label: "可用余额",
+    onchain_live: "链上 · 实时",
+    onchain_offline: "链上 · 离线",
+    last_synced: "更新于 {t}",
+    stat_active: "活跃 Agent",
+    stat_active_hint: "可发起支付的会话",
+    cap_whitelist: "{n} 个白名单收款人",
+    sec_policy: "支出策略",
+    sec_policy_sub: "单笔与每日限额，以及支出窗口规则。",
+    sec_treasury_sub: "链上资金——充值或提现到所有者。",
+    sec_sessions_sub: "被授权从该预算支付的 Agent 身份。",
+    sec_security: "安全控制",
+    sec_security_sub: "高风险操作——每项都需二次确认。",
+    treasury_onchain_note: "链上余额；本地显示可能滞后于待确认交易。",
+    window_rule: "滚动窗口 · {n} 个纪元",
+    merchant_limits_link: "管理商户白名单",
+    pay_preview: "支付预览",
+    pay_preview_sub: "本地预检",
+    pay_preview_note_title: "以链上为准。",
+    pay_preview_note_body: "此面板为本地估算。最终结果以链上预检与验证节点为准——已提交不等于已确认。",
+    risk_whitelist: "白名单",
+    risk_wl_ok: "收款人已在链上白名单。",
+    risk_wl_bad: "不在白名单——将被验证节点拒绝。",
+    risk_awaiting: "请选择收款对象。",
+    risk_pertx: "单笔上限",
+    risk_pertx_detail: "上限 {cap} {unit}。",
+    risk_window: "窗口额度",
+    risk_window_detail: "本窗口还剩 {left} {unit}。",
+    risk_authority: "预算权限",
+    risk_authority_detail: "所有者发起（人工）支付。",
+    risk_confirm: "人工确认",
+    risk_confirm_detail: "提交前需人工确认。",
+    m_stat_total: "商户总数",
+    m_stat_enabled: "已启用",
+    m_stat_pending: "待处理",
+    view_detail: "查看详情",
+    merchant_detail: "商户详情",
+    merchant_status_active: "已批准",
+    drawer_status: "状态",
+    drawer_name: "名称",
+    drawer_address: "地址",
+    drawer_authorization: "授权",
+    merchant_auth_note: "位于链上收款白名单，由所有者添加。",
+    merchant_detail_note: "向该收款人的支付可通过验证节点的白名单校验。",
+    receipts_title: "交易回执",
+    receipts_search: "按商户、付款方或 ID 搜索",
+    rcpt_stat_count: "回执数量",
+    rcpt_stat_total: "合计金额",
+    rcpt_stat_latest: "最近",
+    rcpt_showing: "{n} / {total}",
+    rcpt_th_receipt: "回执",
+    rcpt_th_payer: "付款方",
+    rcpt_no_match: "没有匹配的回执。",
+    receipt_detail: "回执详情",
+    receipt_id: "回执 ID",
+    receipt_detail_note: "由 MCP 生成的支付凭证图片——链上状态请在交易记录中核对。",
+    connect_st_network: "网络：{n}",
+    connect_st_api_on: "HTTP API 已开启",
+    connect_st_api_off: "HTTP API 未开启",
+    connect_st_keys: "{n} 个代理密钥",
+    connect_st_comp_ok: "预算就绪",
+    connect_st_comp_none: "尚未创建预算",
+    connect_steps_title: "接入步骤",
+    connect_step1_t: "选择接入方式。",
+    connect_step1_b: "Claude/Cursor 用 MCP，其他代理用 STDIO，或使用 HTTP API。",
+    connect_step2_t: "复制配置。",
+    connect_step2_b: "用下方代码块的复制按钮——配置由本部署实时生成。",
+    connect_step3_t: "启动服务。",
+    connect_step3_b: "运行 agentpay-mcp（或让 HTTP 客户端指向本地址）。",
+    connect_step4_t: "验证连接。",
+    connect_step4_b: "列出工具 / 调用 get_server_info；上方状态反映真实服务器。",
+    set_sec_general: "通用",
+    set_sec_general_sub: "仪表盘语言与回执语言。",
+    set_sec_wallet: "钱包",
+    set_sec_wallet_sub: "所有者账户与链上预算组件。",
+    set_sec_network: "网络",
+    set_sec_network_sub: "链节点与预算模板（由服务端配置）。",
+    set_sec_security: "安全",
+    set_sec_security_sub: "高风险操作的二次确认。",
+    set_sec_about: "关于",
+    set_sec_about_sub: "关于这个仪表盘。",
+    set_owner: "所有者账户",
+    set_component: "预算组件",
+    set_no_budget: "尚未创建预算",
+    set_network: "网络",
+    set_walletd: "walletd 地址",
+    set_template: "预算模板",
+    set_network_note: "这些来自服务端环境、由服务端配置——仪表盘只读展示，绝不通过界面修改它们。",
+    about_body: "AgentPay 是面向 AI 代理的链上硬额度钱包与网关。托管仪表盘负责计量与展示；真正的额度由链上验证节点强制执行，绝不允许仪表盘越过额度动用资金。",
     nobudget_title: "还没有预算",
     overview_empty_body:
       "开一个链上预算,给 AI 代理一份由 Tari 验证节点强制执行的消费额度:单笔上限、每日上限、商户白名单,以及一键停用开关。",
@@ -965,6 +1143,7 @@ const P = {
   moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/>',
   monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  minus: '<path d="M5 12h14"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
@@ -1021,6 +1200,9 @@ function addrPill(addr, { lg = false } = {}) {
 const S = {
   view: "overview",
   data: null,
+  // Wall-clock of the last successful state fetch — shown as "updated HH:MM:SS" on Overview so the
+  // freshness of the displayed (cached) data is explicit. Not chain time; just when we last read.
+  lastSync: Date.now(),
   booting: true,
   connError: null,
   authRequired: false,
@@ -1408,33 +1590,59 @@ function pageHead(title, sub, actions = "") {
 // to the agent (server-side in the store, read by the separate MCP process over /api/state).
 function viewSettings() {
   const d = S.data || {};
+  const cfg = d.config || {};
+  const comp = d.budget ? d.budget.component : null;
   const rl = ["zh", "en", "both"].includes(d.receiptLang) ? d.receiptLang : "both";
   const opt = (val, label, cur) => `<option value="${val}"${val === cur ? " selected" : ""}>${esc(label)}</option>`;
+  // Read-only config row — surfaces a real, server-set value; never an editable control that would
+  // imply the UI can change wallet/network wiring (§3.7: don't bypass the backend).
+  const infoRow = (label, value, copyable) =>
+    `<div class="set-row">
+      <div class="set-row__k">${esc(label)}</div>
+      <div class="set-row__v">${
+        copyable && value
+          ? `<span class="addr"><span class="addr__text">${esc(value)}</span><button class="icon-btn" data-copy="${esc(value)}" aria-label="${esc(t("copy"))}">${icon("copy", 14)}</button></span>`
+          : `<span>${esc(value || "—")}</span>`
+      }</div>
+    </div>`;
+
   return (
     pageHead(t("nav_settings"), t("settings_sub")) +
-    `<div class="card" style="max-width:560px">
-      <div class="card__body">
+    `<div class="stack" style="max-width:720px">
+      <div class="section-head"><h2>${esc(t("set_sec_general"))}</h2><p>${esc(t("set_sec_general_sub"))}</p></div>
+      <div class="card"><div class="card__body">
         <div class="field">
           <label class="field__label" for="set-ui-lang">${esc(t("set_ui_lang"))}</label>
           <div class="select-wrap">
-            <select class="select" id="set-ui-lang">
-              ${opt("zh", t("lang_zh"), LANG)}
-              ${opt("en", t("lang_en"), LANG)}
-            </select>
+            <select class="select" id="set-ui-lang">${opt("zh", t("lang_zh"), LANG)}${opt("en", t("lang_en"), LANG)}</select>
           </div>
           <div class="field__hint">${esc(t("set_ui_lang_hint"))}</div>
         </div>
-        <div class="field">
+        <div class="field" style="margin-bottom:0">
           <label class="field__label" for="set-receipt-lang">${esc(t("set_receipt_lang"))}</label>
           <div class="select-wrap">
-            <select class="select" id="set-receipt-lang">
-              ${opt("zh", t("lang_zh"), rl)}
-              ${opt("en", t("lang_en"), rl)}
-              ${opt("both", t("lang_both"), rl)}
-            </select>
+            <select class="select" id="set-receipt-lang">${opt("zh", t("lang_zh"), rl)}${opt("en", t("lang_en"), rl)}${opt("both", t("lang_both"), rl)}</select>
           </div>
           <div class="field__hint">${esc(t("set_receipt_lang_hint"))}</div>
         </div>
+      </div></div>
+
+      <div class="section-head"><h2>${esc(t("set_sec_wallet"))}</h2><p>${esc(t("set_sec_wallet_sub"))}</p></div>
+      <div class="card"><div class="card__body">
+        ${infoRow(t("set_owner"), cfg.ownerAccount, false)}
+        ${infoRow(t("set_component"), comp || t("set_no_budget"), !!comp)}
+      </div></div>
+
+      <div class="section-head"><h2>${esc(t("set_sec_network"))}</h2><p>${esc(t("set_sec_network_sub"))}</p></div>
+      <div class="card"><div class="card__body">
+        ${infoRow(t("set_network"), cfg.network || "local", false)}
+        ${infoRow(t("set_walletd"), cfg.walletdUrl, true)}
+        ${infoRow(t("set_template"), cfg.template, true)}
+        <div class="callout mt-18">${icon("info", 18)}<div>${esc(t("set_network_note"))}</div></div>
+      </div></div>
+
+      <div class="section-head"><h2>${esc(t("set_sec_security"))}</h2><p>${esc(t("set_sec_security_sub"))}</p></div>
+      <div class="card"><div class="card__body">
         <div class="field" style="margin-bottom:0">
           <label class="field__label">${esc(t("set_pay_confirm"))}</label>
           <div class="field__hint" style="margin-top:0">${esc(t("set_pay_confirm_intro"))}</div>
@@ -1450,7 +1658,16 @@ function viewSettings() {
           </div>
           <div class="field__hint" id="pay-pass-status">${esc(d.payPassphraseSet ? t("pay_pass_is_set") : t("pay_pass_not_set"))}</div>
         </div>
-      </div>
+      </div></div>
+
+      <div class="section-head"><h2>${esc(t("set_sec_about"))}</h2><p>${esc(t("set_sec_about_sub"))}</p></div>
+      <div class="card"><div class="card__body">
+        <div class="row" style="gap:12px;margin-bottom:12px">
+          <div class="brand__mark" style="width:38px;height:38px">${icon("shield", 20)}</div>
+          <div><div style="font-weight:700">AgentPay</div><div class="muted" style="font-size:13px">${esc(t("brand_sub"))}</div></div>
+        </div>
+        <p class="muted" style="font-size:13.5px;line-height:1.6;margin:0">${esc(t("about_body"))}</p>
+      </div></div>
     </div>`
   );
 }
@@ -1458,42 +1675,118 @@ function viewSettings() {
 /* ---- views: RECEIPTS ------------------------------------------------------ */
 // The payment-receipt images the MCP rendered and uploaded. The list comes from /api/receipts
 // (fetched in wireReceipts); each card previews the PNG and offers it for download.
+let receiptsAll = [];
 function viewReceipts() {
   return (
     pageHead(t("nav_receipts"), t("receipts_sub")) +
-    `<div id="receipts-list" aria-busy="true"><div class="muted" style="padding:8px 2px">…</div></div>`
+    `<div class="stack">
+      <div class="grid grid--3" id="rcpt-stats"></div>
+      <div class="card">
+        <div class="card__head"><h3>${esc(t("receipts_title"))}</h3><span class="sub" id="rcpt-count"></span></div>
+        <div class="card__body">
+          <div class="input-affix" style="margin-bottom:14px">
+            <input class="input" id="rcpt-search" placeholder="${esc(t("receipts_search"))}" autocomplete="off"/>
+          </div>
+          <div id="receipts-list" aria-busy="true"><div class="muted" style="padding:8px 2px">…</div></div>
+        </div>
+      </div>
+    </div>`
   );
 }
 
-function receiptCard(r) {
-  const url = esc(r.url);
-  const amount = r.amount != null ? Number(r.amount).toLocaleString("en-US") : "—";
+function receiptWhen(r) {
   const when = r.paid_at ? new Date(r.paid_at) : null;
-  const whenStr = when && !isNaN(when) ? when.toLocaleString() : esc(r.paid_at || r.saved_at || "");
-  const row = (label, val) =>
-    `<div class="rcpt__row"><span class="rcpt__k">${esc(label)}</span><span class="rcpt__v" title="${esc(val)}">${esc(shorten(val, 12, 6))}</span></div>`;
-  return `<div class="rcpt">
-    <a class="rcpt__thumb" href="${url}" target="_blank" rel="noopener" aria-label="${esc(t("receipt_download"))}"><img src="${url}" alt="" loading="lazy"/></a>
-    <div class="rcpt__body">
-      <div class="rcpt__amount">${esc(amount)} <span class="rcpt__unit">${esc(r.unit || UNIT)}</span></div>
-      ${row(t("receipt_to"), r.merchant || "—")}
-      ${row(t("receipt_from"), r.payer || "—")}
-      <div class="rcpt__row"><span class="rcpt__k">${esc(t("receipt_at"))}</span><span class="rcpt__v">${esc(whenStr)}</span></div>
-      <a class="btn btn--secondary btn--sm rcpt__dl" href="${url}" download="receipt-${esc(r.id)}.png">${icon("download", 15)} ${esc(t("receipt_download"))}</a>
-    </div>
-  </div>`;
+  return when && !isNaN(when) ? when.toLocaleString() : r.paid_at || r.saved_at || "—";
+}
+
+/* One receipt as a table row (§3.6). Only fields the receipt actually carries are shown — no
+   fabricated on-chain status or agent column. Clicking the row opens the detail drawer. */
+function receiptRow(r) {
+  const amount = r.amount != null ? fmt(String(r.amount)) : "—";
+  return `<tr class="rcpt-tr" data-receipt-detail="${esc(String(r.id))}">
+    <td><div class="merchant">
+      <span class="rcpt-thumb-sm"><img src="${esc(r.url)}" alt="" loading="lazy"/></span>
+      <div style="min-width:0"><div class="memo" style="font-weight:600">${esc(shorten(String(r.id), 8, 5))}</div></div>
+    </div></td>
+    <td>${esc(r.merchant || "—")}</td>
+    <td class="amount">${amount} <span class="muted" style="font-weight:500">${esc(r.unit || UNIT)}</span></td>
+    <td><span class="memo">${esc(shorten(String(r.payer || "—"), 8, 5))}</span></td>
+    <td class="muted" style="font-size:12px;white-space:nowrap">${esc(receiptWhen(r))}</td>
+    <td style="text-align:right"><button class="btn btn--ghost btn--sm" data-receipt-detail="${esc(String(r.id))}">${esc(t("view_detail"))}</button></td>
+  </tr>`;
+}
+
+function openReceiptDrawer(id) {
+  const r = receiptsAll.find((x) => String(x.id) === String(id));
+  if (!r) return;
+  const root = ensureDrawerRoot();
+  const amount = r.amount != null ? fmt(String(r.amount)) : "—";
+  const kv = (k, v, mono) =>
+    `<div class="drawer__row"><div class="drawer__k">${esc(k)}</div><div class="drawer__v"${mono ? ' style="font-family:var(--mono);font-size:12.5px"' : ""}>${esc(v)}</div></div>`;
+  root.innerHTML = `
+    <div class="drawer-backdrop">
+      <aside class="drawer" role="dialog" aria-modal="true" aria-label="${esc(t("receipt_detail"))}">
+        <div class="drawer__head">
+          <div><div style="font-weight:700">${esc(t("receipt_detail"))}</div>
+            <div class="muted" style="font-size:12px">${esc(amount)} ${esc(r.unit || UNIT)}</div></div>
+          <button class="icon-btn drawer__close" aria-label="${esc(t("dismiss"))}">${icon("x", 18)}</button>
+        </div>
+        <div class="drawer__body">
+          <a class="rcpt__thumb" href="${esc(r.url)}" target="_blank" rel="noopener" style="border:1px solid var(--border);border-radius:var(--radius);margin-bottom:14px"><img src="${esc(r.url)}" alt="" loading="lazy" style="width:100%;display:block;border-radius:var(--radius)"/></a>
+          ${kv(t("receipt_id"), r.id || "—", true)}
+          ${kv(t("receipt_to"), r.merchant || "—")}
+          ${kv(t("receipt_from"), r.payer || "—", true)}
+          ${kv(t("receipt_at"), receiptWhen(r))}
+          <div class="callout mt-18">${icon("info", 18)}<div>${esc(t("receipt_detail_note"))}</div></div>
+        </div>
+        <div class="drawer__foot">
+          <a class="btn btn--primary btn--block" href="${esc(r.url)}" download="receipt-${esc(String(r.id))}.png">${icon("download", 16)} ${esc(t("receipt_download"))}</a>
+        </div>
+      </aside>
+    </div>`;
+  const bd = $(".drawer-backdrop", root);
+  if (bd) bd.addEventListener("click", (e) => { if (e.target === bd) closeDrawer(); });
+  const cl = $(".drawer__close", root);
+  if (cl) cl.addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", _drawerKey);
 }
 
 async function wireReceipts() {
   const box = el("receipts-list");
   if (!box) return;
+  const statsBox = el("rcpt-stats");
+  const countEl = el("rcpt-count");
+  const search = el("rcpt-search");
+  const renderList = () => {
+    const q = (search && search.value.trim().toLowerCase()) || "";
+    const list = receiptsAll.filter(
+      (r) => !q || [r.merchant, r.payer, r.id].some((v) => String(v || "").toLowerCase().includes(q)),
+    );
+    if (countEl) countEl.textContent = t("rcpt_showing", { n: list.length, total: receiptsAll.length });
+    box.innerHTML = list.length
+      ? `<div class="table-wrap"><table class="ledger ledger--receipts">
+          <thead><tr><th>${esc(t("rcpt_th_receipt"))}</th><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("rcpt_th_payer"))}</th><th>${esc(t("th_time"))}</th><th></th></tr></thead>
+          <tbody>${list.map(receiptRow).join("")}</tbody></table></div>`
+      : `<div class="empty" style="padding:40px"><div class="empty__icon">${icon("receipt", 26)}</div><p>${esc(receiptsAll.length ? t("rcpt_no_match") : t("receipts_empty"))}</p></div>`;
+  };
   try {
     const r = await api("/api/receipts");
-    const list = (r && r.receipts) || [];
+    receiptsAll = (r && r.receipts) || [];
     box.removeAttribute("aria-busy");
-    box.innerHTML = list.length
-      ? `<div class="rcpt-grid">${list.map(receiptCard).join("")}</div>`
-      : `<div class="card"><div class="empty"><div class="empty__icon">${icon("receipt", 26)}</div><p>${esc(t("receipts_empty"))}</p></div></div>`;
+    const total = receiptsAll.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+    const latest = receiptsAll.map((x) => x.paid_at).filter(Boolean).sort().slice(-1)[0];
+    const latestStr = latest ? (isNaN(new Date(latest)) ? latest : new Date(latest).toLocaleDateString()) : "—";
+    if (statsBox)
+      statsBox.innerHTML =
+        subStat(t("rcpt_stat_count"), "receipt", "var(--brand)", fmt(String(receiptsAll.length)), "") +
+        subStat(t("rcpt_stat_total"), "coins", "var(--success)", `${fmt(String(total))} <span class="unit">${UNIT}</span>`, "") +
+        subStat(t("rcpt_stat_latest"), "clock", "var(--warn)", esc(latestStr), "");
+    renderList();
+    if (search) search.addEventListener("input", renderList);
+    box.addEventListener("click", (e) => {
+      const d = e.target.closest("[data-receipt-detail]");
+      if (d) openReceiptDrawer(d.dataset.receiptDetail);
+    });
   } catch (e) {
     box.removeAttribute("aria-busy");
     box.innerHTML = `<div class="banner">${icon("alert", 20)}<div class="banner__text"><b>${esc(t("receipts_load_failed"))}</b>${esc(e.message || "")}</div></div>`;
@@ -1698,10 +1991,17 @@ function viewOverview() {
         })
     : "";
 
+  // Active agents: sessions that can still spend (a fully-revoked budget has none). Real data from the
+  // on-chain budget's session set — the default session counts when nothing else has been issued.
+  const sessions = b.sessions && b.sessions.length ? b.sessions : [{ session: "default", revoked: b.revoked }];
+  const activeAgents = b.revoked ? 0 : sessions.filter((s) => !s.revoked).length;
+
+  // Secondary stats (§3.1): spend, transaction count, active agents, whitelisted payees. The treasury
+  // balance is promoted to the hero headline below, so it is not repeated as a tile here.
   const stats = [
-    { label: t("stat_treasury"), icon: "coins", color: "var(--brand)", value: fmt(b.treasury), unit: true, hint: t("stat_treasury_hint", { funded: fmt(b.funded), withdrawn: fmt(b.withdrawn) }), nav: "manage" },
     { label: t("stat_spent_window"), icon: "trend", color: "var(--info)", value: fmt(winSpent), unit: true, hint: w ? t("stat_spent_hint_window", { cap: fmt(winCap), left: fmt(winRemaining) }) : t("stat_spent_hint_daily", { cap: fmt(b.dailyCap) }), nav: "pay" },
     { label: t("stat_tx"), icon: "activity", color: "var(--success)", value: fmt(b.ledger.length), unit: false, hint: t("stat_tx_hint") },
+    { label: t("stat_active"), icon: "shield", color: "var(--brand)", value: fmt(activeAgents), unit: false, hint: t("stat_active_hint"), nav: "manage" },
     { label: t("stat_whitelisted"), icon: "store", color: "var(--warn)", value: fmt(b.whitelist.length), unit: false, hint: t("stat_whitelisted_hint"), nav: "merchants" },
   ]
     .map(
@@ -1744,10 +2044,14 @@ function viewOverview() {
       <div class="hero">
         <div class="hero__top">
           <div>
-            <div class="hero__title">${esc(t("hero_title"))}</div>
+            <div class="hero__title">${esc(t("hero_balance_label"))}</div>
+            <div class="hero__balance">${fmt(b.treasury)} <span class="unit">${UNIT}</span></div>
             <div class="hero__addr">${addrPill(b.component, { lg: true })}</div>
           </div>
-          ${status}
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+            ${status}
+            <span class="sync-meta"><span class="dot ${d.connected ? "dot--on" : "dot--off"}"></span>${esc(d.connected ? t("onchain_live") : t("onchain_offline"))}</span>
+          </div>
         </div>
         <div class="hero__meters">
           <div>
@@ -1759,6 +2063,7 @@ function viewOverview() {
         <div class="hero__caps">
           <span class="badge badge--muted">${icon("zap", 13)} ${esc(t("cap_pertx", { n: fmt(b.perTxCap), unit: UNIT }))}</span>
           <span class="badge badge--muted" title="${esc(dailyCapTip)}">${icon("clock", 13)} ${esc(t("cap_daily", { n: fmt(b.dailyCap), unit: UNIT }))}${w ? esc(t("cap_daily_window", { n: w.epochsPerWindow })) : ""}</span>
+          <span class="badge badge--muted">${icon("store", 13)} ${esc(t("cap_whitelist", { n: fmt(b.whitelist.length) }))}</span>
           <span class="badge badge--muted">${icon("lock", 13)} ${esc(t("cap_validator"))}</span>
         </div>
         ${
@@ -1776,7 +2081,11 @@ function viewOverview() {
 
       <div class="card">
         <div class="card__head"><h3>${esc(t("recent_activity"))}</h3>
-          <button class="btn btn--ghost btn--sm" data-nav="pay">${esc(t("view_all"))} ${icon("send", 14)}</button></div>
+          <div class="row">
+            <span class="sync-meta"><span class="dot ${d.connected ? "dot--on" : "dot--off"}"></span>${esc(t("last_synced", { t: fmtClock(S.lastSync) || "—" }))}</span>
+            <button class="btn btn--ghost btn--sm" data-action="refresh">${icon("refresh", 14)} ${esc(t("refresh"))}</button>
+            <button class="btn btn--ghost btn--sm" data-nav="pay">${esc(t("view_all"))} ${icon("send", 14)}</button>
+          </div></div>
         <div class="card__body" style="padding:8px 0 4px">
           ${
             recent
@@ -1912,6 +2221,46 @@ function renderTags() {
 
 /* ---- views: PAY ----------------------------------------------------------- */
 let lastVerdict = null;
+
+/* Live, client-side pre-check shown beside the Pay form (§3.3). An ESTIMATE only — the on-chain
+   dry-run (/api/dry-run) and the validator stay authoritative, status semantics are never softened
+   (submitted ≠ confirmed), and nothing here moves funds or writes state. */
+function payRiskHtml(b, merchantVal, amount) {
+  const w = b.window;
+  const winRemaining = w
+    ? w.remaining
+    : (() => { const r = amtBig(b.dailyCap) - amtBig(b.spent); return (r < 0n ? 0n : r).toString(); })();
+  const found = merchantVal ? b.whitelist.find((m) => (m.name || m.address) === merchantVal) : null;
+  const other = !found && merchantVal ? (S.data.merchants || []).find((m) => m.name === merchantVal) : null;
+  const payeeName = found ? found.name || t("merchant_fallback") : other ? other.name : merchantVal || "—";
+  const payeeAddr = found ? found.address : other ? other.address : "";
+  const has = amount !== null && amtBig(amount) > 0n;
+
+  const row = (label, state, detail) => {
+    const ic = state === "ok" ? icon("check", 14) : state === "bad" ? icon("ban", 14) : icon("minus", 14);
+    return `<div class="risk-item risk-item--${state}"><span class="risk-item__ic">${ic}</span>
+      <div><div class="risk-item__label">${esc(label)}</div>${detail ? `<div class="risk-item__detail">${detail}</div>` : ""}</div></div>`;
+  };
+
+  const wlState = !merchantVal ? "idle" : found ? "ok" : "bad";
+  const wlDetail = !merchantVal ? esc(t("risk_awaiting")) : found ? esc(t("risk_wl_ok")) : esc(t("risk_wl_bad"));
+  const perTxState = !has ? "idle" : amtBig(amount) <= amtBig(b.perTxCap) ? "ok" : "bad";
+  const winState = !has ? "idle" : amtBig(amount) <= amtBig(winRemaining) ? "ok" : "bad";
+
+  return `
+    <div class="preview-head">
+      <div class="preview-amt">${has ? fmt(amount) : "—"} <span class="unit">${UNIT}</span></div>
+      <div class="preview-payee">${icon("store", 14)} <span>${esc(payeeName)}</span>${payeeAddr ? ` <code>${esc(shorten(payeeAddr, 8, 5))}</code>` : ""}</div>
+    </div>
+    <div class="risk-list">
+      ${row(t("risk_whitelist"), wlState, wlDetail)}
+      ${row(t("risk_pertx"), perTxState, esc(t("risk_pertx_detail", { cap: fmt(b.perTxCap), unit: UNIT })))}
+      ${row(t("risk_window"), winState, esc(t("risk_window_detail", { left: fmt(winRemaining), unit: UNIT })))}
+      ${row(t("risk_authority"), "ok", esc(t("risk_authority_detail")))}
+      ${row(t("risk_confirm"), "idle", esc(t("risk_confirm_detail")))}
+    </div>`;
+}
+
 function viewPay() {
   const d = S.data;
   const b = d.budget;
@@ -1931,15 +2280,11 @@ function viewPay() {
     .filter((m) => !wlAddrs.has(m.address))
     .map((m) => `<option value="${esc(m.name)}">${esc(m.name)}</option>`)
     .join("");
-  const ledger = b.ledger
-    .slice()
-    .reverse()
-    .map((e) => fullLedgerRow(e))
-    .join("");
+  const initialMerchant = b.whitelist.length ? b.whitelist[0].name || b.whitelist[0].address : "";
 
   return (
     pageHead(t("nav_pay"), t("pay_sub")) +
-    `<div class="grid grid--2 grid--even grid--equal">
+    `<div class="grid grid--2">
       <div class="card">
         <div class="card__head"><h3>${esc(t("send_payment"))}</h3>
           ${b.revoked ? `<span class="badge badge--danger">${icon("ban", 13)} ${esc(t("agent_revoked_badge"))}</span>` : ""}</div>
@@ -1973,25 +2318,19 @@ function viewPay() {
               <button type="button" class="btn btn--secondary" id="p-check">${icon("shield", 16)} ${esc(t("check_on_chain"))}</button>
               <button type="submit" class="btn btn--primary" id="p-pay" ${b.revoked ? "disabled" : ""}>${icon("send", 16)} ${esc(t("pay"))}</button>
             </div>
-            <div id="verdict-slot"></div>
           </form>
           <div class="callout mt-18">${icon("info", 18)}
             <div><b>${esc(t("pay_callout_title"))}</b>${esc(t("pay_callout_body"))}</div>
           </div>
         </div>
       </div>
-      <div class="pay-activity-cell">
-        <div class="card pay-activity">
-          <div class="card__head"><h3>${esc(t("activity"))}</h3><span class="sub">${esc(t("activity_sub", { n: fmt(b.ledger.length) }))}</span></div>
-          <div class="card__body" style="padding:6px 0">
-            ${
-              ledger
-                ? `<div class="table-wrap"><table class="ledger">
-                    <thead><tr><th>${esc(t("th_merchant"))}</th><th>${esc(t("th_amount"))}</th><th>${esc(t("th_memo"))}</th><th>${esc(t("th_source"))} / ${esc(t("th_time"))}</th></tr></thead>
-                    <tbody>${ledger}</tbody></table></div>`
-                : `<div class="empty" style="padding:40px"><div class="empty__icon">${icon("activity", 26)}</div>
-                   <h3>${esc(t("pay_no_payments_title"))}</h3><p>${t("pay_no_payments_body")}</p></div>`
-            }
+      <div class="card">
+        <div class="card__head"><h3>${esc(t("pay_preview"))}</h3><span class="sub">${esc(t("pay_preview_sub"))}</span></div>
+        <div class="card__body">
+          <div id="pay-preview">${payRiskHtml(b, initialMerchant, null)}</div>
+          <div id="verdict-slot"></div>
+          <div class="callout callout--warn mt-18">${icon("shield", 18)}
+            <div><b>${esc(t("pay_preview_note_title"))}</b> ${esc(t("pay_preview_note_body"))}</div>
           </div>
         </div>
       </div>
@@ -2068,6 +2407,7 @@ function viewManage() {
   return (
     pageHead(t("nav_manage"), t("manage_sub")) +
     `<div class="stack">
+      <div class="section-head"><h2>${esc(t("sec_policy"))}</h2><p>${esc(t("sec_policy_sub"))}</p></div>
       <div class="card">
         <div class="card__head"><h3>${esc(t("limits_title"))}</h3></div>
         <div class="card__body">
@@ -2088,13 +2428,19 @@ function viewManage() {
             <button type="submit" class="btn btn--primary btn--block" id="g-limits">${icon("zap", 16)} ${esc(t("update_limits"))}</button>
           </form>
           <div class="field__hint mt-12">${t("limits_hint")}</div>
+          <div class="row row--wrap mt-12" style="justify-content:space-between">
+            <span class="field__hint" style="margin:0">${esc(t("window_rule", { n: b.window ? b.window.epochsPerWindow : "—" }))}</span>
+            <button type="button" class="btn btn--ghost btn--sm" data-nav="merchants">${icon("store", 14)} ${esc(t("merchant_limits_link"))}</button>
+          </div>
         </div>
       </div>
+      <div class="section-head"><h2>${esc(t("treasury"))}</h2><p>${esc(t("sec_treasury_sub"))}</p></div>
       <div class="card">
         <div class="card__head"><h3>${esc(t("treasury"))}</h3></div>
         <div class="card__body">
           <div class="stat__value" style="margin:0">${fmt(b.treasury)} <span class="unit">${UNIT}</span></div>
           <div class="stat__hint">${esc(t("treasury_hint", { funded: fmt(b.funded), spent: fmt(b.spent) }))}</div>
+          <div class="field__hint mt-12" style="display:flex;align-items:flex-start;gap:7px">${icon("info", 13)}<span>${esc(t("treasury_onchain_note"))}</span></div>
           <div class="form-grid mt-18">
             <form id="topup-form" novalidate>
               <div class="field" style="margin-bottom:0">
@@ -2120,8 +2466,10 @@ function viewManage() {
           </div>
         </div>
       </div>
+      <div class="section-head"><h2>${esc(t("agent_sessions"))}</h2><p>${esc(t("sec_sessions_sub"))}</p></div>
       ${sessionsCard(b)}
 
+      <div class="section-head"><h2>${esc(t("sec_security"))}</h2><p>${esc(t("sec_security_sub"))}</p></div>
       <div class="danger-zone">
         <div class="danger-zone__head">${icon("ban", 14)} ${esc(t("danger_zone"))}</div>
         <div class="danger-row">
@@ -2162,18 +2510,27 @@ function viewMerchants() {
   const rows = b.whitelist.length
     ? b.whitelist
         .map(
-          (m) => `<div class="merch-row">
+          (m) => `<div class="merch-row merch-row--link" data-merchant-detail="${esc(m.address)}" role="button" tabindex="0" title="${esc(t("view_detail"))}">
             <span class="chip__dot" style="background:${avatarColor(m.name || m.address)}"></span>
             ${m.name ? `<b class="merch-row__name">${esc(m.name)}</b>` : ""}<code class="merch-row__addr">${esc(shorten(m.address, 10, 6))}</code>
+            <span class="badge badge--ok merch-row__st" style="margin-left:auto">${icon("check", 12)} ${esc(t("merchant_status_active"))}</span>
             <button type="button" class="chip__rm merch-row__rm" data-remove-merchant="${esc(m.address)}" data-merchant-name="${esc(m.name || "")}" title="${esc(t("remove_merchant"))}" aria-label="${esc(t("remove_merchant"))}">${icon("x", 12)}</button>
           </div>`,
         )
         .join("")
     : `<div class="merch-empty muted">${esc(t("no_wl_merchants"))}</div>`;
 
+  const mstat = (label, ic, c, val) =>
+    `<div class="stat"><div class="stat__top"><span class="stat__icon" style="--c:${c}">${icon(ic, 17)}</span><div class="stat__label">${esc(label)}</div></div><div class="stat__value">${val}</div></div>`;
+
   return (
     pageHead(t("nav_merchants"), t("merchants_sub")) +
     `<div class="stack">
+      <div class="grid grid--3">
+        ${mstat(t("m_stat_total"), "store", "var(--brand)", fmt(b.whitelist.length))}
+        ${mstat(t("m_stat_enabled"), "check", "var(--success)", fmt(b.whitelist.length))}
+        ${mstat(t("m_stat_pending"), "clock", "var(--warn)", "0")}
+      </div>
       <div class="card">
         <div class="card__head"><h3>${esc(t("wl_merchants"))}</h3><span class="sub">${fmt(b.whitelist.length)}</span></div>
         <div class="card__body">
@@ -2390,7 +2747,22 @@ function viewConnect() {
 
   return (
     pageHead(t("nav_connect"), t("connect_sub")) +
+    `<div class="connect-status row row--wrap">
+       <span class="badge badge--muted">${icon("plug", 13)} ${esc(t("connect_st_network", { n: network }))}</span>
+       <span class="badge badge--${api.enabled ? "ok" : "muted"}">${icon(api.enabled ? "check" : "lock", 13)} ${esc(api.enabled ? t("connect_st_api_on") : t("connect_st_api_off"))}</span>
+       <span class="badge badge--muted">${icon("wallet", 13)} ${esc(t("connect_st_keys", { n: (api.agentKeys || []).length }))}</span>
+       <span class="badge badge--${comp ? "ok" : "warn"}">${icon("shield", 13)} ${esc(comp ? t("connect_st_comp_ok") : t("connect_st_comp_none"))}</span>
+     </div>` +
     needBudget +
+    `<div class="card connect-card">
+       <div class="connect-card__head">${icon("grid", 18)}<h3>${esc(t("connect_steps_title"))}</h3></div>
+       <ol class="connect-steps">
+         <li><b>${esc(t("connect_step1_t"))}</b> ${esc(t("connect_step1_b"))}</li>
+         <li><b>${esc(t("connect_step2_t"))}</b> ${esc(t("connect_step2_b"))}</li>
+         <li><b>${esc(t("connect_step3_t"))}</b> ${esc(t("connect_step3_b"))}</li>
+         <li><b>${esc(t("connect_step4_t"))}</b> ${esc(t("connect_step4_b"))}</li>
+       </ol>
+     </div>` +
     `<div class="card connect-card">
        <div class="connect-card__head">${icon("shield", 18)}<h3>${esc(t("connect_mcp_title"))}</h3></div>
        <p class="connect-card__how">${esc(t("connect_mcp_how"))}</p>
@@ -2439,6 +2811,9 @@ function wire() {
 
     const rmm = e.target.closest("[data-remove-merchant]");
     if (rmm) return removeMerchant(rmm.dataset.removeMerchant, rmm.dataset.merchantName, rmm);
+
+    const md = e.target.closest("[data-merchant-detail]");
+    if (md) return openMerchantDrawer(md.dataset.merchantDetail);
   };
 
   // theme toggle
@@ -2543,6 +2918,7 @@ async function doCopy(btn) {
 async function refreshState(silent) {
   try {
     S.data = await api("/api/state");
+    S.lastSync = Date.now();
     S.connError = null;
     if (!silent) render();
   } catch (e) {
@@ -2700,6 +3076,76 @@ async function removeMerchant(address, name, btn) {
   });
 }
 
+/* ---- merchant detail drawer (§3.4) ---------------------------------------- */
+function ensureDrawerRoot() {
+  let r = el("drawer-root");
+  if (!r) {
+    r = document.createElement("div");
+    r.id = "drawer-root";
+    document.body.appendChild(r);
+  }
+  return r;
+}
+function _drawerKey(e) {
+  if (e.key === "Escape") closeDrawer();
+}
+function closeDrawer() {
+  const r = el("drawer-root");
+  if (r) r.innerHTML = "";
+  document.removeEventListener("keydown", _drawerKey);
+}
+function openMerchantDrawer(address) {
+  const b = S.data && S.data.budget;
+  if (!b) return;
+  const m = b.whitelist.find((x) => x.address === address);
+  if (!m) return;
+  const root = ensureDrawerRoot();
+  const name = m.name || t("merchant_fallback");
+  root.innerHTML = `
+    <div class="drawer-backdrop">
+      <aside class="drawer" role="dialog" aria-modal="true" aria-label="${esc(name)}">
+        <div class="drawer__head">
+          <div class="row" style="gap:10px;min-width:0">
+            <span class="avatar" style="background:${avatarColor(m.name || m.address)}">${initials(m.name, m.address)}</span>
+            <div style="min-width:0"><div style="font-weight:700">${esc(name)}</div>
+              <div class="muted" style="font-size:12px">${esc(t("merchant_detail"))}</div></div>
+          </div>
+          <button class="icon-btn drawer__close" aria-label="${esc(t("dismiss"))}">${icon("x", 18)}</button>
+        </div>
+        <div class="drawer__body">
+          <div class="drawer__row"><div class="drawer__k">${esc(t("drawer_status"))}</div>
+            <div class="drawer__v"><span class="badge badge--ok">${icon("check", 13)} ${esc(t("merchant_status_active"))}</span></div></div>
+          <div class="drawer__row"><div class="drawer__k">${esc(t("drawer_name"))}</div>
+            <div class="drawer__v">${esc(name)}</div></div>
+          <div class="drawer__row"><div class="drawer__k">${esc(t("drawer_address"))}</div>
+            <div class="drawer__v"><span class="addr addr--lg"><span class="addr__text">${esc(m.address)}</span>
+              <button class="icon-btn" data-copy="${esc(m.address)}" aria-label="${esc(t("copy"))}">${icon("copy", 15)}</button></span></div></div>
+          <div class="drawer__row"><div class="drawer__k">${esc(t("drawer_authorization"))}</div>
+            <div class="drawer__v">${esc(t("merchant_auth_note"))}</div></div>
+          <div class="callout mt-18">${icon("info", 18)}<div>${esc(t("merchant_detail_note"))}</div></div>
+        </div>
+        <div class="drawer__foot">
+          <button class="btn btn--danger-soft btn--block" data-drawer-remove="${esc(m.address)}" data-merchant-name="${esc(m.name || "")}">${icon("x", 16)} ${esc(t("remove_merchant"))}</button>
+        </div>
+      </aside>
+    </div>`;
+  const bd = $(".drawer-backdrop", root);
+  if (bd) bd.addEventListener("click", (e) => { if (e.target === bd) closeDrawer(); });
+  const cl = $(".drawer__close", root);
+  if (cl) cl.addEventListener("click", closeDrawer);
+  root.querySelectorAll("[data-copy]").forEach((btn) => btn.addEventListener("click", () => doCopy(btn)));
+  const rm = $("[data-drawer-remove]", root);
+  if (rm)
+    rm.addEventListener("click", () => {
+      const addr = rm.dataset.drawerRemove;
+      const nm = rm.dataset.merchantName;
+      closeDrawer();
+      const rowBtn = document.querySelector(`[data-remove-merchant="${addr}"]`) || document.createElement("button");
+      removeMerchant(addr, nm, rowBtn);
+    });
+  document.addEventListener("keydown", _drawerKey);
+}
+
 /* ---- create wiring -------------------------------------------------------- */
 function wireCreate() {
   renderTags();
@@ -2787,6 +3233,19 @@ function wirePay() {
     setErr("p-amount", !amountOk);
     return merchant && amountOk;
   };
+
+  // Live client-side pre-check beside the form; a stale dry-run verdict is cleared when inputs change.
+  const preview = el("pay-preview");
+  const refreshPreview = () => {
+    if (!preview) return;
+    const { merchant, amount } = readInputs();
+    preview.innerHTML = payRiskHtml(S.data.budget, merchant, amount);
+    if (slot) slot.innerHTML = "";
+  };
+  const mSel = el("p-merchant");
+  const aInp = el("p-amount");
+  if (mSel) mSel.addEventListener("change", refreshPreview);
+  if (aInp) aInp.addEventListener("input", refreshPreview);
 
   checkBtn.addEventListener("click", async () => {
     const vals = readInputs();
