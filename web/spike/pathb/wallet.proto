@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+// Minimal PROTOTYPE slice of the Minotari base-layer (L1) console-wallet gRPC, enough to drive a
+// one-sided XTM payment and read balance/tx status. Field names + the PaymentType enum match the
+// official proto (tari-project/tari applications/minotari_app_grpc/proto/wallet.proto, service Wallet,
+// package tari.rpc). Field NUMBERS here are prototype-local — for a REAL wallet, swap in the official
+// wallet.proto (it carries the exact numbers + extra fields). Our mock wallet and client share THIS
+// file, so the offline loop is self-consistent.
+package tari.rpc;
+
+service Wallet {
+  rpc GetCompleteAddress (Empty) returns (GetCompleteAddressResponse);
+  rpc GetBalance (GetBalanceRequest) returns (GetBalanceResponse);
+  rpc Transfer (TransferRequest) returns (TransferResponse);
+  rpc GetTransactionInfo (GetTransactionInfoRequest) returns (GetTransactionInfoResponse);
+}
+
+message Empty {}
+
+message GetCompleteAddressResponse {
+  string interactive_address = 1;
+  string one_sided_address = 2;
+}
+
+message GetBalanceRequest {}
+message GetBalanceResponse {
+  uint64 available_balance = 1;
+  uint64 pending_incoming_balance = 2;
+  uint64 pending_outgoing_balance = 3;
+  uint64 timelocked_balance = 4;
+}
+
+// Official recommended type is ONE_SIDED_TO_STEALTH_ADDRESS (recipient needs only their address).
+enum PaymentType {
+  STANDARD_MIMBLEWIMBLE = 0;
+  ONE_SIDED = 1;
+  ONE_SIDED_TO_STEALTH_ADDRESS = 2;
+}
+
+message PaymentRecipient {
+  string address = 1;
+  uint64 amount = 2;          // in micro-Tari (µT)
+  uint64 fee_per_gram = 3;
+  PaymentType payment_type = 4;
+  string user_payment_id = 5; // optional memo
+}
+
+message TransferRequest {
+  repeated PaymentRecipient recipients = 1;
+  bool single_tx = 2;
+}
+
+message TransferResult {
+  string address = 1;
+  uint64 transaction_id = 2;
+  bool is_success = 3;
+  string failure_message = 4;
+}
+message TransferResponse {
+  repeated TransferResult results = 1;
+}
+
+message GetTransactionInfoRequest { repeated uint64 transaction_ids = 1; }
+message TransactionInfo {
+  uint64 tx_id = 1;
+  string dest_address = 2;
+  string status = 3;          // e.g. TRANSACTION_STATUS_MINED_CONFIRMED
+  uint64 amount = 4;
+  uint64 fee = 5;
+}
+message GetTransactionInfoResponse { repeated TransactionInfo transactions = 1; }

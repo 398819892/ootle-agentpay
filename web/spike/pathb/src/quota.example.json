@@ -1,0 +1,10 @@
+{
+  "total": "50000000000",
+  "perTxCap": "1000000000",
+  "dailyCap": "1500000000",
+  "windowMs": 86400000,
+  "whitelist": [
+    "merchant_address_1_base58_or_emoji_here"
+  ],
+  "paymentType": "ONE_SIDED_TO_STEALTH_ADDRESS"
+}

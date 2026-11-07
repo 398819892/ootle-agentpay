@@ -1,0 +1,15 @@
+{
+  "name": "agentpay-pathb-l1",
+  "private": true,
+  "type": "module",
+  "version": "0.0.1",
+  "description": "Path B prototype: an agent spends L1 XTM (Minotari) within a software-enforced budget. A budget gateway holds the quota (per-tx / daily / whitelist), signs one-sided payments via a headless minotari_console_wallet gRPC, and pops NO confirmation while in-cap. The agent talks only to the gateway and never holds the wallet key.",
+  "scripts": {
+    "flow": "node node/pathb-flow.mjs",
+    "gateway": "node src/gateway-server.mjs"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "1.12.5",
+    "@grpc/proto-loader": "0.7.13"
+  }
+}
