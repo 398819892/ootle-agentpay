@@ -105,8 +105,8 @@ export class TariWindowWallet {
    * Local dry-run via the single-call path: no popup, no submit. `instructions` is a raw Instruction[]; we
    * let the wallet discover inputs (the integration docs say inputs are "purely an optimization" and warn
    * NOT to pin cached substate versions). Returns the indexer's dry-run result for client-side preview.
-   * VERIFY on a live wallet: that `dryRun:true` is honoured as no-popup, and the exact param shape — the
-   * connector forwards params verbatim and does not define them.
+   * CONFIRMED (Tari Universe integration SKILL.md): `tari_signAndSubmitTransaction` takes
+   * `{ instructions, maxFee?, inputs?, dryRun? }` and "prompts unless dryRun" — so dryRun:true never pops.
    */
   dryRun(instructions, { inputs } = {}) {
     const params = inputs ? { instructions, inputs, dryRun: true } : { instructions, dryRun: true };
@@ -135,12 +135,15 @@ export class TariWindowWallet {
   }
 
   /**
-   * ALTERNATIVE submit path for the wallet's HIGH-LEVEL named operations (shield / unshield / sendPrivately /
-   * htlc*), NOT for our raw AgentBudget instructions — kept for completeness. `operation` is a flat object
-   * with a `kind` discriminator (CONFIRMED by tari-connector.js `proveFunds`: { kind:"shield", ... }).
+   * ALTERNATIVE 3-step submit, equivalent to signAndSubmit for our use. `operation` is a flat object with a
+   * `kind` discriminator. CONFIRMED (Tari Universe integration SKILL.md): `kind:"instructions"` IS a valid
+   * operation — `{ kind:"instructions", instructions, maxFee?, inputs? }` — so this path ALSO submits raw
+   * AgentBudget instructions (the one exclusion is a hand-built `StealthTransfer`, which we never send). The
+   * wallet's high-level kinds (shield/unshield/sendPrivately/htlc*) are additional operations on the same call.
    * 3 steps: create → returns { requestId } and opens the popup → poll getTransactionRequest → on "approved"
-   * call submit. Statuses CONFIRMED from tari-connector.js: "approved" (now call submit), "submitted" (result
-   * at summary.result), "rejected"/"failed" (error at summary.error); any other status just keeps polling.
+   * call submit. Statuses CONFIRMED: "approved" (now call submit), "submitted" (result at summary.result),
+   * "rejected"/"failed" (error at summary.error); any other status just keeps polling. We default to the
+   * single-call signAndSubmit; this is kept for callers that want the explicit request/poll/submit trio.
    */
   async createApproveSubmit(operation, opts = {}) {
     const { onPending, pollMs = 800, timeoutMs = 180_000 } = opts;

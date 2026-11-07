@@ -23,10 +23,16 @@
   </head>
   <body>
     <h1>AgentPay — connect your own wallet (window.tari spike)</h1>
-    <p class="sub">The same <code>open</code>/<code>pay</code> instruction mapping as flows A/B, but signed and submitted by the user's own wallet through the shared <code>window.tari</code> provider — the Sapient extension, or the Tari Universe web wallet. No backend, no user-run walletd, no browser-held key; every transaction is approved in the wallet's own popup.</p>
+    <p class="sub">The same <code>open</code>/<code>pay</code> instruction mapping as flows A/B, but signed and submitted by the user's own wallet through the <code>window.tari</code> provider — the <b>Tari Universe</b> web wallet (<code>universe.tari.mw</code>). No backend, no user-run walletd, no browser-held key; every transaction is approved in the wallet's own popup.</p>
 
     <div class="warn">
-      Prerequisite not yet done: this reuses the spike's ootle.ts <b>0.11 / Ootle 0.47</b> instruction build, while the live testnet is <b>post-reset 0.49.2</b> and current ootle.ts is <b>0.13 (→0.49.1)</b>. It will not round-trip on esmeralda until the spike deps are bumped (notably the 0.11.0 template-literal encoding change) and the indexer host is updated. Points marked <code>VERIFY:</code> in the source need a live check.
+      Blockers before this round-trips on esmeralda (all current as of 2026-11-07):
+      <ol style="margin:6px 0 0; padding-left:18px">
+        <li><b>No funds.</b> The 0.49.2 reset wiped esmeralda — the Caravel faucet is gone and the walletd faucet is empty. A fresh account can't pay a fee until funded (L1-burn is the only documented route).</li>
+        <li><b>Template gone.</b> The published AgentBudget template was wiped by the reset; it must be <b>republished on 0.49.2</b> and its new address put in the field below.</li>
+        <li><b>Universe loads dApps in a cross-origin iframe.</b> This page gets <code>window.tari</code> only when opened <b>inside</b> <code>universe.tari.mw</code> (a plain localhost tab gets nothing). The dev server must send <code>Content-Security-Policy: frame-ancestors 'self' https://universe.tari.mw;</code>, and how to point Universe at a localhost dev URL is not yet confirmed.</li>
+      </ol>
+      Deps are on ootle.ts <b>0.13 / Ootle 0.49.2</b> (done). A few <code>VERIFY:</code> points in the source still need a live-wallet check.
     </div>
 
     <section>
@@ -38,7 +44,7 @@
     </section>
 
     <section>
-      <h2>C · Your wallet via window.tari <span class="pill">Sapient / Tari Universe · wallet signs + submits</span></h2>
+      <h2>C · Your wallet via window.tari <span class="pill">Tari Universe · wallet signs + submits</span></h2>
       <div id="c-acct" class="mono">not connected</div>
       <button id="c-connect">Connect wallet</button>
       <button id="c-open" class="ghost" disabled>Open budget (50 000 · caps 1 000 / 1 500)</button>
@@ -47,8 +53,9 @@
       <pre id="c-log"></pre>
     </section>
 
-    <!-- Loads the Universe connector so the dApp also works embedded in the Tari Universe web wallet;
-         it stands aside when an extension already owns window.tari. Remove if targeting the extension only. -->
+    <!-- The Tari Universe connector: supplies window.tari by postMessage to the parent wallet frame when
+         this page is loaded INSIDE universe.tari.mw's iframe. In a standalone tab it stands aside (and the
+         page shows "no wallet"). This is the primary path now that we target Universe, not an extension. -->
     <script src="https://universe.tari.mw/tari-connector.js"></script>
     <script type="module" src="/src/window-tari-main.js"></script>
   </body>

@@ -87,11 +87,24 @@ A/B 都要求用户**自己跑 walletd**。路径 C 走 **`window.tari` 注入�
 
 > 结论：从源码能核的都核了、改对了；剩下一批形状**只有真钱包能定**，正是阶段 1（真网 open+pay）要一次性验掉的东西。
 
+### 换 Tari Universe 作为 window.tari 钱包（2026-11-07）
+
+决定：轴 B 押路径 C，但**钱包用官方的 Tari Universe，不用 Sapient**。照官方集成文档（`universe.tari.mw/integration` 的 SKILL.md）核实：
+
+- **通用签名可用（好消息）**：Universe 暴露完整 `window.tari`，原始指令两条路文档里都有——`tari_signAndSubmitTransaction {instructions, maxFee?, inputs?, dryRun?}`（"prompts unless dryRun"）和 `tari_createTransactionRequest {kind:"instructions", instructions, …}`。之前担心的「桌面 tapplet 只放行 4 个方法、不能通用签名」在现行文档里**不存在**。唯一禁的是手搓 `StealthTransfer`（我们不发）。`dryRun:true` 无弹窗、`tari_getNetwork` 回名字字符串、错误码 4200 都已确认，适配器对得上。
+- **连接模型和 Sapient 不同（关键 catch）**：Universe 是 `universe.tari.mw` 上的**托管网页钱包**，它把 dApp 放进一个**跨域 iframe** 里跑，connector 通过 postMessage 和父窗口钱包通话。**独立的 localhost 标签页拿不到 `window.tari`**（只有装了 Sapient 扩展才有）——所以本页必须**在 universe.tari.mw 内部被加载**才行，dev server 还得发 `Content-Security-Policy: frame-ancestors 'self' https://universe.tari.mw;`。**怎么让 Universe 去加载一个 localhost dev 页，文档没说、未确认**——这是新的未知项。
+- **充值仍然卡住**：Universe 文档里**没有 faucet**，和 Sapient 一样卡在 reset 后没测试币（见下「esmeralda 0.49.2 reset」）。
+- 改动：`window-tari.html` 顶部的过时警告已换成当前三道 blocker（没币 / 模板要在 0.49.2 重发 / iframe 加载）；Sapient 字样退成次要。适配器 `createApproveSubmit` 注释修正为「`kind:"instructions"` 也合法，等价于 signAndSubmit」。
+
+### esmeralda 0.49.2 reset 把链上旧状态清了（2026-11-07 实测）
+
+查了所有 indexer（`esme-indexer-a/b`、`ootle-indexer-a/b`，全同一个网、epoch 12920）：2026-11-01 部署的 agent_budget 模板、escrow 模板、充值账户、Caravel 水龙头组件**全部 404**。所以阶段 1 之前要先解决两件事，且都压在「怎么在 reset 后的 esmeralda 上搞到第一笔测试币」上：**① 给账户充值**（Caravel 死了、walletd faucet 空，唯一文档化的路是 L1-burn→claim）；**② 把 agent_budget 在 0.49.2 重发**（旧地址已失效，流程见 `docs/esmeralda.md` + `scripts/esme-fund`、`scripts/esme_publish_retry.sh`）。
+
 ### 怎么跑（先决条件满足后）
 
-1. 装 [Sapient](https://sapient.tari.mw/) 扩展（或在 Tari Universe 网页钱包里打开本页），在 Settings 里切到 esmeralda，账户先充过值（未充值账户 deposit 会 `OneOrMoreInputsNotFound`）。
-2. `npm run dev`，开 `http://localhost:5173/window-tari.html`。
-3. 填 AgentBudget 模板 + 白名单商户地址 → 连接钱包 → 开预算（弹窗批准）→ 付 700（弹窗批准）→ dry-run 超限（应被链上硬额度拒，无弹窗）。
+1. 在 **Tari Universe 网页钱包**（`universe.tari.mw`）里打开本页（本页必须跑在 Universe 的 iframe 内才拿得到 `window.tari`；dev server 要发 `frame-ancestors` CSP，见上）。账户先充过值（未充值账户 deposit 会 `OneOrMoreInputsNotFound`）。
+2. `npm run dev`，让本页可被 Universe 加载（纯 localhost 直开拿不到钱包）。
+3. 填 **0.49.2 上重发的** AgentBudget 模板 + 白名单商户地址 → 连接钱包 → 开预算（弹窗批准）→ 付 700（弹窗批准）→ dry-run 超限（应被链上硬额度拒，无弹窗）。
 
 集成文档（`universe.tari.mw/integration`）提醒的坑：钱包地址 `otl_…` ≠ 组件地址 `component_…`（指令参数要 `component_`）；别钉 substate 版本（用 `version:null`，`agentpay-tx.js` 已如此）；金额用字符串/bigint 不用 JS number（已如此）。
 
