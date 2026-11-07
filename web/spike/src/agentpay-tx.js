@@ -52,8 +52,10 @@ export function nonFungibleStringIdListLiteral(ids) {
 const asInput = (id, is_write = true) => ({ substate_id: id, version: null, is_write });
 
 /**
- * `open`: withdraw `fund` XTR from `owner`, instantiate AgentBudget, deposit both badges back into
- * `owner`. The owner pays the fee. `ownerVaults` are the owner's vault ids (declared as inputs).
+ * `open`: withdraw `fund` of `p.resource` (default native XTR; any L2 resource, e.g. a stablecoin) from
+ * `owner`, instantiate AgentBudget, deposit both badges back into `owner`. The owner pays the fee (always
+ * in native XTR). `ownerVaults` are the owner's vault ids (declared as inputs) — include the funding
+ * resource's vault AND, when funding with a non-XTR resource, the owner's XTR vault for the fee.
  */
 export function openBudgetTx(p) {
   // "No-confirm" (免确认) two-account model: when `p.agent` (a separate agent account address) is set,
@@ -63,23 +65,30 @@ export function openBudgetTx(p) {
   // still signs THIS open once (funding + handing over the badge).
   const agentAccount = p.agent ?? p.owner;
   const routesToAgent = p.agent && p.agent !== p.owner;
+  // Asset-generic: the budget locks whatever resource it is funded with (the AgentBudget template's vault
+  // + caps are resource-agnostic — see templates/agent_budget/src/lib.rs). `p.resource` is the FUNDING
+  // resource; it defaults to native XTR (= TARI_RESOURCE_ADDRESS) and can be any L2 resource, e.g. a
+  // stablecoin, for the same open flow. The transaction FEE is always paid in native XTR (Ootle fees are
+  // native), independent of the funding resource — so when they differ we declare both as read inputs.
+  const resource = p.resource ?? XTR;
   const b = TransactionBuilder.new(p.network, p.maxEpoch)
     // Inputs are explicit on this path (walletd's `detect_inputs` is not available via the indexer):
     // the owner account + its vaults (written), the agent account when distinct (written — it receives
-    // the badge), the XTR resource and template (read), and every whitelisted merchant (read) — the
-    // engine rejects an undeclared component referenced from template args with "Template referenced
-    // root substate but it was not found".
+    // the badge), the funding resource + native XTR (fee) + template (read), and every whitelisted
+    // merchant (read) — the engine rejects an undeclared component referenced from template args with
+    // "Template referenced root substate but it was not found".
     .withInputs([
       asInput(p.owner),
       ...(routesToAgent ? [asInput(p.agent)] : []),
       ...p.ownerVaults.map((v) => asInput(v)),
-      asInput(XTR, false),
+      asInput(resource, false),
+      ...(resource !== XTR ? [asInput(XTR, false)] : []),
       asInput(p.template, false),
       ...p.whitelist.map((m) => asInput(m, false)),
     ])
     .feeTransactionPayFromComponent(p.owner, BigInt(p.maxFee ?? 200_000))
     .callMethod({ componentAddress: p.owner, methodName: "withdraw" }, [
-      resourceAddressLiteral(XTR),
+      resourceAddressLiteral(resource),
       amountLiteral(BigInt(p.fund)),
     ])
     .saveVar("funds")
