@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mock Tari wallet — path-C embedding harness</title>
+    <!--
+      A stand-in for the Tari Universe web wallet, JUST enough to prove the window.tari EMBEDDING
+      mechanism (spike README blocker #3) with no real wallet, no funds, no Universe account.
+
+      How the real thing works (from universe.tari.mw/tari-connector.js, read 2026-11-07): the WALLET
+      is the parent frame and the dApp runs in a child iframe; the connector publishes a working
+      `window.tari` in the dApp ONLY when the parent origin is a KNOWN wallet origin — and
+      http://localhost:5173 / http://127.0.0.1:5173 are hard-coded in that allow-list (plus anything
+      in window.TARI_WALLET_ORIGINS). The dApp talks to the parent over postMessage protocol
+      "tari-dapp-bridge/1". So: serve this page at :5173, iframe the real window-tari.html, and
+      answer the bridge. The dApp's connector then flips to embedded and the whole flow round-trips.
+
+      This proves the mechanism + that our dApp is shaped for it. It does NOT prove the hosted
+      universe.tari.mw will agree to frame OUR url (a wallet-side registration question), nor the
+      wallet's real receipt shapes (the README `VERIFY:` items) — those still need the live wallet.
+    -->
+    <style>
+      body { margin: 0; font: 13px/1.5 system-ui, sans-serif; background: #0f1012; color: #e8e8ea; }
+      header { padding: 10px 16px; background: #1a1b1f; border-bottom: 1px solid #2a2c32; }
+      header b { color: #8b7bff; } .tag { color: #9a9aa3; }
+      main { display: flex; gap: 12px; padding: 12px 16px; align-items: flex-start; flex-wrap: wrap; }
+      iframe { width: 780px; height: 620px; border: 1px solid #2a2c32; border-radius: 8px; background: #fff; }
+      #wlog { flex: 1; min-width: 300px; height: 620px; overflow: auto; background: #15161a; border: 1px solid #2a2c32; border-radius: 8px; padding: 10px; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; }
+      #wlog .in { color: #6fd08c; } #wlog .out { color: #7aa2ff; } #wlog .warn { color: #e0b000; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <b>Mock Tari wallet</b> <span class="tag">(dev) — origin http://localhost:5173 · speaks tari-dapp-bridge/1 · embeds the real window-tari.html</span>
+    </header>
+    <main>
+      <iframe id="dapp" src="/window-tari.html" title="dApp"></iframe>
+      <div id="wlog"></div>
+    </main>
+    <script>
+      // ---- wallet-side mock state (same canned data as node/mock-window-tari.mjs; matches the dApp's
+      // default config inputs so findNewComponent / parseBudgetSubstate / templateEvents line up) ----
+      var PROTOCOL = "tari-dapp-bridge/1";
+      var h = function (b) { return b.repeat(32); };
+      var ACCOUNT  = "component_f973833d3747d725c48a564d5b6bd4482259013d00722b28fd42814d4365d814";
+      var MERCHANT_HEX = "7ce2546e4f2384eee64b89e77fab606aff50099e0c14be140c50db294780ec6c"; // == default merchant input
+      var TEMPLATE_HEX = "978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f"; // == default template input
+      var NEWBUDGET = "component_" + h("ab");
+      var VAULT = h("44"), OBADGE = h("55"), ABADGE = h("66");
+
+      var openReceipt = { Finalized: { execution_result: { finalize: { result: {
+        Accept: { up_substates: [[ACCOUNT, {}], ["component_" + MERCHANT_HEX, {}], [NEWBUDGET, {}]] }, events: [] } } } } };
+      var payReceipt = { result: { Finalized: { execution_result: { finalize: {
+        result: { Accept: { up_substates: [] } },
+        events: [{ template_address: TEMPLATE_HEX, topic: "AgentBudget.pay", payload: { amount: "700", merchant: "component_" + MERCHANT_HEX } }] } } } } };
+      var dryRunReject = { Finalized: { execution_result: { finalize: { result: {
+        Reject: { reason: "Amount exceeds the per-transaction cap" } } } } } };
+      var substate = { substate: { Component: { body: { state: [
+        { value: { hex: VAULT } }, { value: { hex: OBADGE } }, { value: { hex: ABADGE } },
+        1000, 1500, 0, 12920, 10, [{ value: { hex: MERCHANT_HEX } }], false ] } } } };
+
+      var submitN = 0;
+      var wlog = document.getElementById("wlog");
+      function log(cls, msg) {
+        var d = document.createElement("div"); d.className = cls;
+        d.textContent = new Date().toLocaleTimeString() + "  " + msg;
+        wlog.appendChild(d); wlog.scrollTop = wlog.scrollHeight;
+      }
+
+      // The "signer": decide the reply for each bridge method. A real wallet would pop an approval
+      // here; we auto-approve and log it, which is enough to prove the round-trip.
+      function handle(method, params) {
+        switch (method) {
+          case "tari_requestAccounts": log("warn", "approve: connect -> account " + ACCOUNT.slice(0, 20) + "…"); return [ACCOUNT];
+          case "tari_getAccounts": return [ACCOUNT];
+          case "tari_getNetwork": return "esmeralda";
+          case "tari_getCapabilities": return { transactionRequests: true, dryRunIsLocal: true, walletAddress: true };
+          case "tari_signAndSubmitTransaction":
+            if (params && params.dryRun) { log("warn", "dry-run (no prompt): " + (params.instructions ? params.instructions.length : 0) + " instr -> REJECT (over cap)"); return dryRunReject; }
+            log("warn", "approve: sign+submit " + (params && params.instructions ? params.instructions.length : 0) + " instr, maxFee=" + (params && params.maxFee));
+            return (submitN++ === 0) ? openReceipt : payReceipt;
+          case "tari_getSubstate": return substate;
+          case "tari_getTransactionResult": return payReceipt.result;
+          default: throw { code: 4200, message: "mock wallet: unsupported method " + method };
+        }
+      }
+
+      window.addEventListener("message", function (event) {
+        var data = event.data;
+        if (!data || data.protocol !== PROTOCOL || !data.id) return;
+        // The dApp iframe is our only child; answer to its exact origin.
+        log("in", "→ req " + data.method + (data.params && Object.keys(data.params).length ? " " + JSON.stringify(data.params).slice(0, 80) : ""));
+        var reply = { protocol: PROTOCOL, id: data.id };
+        try { reply.result = handle(data.method, data.params || {}); }
+        catch (e) { reply.error = { code: e.code || -32603, message: e.message || String(e) }; }
+        event.source.postMessage(reply, event.origin);
+        log("out", "← " + (reply.error ? ("error " + reply.error.code) : ("ok " + data.method)));
+      });
+
+      log("warn", "mock wallet ready; embedding /window-tari.html (parent origin = " + window.location.origin + ")");
+    </script>
+  </body>
+</html>
