@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentPay — window.tari spike</title>
+    <style>
+      :root { --bg: #f7f7f5; --fg: #1a1a1a; --mut: #666; --box: #fff; --line: #ddd; --ok: #1b7f3b; --bad: #b3261e; --acc: #4b3ad6; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #15161a; --fg: #ececec; --mut: #9a9aa3; --box: #1f2127; --line: #33363f; } }
+      body { margin: 0; padding: 16px; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); max-width: 760px; }
+      h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 15px; margin: 0 0 8px; }
+      p.sub { color: var(--mut); margin: 0 0 16px; }
+      section { background: var(--box); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-top: 16px; }
+      label { display: block; color: var(--mut); font-size: 12px; margin-top: 8px; }
+      input { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); font-family: ui-monospace, monospace; font-size: 12px; }
+      button { margin: 8px 6px 0 0; padding: 7px 12px; border: 1px solid var(--acc); background: var(--acc); color: #fff; border-radius: 6px; cursor: pointer; }
+      button.ghost { background: transparent; color: var(--acc); } button:disabled { opacity: .5; cursor: default; }
+      pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 360px; overflow: auto; margin: 10px 0 0; }
+      .ok { color: var(--ok); } .bad { color: var(--bad); } .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+      .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--mut); font-size: 12px; margin-left: 6px; }
+      .warn { border-left: 3px solid #d08700; padding: 8px 10px; background: color-mix(in srgb, #d08700 10%, transparent); border-radius: 4px; font-size: 13px; color: var(--mut); }
+    </style>
+  </head>
+  <body>
+    <h1>AgentPay — connect your own wallet (window.tari spike)</h1>
+    <p class="sub">The same <code>open</code>/<code>pay</code> instruction mapping as flows A/B, but signed and submitted by the user's own wallet through the shared <code>window.tari</code> provider — the Sapient extension, or the Tari Universe web wallet. No backend, no user-run walletd, no browser-held key; every transaction is approved in the wallet's own popup.</p>
+
+    <div class="warn">
+      Prerequisite not yet done: this reuses the spike's ootle.ts <b>0.11 / Ootle 0.47</b> instruction build, while the live testnet is <b>post-reset 0.49.2</b> and current ootle.ts is <b>0.13 (→0.49.1)</b>. It will not round-trip on esmeralda until the spike deps are bumped (notably the 0.11.0 template-literal encoding change) and the indexer host is updated. Points marked <code>VERIFY:</code> in the source need a live check.
+    </div>
+
+    <section>
+      <h2>AgentBudget config</h2>
+      <label>AgentBudget template (component_… the budget is instantiated from)</label>
+      <input id="cfg-template" value="template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f" />
+      <label>Merchant account (whitelisted, will be paid)</label>
+      <input id="cfg-merchant" value="component_7ce2546e4f2384eee64b89e77fab606aff50099e0c14be140c50db294780ec6c" />
+    </section>
+
+    <section>
+      <h2>C · Your wallet via window.tari <span class="pill">Sapient / Tari Universe · wallet signs + submits</span></h2>
+      <div id="c-acct" class="mono">not connected</div>
+      <button id="c-connect">Connect wallet</button>
+      <button id="c-open" class="ghost" disabled>Open budget (50 000 · caps 1 000 / 1 500)</button>
+      <button id="c-pay" class="ghost" disabled>Pay 700</button>
+      <button id="c-over" class="ghost" disabled>Dry-run pay 5 000 (over cap)</button>
+      <pre id="c-log"></pre>
+    </section>
+
+    <!-- Loads the Universe connector so the dApp also works embedded in the Tari Universe web wallet;
+         it stands aside when an extension already owns window.tari. Remove if targeting the extension only. -->
+    <script src="https://universe.tari.mw/tari-connector.js"></script>
+    <script type="module" src="/src/window-tari-main.js"></script>
+  </body>
+</html>

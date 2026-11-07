@@ -1,16 +1,27 @@
 // Read + submit side: the indexer REST API via ootle.ts's IndexerProvider. No keys here.
+// Upgraded to ootle.ts 0.13 / Ootle 0.49: the transaction lifecycle is now
+//   resolveTransaction → signTransaction → sealTransaction → submitTransaction → watchTransaction,
+// and 0.48+ indexers return CBOR-encoded execution results / substate values, decoded with the
+// @tari-project/ootle-wasm-bor helpers. (0.47 used a flat JSON result and a manual /dry-run POST.)
 import {
   Network,
   getVaultIdsForAccount,
   resolveMaxEpoch,
+  resolveTransaction,
   signTransaction,
   sealTransaction,
   submitTransaction,
+  sendDryRun,
+  watchTransaction,
   classifyOutcome,
 } from "@tari-project/ootle";
 import { IndexerProvider } from "@tari-project/ootle-indexer";
+import { decodeExecuteResult, decodeSubstateValue } from "@tari-project/ootle-wasm-bor";
 
 export const LOCALNET = { network: Network.LocalNet, indexerUrl: "http://127.0.0.1:12008" };
+// Post-reset esmeralda (0.49.2). The DNS moved from ootle-indexer-a.tari.com to the esme-* hosts;
+// smoke-esmeralda.mjs confirmed esme-indexer-a answers getCurrentEpoch.
+export const ESMERALDA = { network: Network.Esmeralda, indexerUrl: "https://esme-indexer-a.ootle.tari.com" };
 
 export async function connectIndexer(url = LOCALNET.indexerUrl, network = LOCALNET.network) {
   return IndexerProvider.connect({ url, network });
@@ -24,61 +35,49 @@ export async function maxEpoch(provider) {
   return resolveMaxEpoch(provider);
 }
 
-/** Dry-run through the indexer's /transactions/dry-run endpoint (returns the raw ExecuteResult). */
-export async function dryRun(provider, signers, unsignedTx, indexerUrl = LOCALNET.indexerUrl) {
-  const signed = await signTransaction(signers, { ...unsignedTx, dry_run: true });
-  const envelope = sealTransaction(signed);
-  const r = await fetch(`${indexerUrl.replace(/\/$/, "")}/transactions/dry-run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ transaction: envelope }),
-  });
-  if (!r.ok) throw new Error(`dry-run HTTP ${r.status}: ${await r.text()}`);
-  return r.json();
+// --- CBOR decode (0.48+) ---------------------------------------------------------------------------
+// The wasm-bor decoders take a base64/hex CBOR string and return a JSON string. The indexer provider
+// may already hand back decoded JSON for some fields, so decode defensively: a value that is not an
+// encoded string is passed through unchanged. VERIFY the exact wrapping against a live esmeralda
+// receipt — which field is CBOR vs JSON is the one thing a no-funds smoke cannot pin down.
+export function decodeExecResult(encoded) {
+  return typeof encoded === "string" ? JSON.parse(decodeExecuteResult(encoded)) : encoded;
+}
+export function decodeSubstate(encoded) {
+  return typeof encoded === "string" ? JSON.parse(decodeSubstateValue(encoded)) : encoded;
+}
+
+/** Dry-run via the SDK (0.13): resolve → sign → seal → POST /transactions/dry-run. Returns the result. */
+export async function dryRun(provider, signers, unsignedTx) {
+  return sendDryRun(provider, Array.isArray(signers) ? signers : [signers], unsignedTx);
 }
 
 /**
- * Poll the indexer until `txId` is finalized. ootle.ts 0.11's `watchTransaction` throws on the
- * 404 the indexer returns in the first ~second after a submit (the tx is not indexed yet), so
- * this loop treats 404 as "pending". Throws with the chain's reason on Reject / FeeIntentCommit.
+ * 0.13 lifecycle: resolve input versions → sign (the user's key) → seal (throwaway seal key, WASM) →
+ * submit → watch. The built-in watchTransaction now polls and does NOT throw on the early 404 or on a
+ * Reject / FeeIntentCommit (0.11 did, which is why the old code had a custom waitFinalized loop).
+ * Returns { txId, receipt }. Throws with the chain's reason on a non-Commit outcome.
  */
-export async function waitFinalized(provider, txId, { timeoutMs = 90_000, pollMs = 500 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    let response = null;
-    try {
-      response = await provider.getTransactionResult(txId);
-    } catch (e) {
-      if (e?.status !== 404) throw e;
-    }
-    const result = response?.result;
-    if (result && result !== "Pending" && "Finalized" in result) {
-      const c = classifyOutcome(result);
-      // `final_decision` is "Commit" even when only the FEE intent committed and execution was
-      // rejected (AcceptFeeRejectRest), so also read the engine's own TransactionResult.
-      const exec = result.Finalized.execution_result?.finalize?.result;
-      const execReject = exec && typeof exec === "object" ? (exec.Reject ?? exec.AcceptFeeRejectRest?.[1] ?? null) : null;
-      if (c && c.outcome === "Commit" && !execReject) return response;
-      if (c) {
-        const outcome = execReject && c.outcome === "Commit" ? "FeeIntentCommit" : c.outcome;
-        const reason = c.reason ?? (execReject ? JSON.stringify(execReject) : "");
-        const err = new Error(`transaction ${txId} ${outcome}: ${reason}`);
-        err.txId = txId;
-        err.reason = reason;
-        err.outcome = outcome;
-        throw err;
-      }
-    }
-    if (Date.now() > deadline) throw new Error(`transaction ${txId} did not finalize within ${timeoutMs}ms`);
-    await new Promise((r) => setTimeout(r, pollMs));
-  }
-}
-
-/** sign (by the given signers) -> seal (throwaway key, WASM) -> submit -> wait. Returns {txId, receipt}. */
 export async function signSealSubmit(provider, signers, unsignedTx, opts = {}) {
-  const signed = await signTransaction(signers, unsignedTx);
+  const resolved = await resolveTransaction(provider, unsignedTx);
+  const signed = await signTransaction(Array.isArray(signers) ? signers : [signers], resolved);
   const envelope = sealTransaction(signed);
   const txId = await submitTransaction(provider, envelope);
-  const receipt = await waitFinalized(provider, txId, { timeoutMs: opts.timeoutMs ?? 90_000 });
+  const receipt = await watchTransaction(provider, txId, { timeoutMs: opts.timeoutMs ?? 90_000 });
+  const c = classifyOutcome(receipt.result);
+  // classifyOutcome (0.13) returns one of Commit / FeeIntentCommit / Reject — so a plain inequality
+  // catches "fee charged but execution rejected" too, which 0.11 had to detect by hand.
+  if (c && c.outcome && c.outcome !== "Commit") {
+    const err = new Error(`transaction ${txId} ${c.outcome}: ${c.reason ?? ""}`);
+    err.txId = txId;
+    err.outcome = c.outcome;
+    err.reason = c.reason;
+    throw err;
+  }
   return { txId, receipt };
+}
+
+/** Wait for a tx already submitted elsewhere (kept for callers that submit then wait separately). */
+export async function waitFinalized(provider, txId, opts = {}) {
+  return watchTransaction(provider, txId, { timeoutMs: opts.timeoutMs ?? 90_000 });
 }
