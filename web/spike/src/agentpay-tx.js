@@ -150,7 +150,11 @@ export function templateEvents(receipt, template) {
 
 /** Positional AgentBudget state (same layout as web/server/substate.js) from an indexer substate response. */
 export function parseBudgetSubstate(resp) {
-  const state = resp?.state?.up?.substate?.Component?.body?.state;
+  // Two shapes: the indexer transaction-diff shape (flows A/B via chain.js) and the window.tari
+  // `tari_getSubstate` shape (flow C). Accept either.
+  const state =
+    resp?.state?.up?.substate?.Component?.body?.state ?? // indexer / tx-result diff (flows A/B)
+    resp?.substate?.Component?.body?.state;              // window.tari tari_getSubstate (flow C)
   if (!Array.isArray(state) || state.length < 10) throw new Error("unexpected budget component layout");
   const addr = (x, prefix) => {
     if (!x || typeof x !== "object" || typeof x.value?.hex !== "string") throw new Error("expected an address at " + prefix);

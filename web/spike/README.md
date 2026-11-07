@@ -67,15 +67,25 @@ A/B 都要求用户**自己跑 walletd**。路径 C 走 **`window.tari` 注入�
 
 | 文件 | 作用 |
 |---|---|
-| `src/tari-window.js` | `window.tari` 适配器：`getTariProvider`（等 `tari#initialized`）、`TariWindowWallet.connect`（`tari_requestAccounts` + `tari_getNetwork`）、`createApproveSubmit`（create→轮询→submit 三段式）、`getSubstate`/`getTransactionResult`/`dryRun`、`describeTariError`（抹平 Sapient 字符串错误 vs Universe 数字错误码 4001/4100/4200）。**复用 `agentpay-tx.js` 的指令映射**，只换签名/提交层 |
+| `src/tari-window.js` | `window.tari` 适配器：`getTariProvider`（等 `tari#initialized`）、`TariWindowWallet.connect`、`signAndSubmit`（**原始指令的提交通道** = `tari_signAndSubmitTransaction`）、`dryRun`、`createApproveSubmit`（3 段式，**仅用于钱包高层操作 shield/sendPrivately/htlc\***，不是我们的原始指令）、`getSubstate`/`getTransactionResult`、`describeTariError`、`normaliseNetwork`（名字 or 数字字节都接）。**复用 `agentpay-tx.js` 的指令映射**，只换签名/提交层 |
 | `src/window-tari-main.js` | 路径 C 页面逻辑：连接 → 开预算 → 付 700 → dry-run 超限。owner=连接的账户；**只交指令、不显式声明 inputs**（集成文档说 inputs "纯属优化"，钱包自动发现缺失 substate），钱包加手续费+epoch+签名+提交 |
 | `window-tari.html` | 路径 C 页面（独立于 `index.html`） |
 
-**先决条件（尚未做，`window-tari.html` 顶部有红条提醒）：** 本 spike 的指令构造仍钉在 **ootle.ts 0.11 / Ootle 0.47**，而线上测试网已是**重置后的 0.49.2**（只有 0.49.2 出了可用二进制，0.49.0/0.49.1 没构建成功），当前 ootle.ts 是 **0.13（对应 0.49.1）**。要在 esmeralda 上真连，得先：
+**先决条件（进度）：**
 
-1. 把 spike 依赖从 ootle.ts 0.11 升到 **0.13.x**——注意 **0.11.0 改了 `templateAddressLiteral` 的编码**（untagged bytes32），直接影响 `agentpay-tx.js` 里 `callFunction({templateAddress})` 的参数；再加 0.10.0（0.47）、0.12.0（0.49.1）两次 breaking。
-2. indexer host 换成重置后的 **`esme-indexer-a.ootle.tari.com`**（ootle.ts README 里的 `ootle-indexer-a.tari.com` 可能已过时）。
-3. Sapient 自身钉的是 **0.10.x / wasm 0.47 / wasm-bor 0.48.0-rc.0 + 一份 vendored patched wasm**（扩展版本 0.6.17），**是否已兼容 0.49.2 重置后的 esmeralda 未经确认**——这是能不能连通的最大未知项。源码里标 `VERIFY:` 的点（`tari_createTransactionRequest` 的 operation 形状、提交结果/substate 的 JSON 形状、Network 枚举值）都要用真钱包核一遍。
+1. ~~升依赖到 0.13.x~~ **已做**（见「升级结果」；`@tari-project/ootle-wasm` 解析为 0.49.2 = 线上版本，`agentpay-tx.js` 一行没改）。
+2. ~~indexer host 换 `esme-indexer-a.ootle.tari.com`~~ **已做**（smoke 连通，读到 epoch）。
+3. **唯一剩下的硬门槛：拿真钱包 + 充值账户在 esmeralda 上跑一遍**（装 Sapient 或用 Tari Universe 网页钱包）。Sapient 非官方、单人维护、只覆盖 esmeralda/igor；是否已兼容 0.49.2 重置后的 esmeralda 仍未在真钱包上确认。
+
+### 适配器核实（2026-11-07）
+
+照着 live 的 `https://universe.tari.mw/tari-connector.js`（未压缩、可读，声明与 Sapient 注入 provider 同形）把适配器核了一遍，改掉了几处：
+
+- **CONFIRMED（源码里有）**：`window.tari.request({method,params})` 约定、全部 `tari_*` 方法名、单笔 `tari_signAndSubmitTransaction` 与 3 段式 `createTransactionRequest→getTransactionRequest→submitTransactionRequest` **两条提交路都存在**、`createTransactionRequest` 返回 `{requestId}`、状态集 `approved/submitted/rejected/failed`（结果在 `summary.result`、错误在 `summary.error`）、错误对象带 `{code,message}`。Network 枚举值也用本机 SDK 核实：**Esmeralda=38(0x26)、Igor=36(0x24)**。
+- **改对的**：① 原始 AgentBudget 指令走 **`tari_signAndSubmitTransaction`**，不是 3 段式——后者的 `kind` 全是高层私密操作（shield/unshield/sendPrivately/htlc\*），源码里**没有 `kind:"instructions"`**；② `tari_getSubstate` 返回路径是 **`resp.substate.Component.body.state`**，不是 `state.up.substate.*`（那是交易回执 diff 形状）——`parseBudgetSubstate` 现同时接两种；③ `tari_getNetwork` 可能回名字也可能回数字字节，`normaliseNetwork` 都接。
+- **仍只能在真钱包上核的 `VERIFY:`**：`tari_signAndSubmitTransaction` 的确切入参/返回形状、`dryRun:true` 是否真无弹窗、错误码具体数字（4001 等是 EIP-1193 习惯值，连接器没定义）、`getSubstate` 返回是 JSON 还是 CBOR-base64、`.Component.body.state` 这条尾路径。连接器是个薄 postMessage 转发层，这些都由钱包端决定，源码核不到。
+
+> 结论：从源码能核的都核了、改对了；剩下一批形状**只有真钱包能定**，正是阶段 1（真网 open+pay）要一次性验掉的东西。
 
 ### 怎么跑（先决条件满足后）
 

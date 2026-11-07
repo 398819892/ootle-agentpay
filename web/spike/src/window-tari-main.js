@@ -24,8 +24,9 @@ const cfg = () => ({ template: $("cfg-template").value.trim(), merchant: $("cfg-
 // submits), so the maxEpoch we pass to the builder is never used on this path — 0 is a placeholder.
 const BUILD_EPOCH = 0;
 const network = () => (C.wallet.network === "igor" ? "igor" : "esmeralda");
-// Network enum value the instruction encoders need. VERIFY against @tari-project/ootle's Network enum
-// for the running SDK version (Esmeralda 0x26 / Igor 0x24 at the versions we read).
+// Network enum value the instruction encoders need. CONFIRMED against @tari-project/ootle's Network enum
+// (0.13 / wasm 0.49.2): Esmeralda = 38 (0x26), Igor = 36 (0x24). C.wallet.network is normalised to a
+// lowercase name by the adapter (tari_getNetwork may report a name OR the numeric byte).
 const NETWORK_ID = () => (C.wallet.network === "igor" ? 0x24 : 0x26);
 
 const C = { wallet: null, budget: null, state: null };
@@ -55,11 +56,10 @@ $("c-open").onclick = async () => {
       whitelist: [c.merchant], maxFee: 200_000,
     });
     const instructions = coreInstructions(unsigned);
-    log(`open: ${instructions.length} instructions → approve in your wallet…`);
-    const { result } = await C.wallet.createApproveSubmit(instructions, {
-      maxFee: 200_000n,
-      onPending: (id) => log(`request ${short(String(id))} is waiting for your approval in the wallet popup`),
-    });
+    log(`open: ${instructions.length} instructions → approve in your wallet popup…`);
+    // Raw instructions go through signAndSubmit (tari_signAndSubmitTransaction); the wallet pops its own
+    // approval, builds+signs+submits, and returns the result.
+    const result = await C.wallet.signAndSubmit(instructions, { maxFee: 200_000n });
     // VERIFY: the wallet's result shape vs findNewComponent (expects receipt.result = {Finalized:…}).
     const receipt = normaliseReceipt(result);
     C.budget = findNewComponent(receipt, [C.wallet.account, c.merchant]);
@@ -97,11 +97,8 @@ async function doPay(amount, realSubmit) {
       log(`dry-run → ${accept ? "ACCEPT (unexpected over cap)" : "REJECT (hard cap enforced on chain)"}`, accept ? "bad" : "ok");
       return;
     }
-    log(`pay ${amount}: prove one session badge → approve in your wallet…`);
-    const { result } = await C.wallet.createApproveSubmit(instructions, {
-      maxFee: 200_000n,
-      onPending: (id) => log(`request ${short(String(id))} waiting for approval`),
-    });
+    log(`pay ${amount}: prove one session badge → approve in your wallet popup…`);
+    const result = await C.wallet.signAndSubmit(instructions, { maxFee: 200_000n });
     const receipt = normaliseReceipt(result);
     const evs = templateEvents(receipt, c.template).filter((e) => e.topic?.startsWith?.("AgentBudget."));
     log(`pay COMMITTED`, "ok");
