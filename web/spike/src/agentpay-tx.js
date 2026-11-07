@@ -21,7 +21,7 @@ import {
   resourceAddressLiteral,
   TARI_RESOURCE_ADDRESS,
 } from "@tari-project/ootle";
-import { decodeSubstateValue } from "@tari-project/ootle-wasm-bor";
+import { decodeSubstateValue, decodeExecuteResult } from "@tari-project/ootle-wasm-bor";
 
 export const XTR = TARI_RESOURCE_ADDRESS;
 
@@ -151,10 +151,23 @@ export function payTx(p) {
 }
 
 // --- receipt / substate readers ----------------------------------------------------------------
-function acceptDiff(receipt) {
+/**
+ * The `finalize` object (result + events + up_substates) of a committed receipt. On 0.50 the
+ * `execution_result` is a base64 CBOR STRING that must go through wasm-bor `decodeExecuteResult`
+ * before it has a `.finalize`; older indexers already hand back a decoded object. Returns null for a
+ * pending / non-finalized receipt. (Without this decode, `findNewComponent` and `templateEvents`
+ * silently see nothing on a raw 0.50 receipt.)
+ */
+function finalizeOf(receipt) {
   const r = receipt?.result;
   if (!r || r === "Pending" || !("Finalized" in r)) return null;
-  const tx = r.Finalized.execution_result?.finalize?.result;
+  let exec = r.Finalized.execution_result;
+  if (typeof exec === "string") exec = JSON.parse(decodeExecuteResult(exec));
+  return exec?.finalize ?? null;
+}
+
+function acceptDiff(receipt) {
+  const tx = finalizeOf(receipt)?.result;
   if (tx && typeof tx === "object" && "Accept" in tx) return tx.Accept;
   if (tx && typeof tx === "object" && "AcceptFeeRejectRest" in tx) return tx.AcceptFeeRejectRest[0];
   return null;
@@ -171,9 +184,7 @@ export function findNewComponent(receipt, exclude = []) {
 
 /** Events emitted by the AgentBudget template in a receipt (topic `AgentBudget.pay` etc.). */
 export function templateEvents(receipt, template) {
-  const r = receipt?.result;
-  if (!r || r === "Pending" || !("Finalized" in r)) return [];
-  const events = r.Finalized.execution_result?.finalize?.events ?? [];
+  const events = finalizeOf(receipt)?.events ?? [];
   const tpl = template.replace(/^template_/, "");
   return events.filter((e) => e.template_address === tpl);
 }
