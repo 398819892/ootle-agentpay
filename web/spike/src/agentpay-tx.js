@@ -56,13 +56,22 @@ const asInput = (id, is_write = true) => ({ substate_id: id, version: null, is_w
  * `owner`. The owner pays the fee. `ownerVaults` are the owner's vault ids (declared as inputs).
  */
 export function openBudgetTx(p) {
+  // "No-confirm" (免确认) two-account model: when `p.agent` (a separate agent account address) is set,
+  // the agent badge (ret.2) is deposited into the AGENT's own account instead of the owner's, so the
+  // agent can later `pay` with its OWN key — no owner wallet popup per payment, the chain enforces the
+  // caps. Omit `p.agent` for the single-account demo (owner == agent), which is unchanged. The owner
+  // still signs THIS open once (funding + handing over the badge).
+  const agentAccount = p.agent ?? p.owner;
+  const routesToAgent = p.agent && p.agent !== p.owner;
   const b = TransactionBuilder.new(p.network, p.maxEpoch)
     // Inputs are explicit on this path (walletd's `detect_inputs` is not available via the indexer):
-    // the owner account + its vaults (written), the XTR resource and template (read), and every
-    // whitelisted merchant (read) — the engine rejects an undeclared component referenced from
-    // template args with "Template referenced root substate but it was not found".
+    // the owner account + its vaults (written), the agent account when distinct (written — it receives
+    // the badge), the XTR resource and template (read), and every whitelisted merchant (read) — the
+    // engine rejects an undeclared component referenced from template args with "Template referenced
+    // root substate but it was not found".
     .withInputs([
       asInput(p.owner),
+      ...(routesToAgent ? [asInput(p.agent)] : []),
       ...p.ownerVaults.map((v) => asInput(v)),
       asInput(XTR, false),
       asInput(p.template, false),
@@ -82,8 +91,8 @@ export function openBudgetTx(p) {
       componentListLiteral(p.whitelist),
     ])
     .saveVar("ret")
-    .callMethod({ componentAddress: p.owner, methodName: "deposit" }, [{ Workspace: "ret.1" }])
-    .callMethod({ componentAddress: p.owner, methodName: "deposit" }, [{ Workspace: "ret.2" }]);
+    .callMethod({ componentAddress: p.owner, methodName: "deposit" }, [{ Workspace: "ret.1" }])        // owner badge -> owner
+    .callMethod({ componentAddress: agentAccount, methodName: "deposit" }, [{ Workspace: "ret.2" }]);  // agent badge -> agent (or owner)
   return b.buildUnsignedTransaction();
 }
 
