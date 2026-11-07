@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentPay</title>
+    <style>
+      :root { --bg: #f7f7f5; --fg: #1a1a1a; --mut: #666; --box: #fff; --line: #ddd; --ok: #1b7f3b; --bad: #b3261e; --acc: #4b3ad6; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #15161a; --fg: #ececec; --mut: #9a9aa3; --box: #1f2127; --line: #33363f; } }
+      body { margin: 0; padding: 16px; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); max-width: 760px; }
+      h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 15px; margin: 0 0 8px; }
+      p.sub { color: var(--mut); margin: 0 0 16px; }
+      section { background: var(--box); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-top: 16px; }
+      label { display: block; color: var(--mut); font-size: 12px; margin-top: 8px; }
+      input { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); font-family: ui-monospace, monospace; font-size: 12px; }
+      button { margin: 8px 6px 0 0; padding: 7px 12px; border: 1px solid var(--acc); background: var(--acc); color: #fff; border-radius: 6px; cursor: pointer; }
+      button.ghost { background: transparent; color: var(--acc); } button:disabled { opacity: .5; cursor: default; }
+      pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 360px; overflow: auto; margin: 10px 0 0; }
+      .ok { color: var(--ok); } .bad { color: var(--bad); } .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+      .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--mut); font-size: 12px; margin-left: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>AgentPay</h1>
+    <p class="sub">Fund an on-chain budget for an AI agent from <b>your own wallet</b>, with a hard per-transaction and daily cap the chain enforces. You approve the budget once; inside the cap the agent pays on its own — no confirmation each time. Runs as a <b>Tari Universe tapplet</b>: every signature is this wallet's, no backend and no browser-held key.</p>
+
+    <section>
+      <h2>Budget config</h2>
+      <label>AgentBudget template (the budget is instantiated from it)</label>
+      <input id="cfg-template" value="template_978113ef1251cf83cff05ca21057eefcaa2ebaa7770abf07ba82d6ffda0e453f" />
+      <label>Merchant account (whitelisted, will be paid)</label>
+      <input id="cfg-merchant" value="component_7ce2546e4f2384eee64b89e77fab606aff50099e0c14be140c50db294780ec6c" />
+    </section>
+
+    <section>
+      <h2>Your wallet <span class="pill">Tari Universe · wallet signs + submits</span></h2>
+      <div id="c-acct" class="mono">not connected</div>
+      <button id="c-connect">Connect wallet</button>
+      <button id="c-open" class="ghost" disabled>Open budget (50 000 · caps 1 000 / 1 500)</button>
+      <button id="c-pay" class="ghost" disabled>Pay 700</button>
+      <button id="c-over" class="ghost" disabled>Dry-run pay 5 000 (over cap)</button>
+      <pre id="c-log"></pre>
+    </section>
+
+    <!-- The Tari Universe connector supplies window.tari by postMessage to the parent wallet frame when
+         this page is loaded INSIDE Universe's iframe. Absolute src paths resolve from the server root, so
+         this page works whether it is served at /tapplet/ (dev tapplet) or at a dist root. -->
+    <script src="https://universe.tari.mw/tari-connector.js"></script>
+    <script type="module" src="/src/window-tari-main.js"></script>
+  </body>
+</html>

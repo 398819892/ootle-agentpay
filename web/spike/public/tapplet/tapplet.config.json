@@ -1,0 +1,18 @@
+{
+  "packageName": "agentpay-wallet-spike",
+  "version": "0.0.1",
+  "supportedChain": [""],
+  "permissions": {
+    "requiredPermissions": [
+      "TariPermissionAccountList",
+      "TariPermissionTransactionSend",
+      "TariPermissionSubstatesRead",
+      "TariPermissionTemplatesRead"
+    ],
+    "optionalPermissions": [
+      "TariPermissionAccountInfo",
+      "TariPermissionAccountBalance",
+      "TariPermissionTransactionGet"
+    ]
+  }
+}

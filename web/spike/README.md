@@ -96,6 +96,25 @@ A/B 都要求用户**自己跑 walletd**。路径 C 走 **`window.tari` 注入�
 - **充值仍然卡住**：Universe 文档里**没有 faucet**，和 Sapient 一样卡在 reset 后没测试币（见下「esmeralda 0.49.2 reset」）。
 - 改动：`window-tari.html` 顶部的过时警告已换成当前三道 blocker（没币 / 模板要在 0.49.2 重发 / iframe 加载）；Sapient 字样退成次要。适配器 `createApproveSubmit` 注释修正为「`kind:"instructions"` 也合法，等价于 signAndSubmit」。
 
+### 包成 Tari Universe tapplet（2026-11-07）—— 上面的「iframe 加载」未知项已解
+
+「怎么让 Universe 去加载我们的页面」查清了：Universe 里嵌入的 dApp 叫 **tapplet**，有官方入口，**不是**私下求钱包团队。机制从 `tari-project/tari-universe` 源码核实（分支 `main`）：
+
+- **开发入口（现在就能用，不要币、不要审核）**：Universe 的 **Tapplet Registry** 页有 **Add dev tapplet**，只填一个 endpoint URL。后端 `add_dev_tapplet`（`src-tauri/src/commands.rs`）会 `GET <endpoint>/tapplet.manifest.json`，按 `DevTappletResponse` 解析，**只要两个 camelCase 字段**：`{ "packageName": "...", "displayName": "..." }`。URL 是字符串拼接（endpoint 末尾**别带斜杠**，否则变 `//tapplet.manifest.json`）。然后它把 `<endpoint>` 本身塞进 iframe。
+- **权限文件**：安装/发布路径读 `dist/tapplet.config.json` → `TappletConfig { packageName, version, supportedChain, permissions:{requiredPermissions,optionalPermissions} }`；权限枚举是 `TariPermissionAccountList / TransactionSend / SubstatesRead / TemplatesRead / AccountInfo / AccountBalance / TransactionGet …`。缺这个文件权限默认空数组（带告警）。
+- **CSP 仍然必须**：tapplet 在跨域 iframe 里跑，页面要发响应头 `Content-Security-Policy: frame-ancestors …`（`<meta>` 对 frame-ancestors 无效，必须是响应头）。Universe v1.6.18 刚补了「没校验 postMessage 发信方 origin」的漏洞（GHSA-mj75-4pfh-7q38），所以这套握手现在是硬要求。
+
+本 spike 的 tapplet 打包（**已离线验**）：
+
+- `tapplet/index.html` —— 独立的 AgentPay tapplet 页（复用 `src/window-tari-main.js`，脚本用绝对路径 `/src/…`，在 /tapplet/ 下也能解析）；不动原来的 A/B/C 合并 demo（`index.html`）。
+- `public/tapplet/tapplet.manifest.json` —— `{packageName, displayName}`，给 Add dev tapplet。
+- `public/tapplet/tapplet.config.json` —— `TappletConfig`，权限清单。
+- `vite.config.js` —— 两处：① `server.headers`/`preview.headers` 发 `frame-ancestors 'self' https://universe.tari.mw http://localhost:5173 http://127.0.0.1:5173`；② `build.rollupOptions.input` 加 tapplet 入口，`vite build` 会出 `dist/tapplet/index.html`。
+
+**加成 dev tapplet：** `npm run dev`，在 Universe 的 Tapplet Registry → Add dev tapplet 填 **`http://localhost:5173/tapplet`**（无尾斜杠）。Universe 会 `GET /tapplet/tapplet.manifest.json`（→ AgentPay），再 iframe `/tapplet/`。dev server 已核实：manifest/config/页面三者都 200 且都带 `frame-ancestors` 响应头（WSL headless curl 验过）。
+
+还没落地的两点：① 线上 `universe.tari.mw` 用的 host 版 Universe 能否被指向 localhost dev endpoint（Add dev tapplet 是桌面版功能，host 版可能只认已注册的 registry tapplet）——要在真 Universe 里点一下才知道；② **发布路径**（给别人用）= 按 RFC 把 tapplet 发成 npm 包、进 `tapplets-registry.manifest.json`（registry：`karczuRF/tapp-registry`），且安装包要求 `package/dist/tapplet.config.json` 在 dist 根（本 spike 现放在 `/tapplet/` 子目录下，发布时要调）。build 还有个环境坑：WSL 那份 `vite-plugin-top-level-await` + swc 组合 `vite build` 报 `missing field type`（和本改动无关，dev 路径不受影响）。
+
 ### esmeralda 0.49.2 reset 把链上旧状态清了（2026-11-07 实测）
 
 查了所有 indexer（`esme-indexer-a/b`、`ootle-indexer-a/b`，全同一个网、epoch 12920）：2026-11-01 部署的 agent_budget 模板、escrow 模板、充值账户、Caravel 水龙头组件**全部 404**。所以阶段 1 之前要先解决两件事，且都压在「怎么在 reset 后的 esmeralda 上搞到第一笔测试币」上：**① 给账户充值**（Caravel 死了、walletd faucet 空，唯一文档化的路是 L1-burn→claim）；**② 把 agent_budget 在 0.49.2 重发**（旧地址已失效，流程见 `docs/esmeralda.md` + `scripts/esme-fund`、`scripts/esme_publish_retry.sh`）。
