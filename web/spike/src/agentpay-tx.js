@@ -21,6 +21,7 @@ import {
   resourceAddressLiteral,
   TARI_RESOURCE_ADDRESS,
 } from "@tari-project/ootle";
+import { decodeSubstateValue } from "@tari-project/ootle-wasm-bor";
 
 export const XTR = TARI_RESOURCE_ADDRESS;
 
@@ -108,6 +109,17 @@ export function openBudgetTx(p) {
 /**
  * `pay`: the agent proves exactly ONE session badge by id (`create_proof_by_non_fungible_ids`),
  * calls `budget.pay`, then drops the proof. The agent pays the fee.
+ *
+ * CONTRACT — `p.agentVaults` must be the agent account's CURRENT vault ids, re-fetched (via
+ * `getVaultIdsForAccount`) AFTER any transaction that mutated the account — in particular after
+ * `open`, which mints the agent-badge vault that `create_proof_by_non_fungible_ids` needs here.
+ * The bare indexer cannot auto-detect inputs, so every vault the pay touches must be declared.
+ * If a STALE (e.g. pre-open) list is passed, the badge vault is missing, the proof cannot be
+ * created, and on 0.50 the chain commits only the fee and rejects `budget.pay` (AcceptFeeRejectRest):
+ * the receipt still reads `final_decision: Commit` while `spent_in_window` stays unchanged — a
+ * silent no-op pay. Pass the merchant's current vaults in `p.merchantVaults` for the same reason.
+ * (The offline mock harnesses pass `agentVaults: []` deliberately: they only inspect the instruction
+ * bytes and never submit, so this is not enforced at runtime.)
  */
 export function payTx(p) {
   const inputs = [
@@ -168,11 +180,19 @@ export function templateEvents(receipt, template) {
 
 /** Positional AgentBudget state (same layout as web/server/substate.js) from an indexer substate response. */
 export function parseBudgetSubstate(resp) {
-  // Two shapes: the indexer transaction-diff shape (flows A/B via chain.js) and the window.tari
-  // `tari_getSubstate` shape (flow C). Accept either.
-  const state =
-    resp?.state?.up?.substate?.Component?.body?.state ?? // indexer / tx-result diff (flows A/B)
-    resp?.substate?.Component?.body?.state;              // window.tari tari_getSubstate (flow C)
+  // Three shapes are accepted:
+  //  - indexer transaction-diff / already-decoded substate (flows A/B via chain.js): an object at
+  //    `resp.state.up.substate` with `.Component.body.state`;
+  //  - window.tari `tari_getSubstate` with an already-decoded component (flow C / offline mock):
+  //    an object at `resp.substate` with `.Component.body.state`;
+  //  - the live 0.50 indexer/engine `getSubstate`: `resp.state.up.substate` is a base64 CBOR STRING
+  //    that must be run through wasm-bor `decodeSubstateValue` before it has a `.Component`.
+  // In the 0.50 shape each address field is CBOR-tagged `{tag, value:{hex}}` (tag 132=vault_,
+  // 131=resource_, 128=component_); the older shapes use `{value:{hex}}`. Both expose `value.hex`,
+  // so once the CBOR string is decoded the positional `addr()` reader below handles every shape.
+  let container = resp?.state?.up?.substate ?? resp?.substate ?? resp;
+  if (typeof container === "string") container = JSON.parse(decodeSubstateValue(container));
+  const state = container?.Component?.body?.state;
   if (!Array.isArray(state) || state.length < 10) throw new Error("unexpected budget component layout");
   const addr = (x, prefix) => {
     if (!x || typeof x !== "object" || typeof x.value?.hex !== "string") throw new Error("expected an address at " + prefix);
