@@ -108,8 +108,10 @@ const body = (req) => new Promise((r) => { let d = ""; req.on("data", (c) => d +
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://x");
-    if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); return res.end(fs.readFileSync(UI));
+    const STATIC = { "/": "wallet-live.html", "/index.html": "wallet-live.html", "/linked": "linked.html", "/linked.html": "linked.html", "/dapp.html": "dapp.html" };
+    if (req.method === "GET" && STATIC[url.pathname]) {
+      const f = new URL("../" + STATIC[url.pathname], import.meta.url);
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); return res.end(fs.readFileSync(f));
     }
     if (url.pathname === "/api/status") {
       return send(res, 200, { connected: true, account: ACCOUNT, network: "localnet", indexer: INDEXER_URL,

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caravel — dApp</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+  :root{
+    --bg:#0c110f;--panel:#121a17;--panel-2:#17211d;--border:#24322c;--border-soft:#1b2521;
+    --fg:#e9f1ec;--muted:#93a69c;--faint:#63746b;
+    --accent:#2fd4a7;--accent-ink:#79e9c8;--accent-bg:#2fd4a71a;--bad:#ff6f6f;--bad-bg:#ff6f6f1a;--good:#45cf8c;
+    color-scheme:dark;
+    --d-ui:"IBM Plex Sans","Noto Sans SC",ui-sans-serif,system-ui,sans-serif;--d-display:"Bricolage Grotesque",var(--d-ui);--d-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  }
+  :lang(zh) h1,:lang(zh) h2,:lang(zh) h3{font-family:"Noto Sans SC",var(--d-display);}
+  *{box-sizing:border-box;} html,body{margin:0;height:100%;}
+  body{background:var(--bg);color:var(--fg);font-family:var(--d-ui);line-height:1.5;-webkit-font-smoothing:antialiased;padding:16px;}
+  .mono{font-family:var(--d-mono);} .num{font-variant-numeric:tabular-nums;}
+  .top{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+  .logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(145deg,var(--accent),#17a784);display:grid;place-items:center;color:#06110d;font-family:var(--d-display);font-weight:700;}
+  .top h1{margin:0;font-family:var(--d-display);font-size:17px;}
+  .top .sub{font-size:11px;color:var(--muted);}
+  .pill{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:4px 9px;border-radius:999px;border:1px solid var(--border);color:var(--muted);background:var(--panel);}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);} .pill.on .dot{background:var(--good);box-shadow:0 0 0 3px #45cf8c22;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:14px;}
+  .prod{display:flex;gap:13px;align-items:center;}
+  .thumb{width:52px;height:52px;border-radius:11px;background:linear-gradient(145deg,#1d2b26,#243a32);display:grid;place-items:center;font-size:24px;}
+  .prod h2{margin:0;font-size:15px;font-family:var(--d-display);} .prod .d{font-size:12px;color:var(--muted);}
+  .price{margin-left:auto;text-align:right;} .price .n{font-family:var(--d-mono);font-size:20px;font-weight:600;} .price .u{font-size:11px;color:var(--muted);}
+  .lab{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;}
+  :lang(zh) .lab{letter-spacing:.04em;}
+  .presets{display:flex;flex-wrap:wrap;gap:7px;} .preset{font:inherit;font-family:var(--d-mono);font-size:12px;color:var(--muted);background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer;} .preset:hover{color:var(--fg);border-color:var(--accent);} .preset.on{color:var(--accent-ink);border-color:var(--accent);background:var(--accent-bg);}
+  .btn{font:inherit;font-weight:700;font-size:14px;color:#06110d;background:linear-gradient(145deg,var(--accent),#1cb78f);border:0;border-radius:11px;padding:13px 16px;cursor:pointer;box-shadow:0 8px 20px -10px var(--accent);width:100%;} .btn:hover{filter:brightness(1.06);} .btn:disabled{opacity:.5;cursor:progress;filter:none;box-shadow:none;}
+  .status{border:1px dashed var(--border);border-radius:11px;padding:12px 13px;font-size:13px;display:flex;align-items:center;gap:9px;min-height:46px;color:var(--muted);}
+  .status.wait{border-style:solid;border-color:var(--accent);background:var(--accent-bg);color:var(--accent-ink);}
+  .status.ok{border-style:solid;border-color:var(--good);background:#45cf8c14;color:var(--good);}
+  .status.no{border-style:solid;border-color:var(--bad);background:var(--bad-bg);color:var(--bad);}
+  .status .mono{font-size:11px;opacity:.85;}
+  .spin{width:13px;height:13px;border:2px solid #ffffff33;border-top-color:currentColor;border-radius:50%;animation:sp .7s linear infinite;flex-shrink:0;} @keyframes sp{to{transform:rotate(360deg);}}
+  .note{font-size:11px;color:var(--faint);line-height:1.6;}
+  .acct{font-size:11px;color:var(--muted);} .acct b{color:var(--accent-ink);font-weight:600;}
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="logo">⌁</div>
+    <div><h1>Caravel</h1><div class="sub" data-i18n="tag">storefront · a dApp</div></div>
+    <span class="pill" id="connPill"><span class="dot"></span><span id="connText" data-i18n="connecting">connecting…</span></span>
+  </div>
+
+  <div class="card">
+    <div class="prod">
+      <div class="thumb">🔑</div>
+      <div><h2 data-i18n="prod">Pro API credits</h2><div class="d" data-i18n="prodD">Agent-metered usage · settle on Ootle</div></div>
+      <div class="price"><div class="n num" id="price">700</div><div class="u">XTR</div></div>
+    </div>
+    <div>
+      <div class="lab" data-i18n="choose">Choose amount</div>
+      <div class="presets" style="margin-top:7px" id="presets">
+        <button class="preset" data-amt="300">300</button>
+        <button class="preset on" data-amt="700">700</button>
+        <button class="preset" data-amt="900">900</button>
+        <button class="preset" data-amt="5000">5000</button>
+      </div>
+    </div>
+    <button class="btn" id="payBtn" disabled data-i18n="payBtn">Pay with AgentPay Wallet</button>
+    <div class="status" id="status"><span data-i18n="idle">Pick an amount and pay — the wallet will ask you to approve.</span></div>
+    <div class="acct" id="acct"></div>
+    <p class="note" data-i18n="note">This storefront holds no keys. It calls window.tari and lets the wallet sign and enforce the owner's caps.</p>
+  </div>
+
+<script>
+  const T = {
+    en:{ tag:"storefront · a dApp", connecting:"connecting…", connected:"wallet connected", prod:"Pro API credits",
+      prodD:"Agent-metered usage · settle on Ootle", choose:"Choose amount", payBtn:"Pay with AgentPay Wallet",
+      idle:"Pick an amount and pay — the wallet will ask you to approve.",
+      note:"This storefront holds no keys. It calls window.tari and lets the wallet sign and enforce the owner's caps.",
+      waiting:"Waiting for wallet approval…", paid:"Order paid", declined:"Declined by the wallet's caps",
+      acct:(a)=>`Paying from wallet `+a, sending:"Sending request to the wallet…" },
+    zh:{ tag:"商店 · 一个 dApp", connecting:"连接中…", connected:"钱包已连接", prod:"Pro API 额度",
+      prodD:"按 Agent 计费 · 在 Ootle 结算", choose:"选择金额", payBtn:"用 AgentPay 钱包支付",
+      idle:"选好金额点支付 —— 钱包会请你批准。",
+      note:"这个商店不持有任何私钥。它调用 window.tari,由钱包签名并强制执行 owner 的额度。",
+      waiting:"等待钱包批准…", paid:"订单已支付", declined:"被钱包额度拒绝",
+      acct:(a)=>`从钱包付款 `+a, sending:"正在向钱包发送请求…" },
+  };
+  let L = new URLSearchParams(location.search).get("lang") === "en" ? "en" : "zh";
+  const $=(id)=>document.getElementById(id);
+  const t=(k,...a)=>{const v=T[L][k];return typeof v==="function"?v(...a):v;};
+  function applyLang(){document.documentElement.lang=L;document.querySelectorAll("[data-i18n]").forEach(el=>{const v=T[L][el.getAttribute("data-i18n")];if(v!=null)el.textContent=v;});}
+  const short=(a)=>!a?"":a.slice(0,a.indexOf("_")+1)+a.slice(a.indexOf("_")+1,a.indexOf("_")+9)+"…"+a.slice(-6);
+
+  // --- bridge: talk to the parent (wallet) over postMessage ---
+  const NS="tari-bridge"; let seq=0; const pending={};
+  function call(method,params){return new Promise((res,rej)=>{const id=++seq;pending[id]={res,rej};parent.postMessage({ns:NS,kind:"req",id,method,params},"*");});}
+  window.addEventListener("message",(e)=>{
+    const d=e.data; if(!d||d.ns!==NS)return;
+    if(d.kind==="res"&&pending[d.id]){ (d.error?pending[d.id].rej(new Error(d.error)):pending[d.id].res(d.result)); delete pending[d.id]; }
+    if(d.kind==="lang"&&(d.lang==="en"||d.lang==="zh")){ L=d.lang; applyLang(); setStatus(statusState); }
+  });
+
+  let amount=700, account=null, statusState={cls:"",key:"idle"};
+  function setStatus(s){ statusState=s; const el=$("status"); el.className="status "+(s.cls||""); el.innerHTML="";
+    if(s.cls==="wait"){const sp=document.createElement("span");sp.className="spin";el.appendChild(sp);}
+    const span=document.createElement("span"); span.textContent=s.text!=null?s.text:t(s.key); el.appendChild(span);
+    if(s.sub){const m=document.createElement("span");m.className="mono";m.textContent=s.sub;el.appendChild(document.createTextNode(" "));el.appendChild(m);}
+  }
+  $("presets").addEventListener("click",(e)=>{const b=e.target.closest(".preset");if(!b)return;amount=+b.dataset.amt;$("price").textContent=amount;document.querySelectorAll(".preset").forEach(p=>p.classList.toggle("on",p===b));});
+
+  $("payBtn").onclick=async()=>{
+    $("payBtn").disabled=true; setStatus({cls:"wait",key:"waiting"});
+    try{
+      const r=await call("tari_signAndSubmitTransaction",{pay:{amount,memo:"Caravel · Pro API credits"}});
+      if(r&&r.committed){ setStatus({cls:"ok",text:"✓ "+t("paid"),sub:r.txid?String(r.txid).slice(0,18)+"…":""}); }
+      else{ const why=/per-transaction/.test(r&&r.reason||"")?(L==="zh"?"超单笔上限":"over per-tx cap"):/daily/.test(r&&r.reason||"")?(L==="zh"?"超每日上限":"over daily cap"):""; setStatus({cls:"no",text:"✕ "+t("declined"),sub:why}); }
+    }catch(err){ setStatus({cls:"no",text:"✕ "+err.message}); }
+    $("payBtn").disabled=false;
+  };
+
+  async function boot(){
+    applyLang();
+    try{
+      const accts=await call("tari_requestAccounts");
+      account=Array.isArray(accts)?accts[0]:accts;
+      $("connPill").classList.add("on"); $("connText").textContent=t("connected");
+      $("acct").innerHTML=""; const s=document.createElement("span"); s.textContent=t("acct",""); const b=document.createElement("b"); b.textContent=short(account); $("acct").append(s,b);
+      $("payBtn").disabled=false;
+    }catch(e){ $("connText").textContent="no wallet"; }
+  }
+  boot();
+</script>
+</body>
+</html>
