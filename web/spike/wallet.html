@@ -179,6 +179,7 @@
           <div class="lab" data-i18n="budget">预算 · AgentBudget</div>
           <div class="budget">
             <div class="kv"><span class="k" data-i18n="budgetK">合约</span><span class="addr mono" id="budgetAddr"></span></div>
+            <div class="kv" id="payerRow" hidden><span class="k" data-i18n="payerK">会话账户</span><span class="addr mono" id="payerAddr" title="dApp 的付款与 gas 都由这个独立账户承担,不动钱包余额"></span></div>
             <div class="caps">
               <div class="cap"><div class="lab" data-i18n="perTxCap">单笔上限</div><div class="val num"><span id="perTx">—</span> <span class="muted">XTR</span></div></div>
               <div class="cap"><div class="lab" data-i18n="dailyCap">每日上限</div><div class="val num"><span id="daily">—</span> <span class="muted">XTR</span></div></div>
@@ -228,7 +229,7 @@
   const T={
     zh:{ acctName:"账户 1", receive:"接收", send:"发送", balSub:"账户余额", tokens:"代币", activity:"活动",
       onOotle:"Ootle L2 · localnet", spendable:"可支配", budget:"预算 · AgentBudget", budgetK:"合约",
-      perTxCap:"单笔上限", dailyCap:"每日上限", spent:"本窗口已花", vault:"金库", wl:"白名单",
+      perTxCap:"单笔上限", dailyCap:"每日上限", spent:"本窗口已花", vault:"金库", wl:"白名单", payerK:"会话账户(付 gas)",
       openBtn:"链上开一个预算(5000 · 额度 1000/1500)", bridgeLog:"桥接日志", langBtn:"EN",
       noLink:"尚无 dApp 连接", linked:"已连接 dApp",
       hint:"这是独立的钱包窗口。dApp 不持有私钥,只能经 window.tari 向这里发请求;由你批准,钱包在本机签名并提交到链上。",
@@ -250,7 +251,7 @@
       opened:(b)=>`链:Commit · 预算 ${b}` },
     en:{ acctName:"Account 1", receive:"Receive", send:"Send", balSub:"account balance", tokens:"Tokens", activity:"Activity",
       onOotle:"Ootle L2 · localnet", spendable:"spendable", budget:"Budget · AgentBudget", budgetK:"contract",
-      perTxCap:"Per-tx cap", dailyCap:"Daily cap", spent:"Spent this window", vault:"vault", wl:"whitelist",
+      perTxCap:"Per-tx cap", dailyCap:"Daily cap", spent:"Spent this window", vault:"vault", wl:"whitelist", payerK:"Session account (gas)",
       openBtn:"Open a budget on-chain (5000 · caps 1000/1500)", bridgeLog:"Bridge log", langBtn:"中文",
       noLink:"no dApp connected", linked:"dApp connected",
       hint:"This is the wallet's own window. The dApp holds no key — it can only ask over window.tari; you approve, and the wallet signs locally and submits on-chain.",
@@ -314,6 +315,7 @@
     $("budgetBox").hidden=!b; $("noBudget").hidden=!!b;
     if(!b)return;
     $("budgetAddr").textContent=short(b.address);$("perTx").textContent=fmt(b.perTx);$("daily").textContent=fmt(b.daily);$("daily2").textContent=fmt(b.daily);
+    if(ST&&ST.twoAccount&&ST.agentAccount){$("payerRow").hidden=false;$("payerAddr").textContent=short(ST.agentAccount);}else{$("payerRow").hidden=true;}
     $("spent").textContent=fmt(b.spent);$("vault").textContent=fmt(b.vault);$("wlN").textContent=(b.whitelist||[]).length;
     const pct=Math.min(100,Math.round(b.spent/b.daily*100));$("bar").style.width=pct+"%";$("meter").classList.toggle("hot",pct>=80);
   }

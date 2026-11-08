@@ -47,6 +47,27 @@ const provider = await connectIndexer(INDEXER_URL, Network.LocalNet);
 
 const state = { budget: process.env.BUDGET || null, initialFund: null, template: TEMPLATE, merchant: MERCHANT };
 
+// --- two-account decoupling --------------------------------------------------------------------
+// A SEPARATE agent account (its own key) holds the budget's agent badge and pays its OWN gas, so the
+// owner wallet (ACCOUNT) is untouched by the dApp's payments. `.spike-two-account.json` is written by
+// setup-agent.mjs (faucet-funded agent account + a budget opened with the agent badge routed to it).
+// If the file is absent, pay falls back to the single-account model (agent == owner).
+const TWO_FILE = new URL("../.spike-two-account.json", import.meta.url);
+const AGENT_KEY_FILE = new URL("../.spike-agent-key.json", import.meta.url);
+let two = null, agentW = null;
+if (fs.existsSync(TWO_FILE) && fs.existsSync(AGENT_KEY_FILE)) {
+  two = JSON.parse(fs.readFileSync(TWO_FILE, "utf8"));
+  const ak = JSON.parse(fs.readFileSync(AGENT_KEY_FILE, "utf8"));
+  agentW = new L2Wallet({ ownerSecretHex: ak.owner, viewSecretHex: ak.view, network: Network.LocalNet, indexerUrl: INDEXER_URL, account: ak.account });
+  state.budget = two.budget; // the two-account budget (agent badge lives in the agent account)
+  console.log(`two-account mode: agent=${two.agent} budget=${two.budget}`);
+}
+const PAY_AGENT = two ? two.agent : ACCOUNT;      // who proves the badge + pays the pay-tx gas
+// The agent-badge NFT id to prove. In two-account mode the badge was minted by AgentBudget::new (id
+// "default"); the single-account dashboard budget used an owner-issued id (env SESSION, e.g. "agent1").
+const PAY_SESSION = two ? (two.session || "default") : SESSION;
+const paySign = (unsignedTransaction) => (agentW || w).request("tari_signAndSubmitTransaction", { unsignedTransaction });
+
 // --- dApp <-> wallet relay (WalletConnect-style) ---------------------------------------------------
 // The dApp lives on ANOTHER origin and holds no key. It can only ENQUEUE a request here; it can never
 // sign. The wallet UI (same origin, holds the key) polls /bridge/poll, shows its own approval, signs
@@ -148,16 +169,18 @@ async function doPay({ amount, memo = "Caravel order" }) {
   // read the budget: its spent-before and the vault/badge addresses the pay needs to declare
   const parsed = await parseBudgetSubstate(await w.request("tari_getSubstate", { substate_id: state.budget }));
   const b0 = parsed.spentInWindow;
-  // CONTRACT: re-fetch the agent's CURRENT vaults (open minted the agent-badge vault the proof needs).
+  // The AGENT proves the badge and pays the pay-tx gas. In two-account mode that is a separate account
+  // (PAY_AGENT), so the owner wallet never moves on a dApp pay — not even the fee. Re-fetch the agent's
+  // CURRENT vaults (the open minted the agent-badge vault the proof needs, in the agent account).
   const full = {
-    network: Network.LocalNet, maxEpoch: await w.maxEpoch(), agent: ACCOUNT,
-    agentVaults: await accountVaults(provider, ACCOUNT), budget: state.budget, budgetVault: parsed.vault,
-    agentBadge: parsed.agentBadge, session: SESSION, merchant: MERCHANT,
+    network: Network.LocalNet, maxEpoch: await (agentW || w).maxEpoch(), agent: PAY_AGENT,
+    agentVaults: await accountVaults(provider, PAY_AGENT), budget: state.budget, budgetVault: parsed.vault,
+    agentBadge: parsed.agentBadge, session: PAY_SESSION, merchant: MERCHANT,
     merchantVaults: await accountVaults(provider, MERCHANT), amount, memo, maxFee: 200_000,
   };
   let txid = null, events = [], reason = null;
   try {
-    const r = await sign(payTx(full));
+    const r = await paySign(payTx(full));
     txid = r?.result?.Finalized?.transaction_id || null;
     events = templateEvents(r, TEMPLATE).map((e) => e.topic);
     const ad = r?.result?.Finalized?.abort_details;
@@ -186,7 +209,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/status") {
       return send(res, 200, { connected: true, account: ACCOUNT, network: "localnet", indexer: INDEXER_URL,
-        template: TEMPLATE, merchant: MERCHANT, budget: await budgetState() });
+        template: TEMPLATE, merchant: MERCHANT, agentAccount: PAY_AGENT, twoAccount: !!two, budget: await budgetState() });
     }
     if (url.pathname === "/api/account") {
       return send(res, 200, { account: ACCOUNT, resource: "XTR", balance: (await ownerBalance()).toString() });
