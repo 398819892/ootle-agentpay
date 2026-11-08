@@ -123,10 +123,23 @@ function createChainReads({ store, walletd, conn, txlog, OnChainBudget, windowSt
     }
     const sub = await c.getSubstate(component);
     const state = findComponentState(sub);
-    if (!state) throw new Error("could not read the budget component state");
+    // readInfo (a live get_info call) is authoritative for the financial state; the component SUBSTATE is
+    // only needed for the whitelist. walletd can hand back a STALE local substate copy with no state body
+    // (findComponentState → null) when the budget was last updated by an EXTERNAL, non-custodial payer
+    // that walletd never tracked (e.g. a self-signing agent wallet paying a shared budget). In that case
+    // do NOT fail the whole read if readInfo succeeded: use it, and fall back to the last-known (cached)
+    // whitelist for that one field. Only when BOTH reads are unusable do we give up (caller → cache).
+    if (!state && !info) throw new Error("could not read the budget component state");
     if (info) {
-      const wlRaw = Array.isArray(state[8]) ? state[8] : [];
-      const whitelist = wlRaw.map((e) => (cborHex(e) ? "component_" + cborHex(e) : null)).filter(Boolean);
+      let whitelist;
+      let whitelistStale = false;
+      if (Array.isArray(state && state[8])) {
+        whitelist = state[8].map((e) => (cborHex(e) ? "component_" + cborHex(e) : null)).filter(Boolean);
+      } else {
+        // substate unavailable/stale — reuse the last-known whitelist (cached snapshot) and flag it.
+        whitelist = ((store.budget && store.budget.whitelist) || []).slice();
+        whitelistStale = true;
+      }
       const window = windowStatus({
         dailyCap: Number(info.dailyCap), spentInWindow: Number(info.spentInWindow),
         windowStartEpoch: Number(info.windowStartEpoch), epochsPerWindow: Number(info.epochsPerWindow), currentEpoch,
@@ -136,6 +149,7 @@ function createChainReads({ store, walletd, conn, txlog, OnChainBudget, windowSt
         dailyCap: info.dailyCap,
         spentInWindow: String(window.spentInWindow), // effective (0 once the window has lazily elapsed)
         whitelist,
+        whitelistStale, // true → whitelist came from cache, not this read (substate was stale)
         revoked: info.revoked,
         vaultBalance: info.balance, // vault.balance() from the info event — no separate vault read needed
         window,

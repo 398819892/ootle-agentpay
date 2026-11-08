@@ -150,7 +150,7 @@ function createDashboard({
         treasury: treasuryFromChain ? "chain" : "journal(cache)",
         spent: chainOk ? "chain" : "unavailable",
         caps: chainOk ? "chain" : "cache",
-        whitelist: chainOk ? "chain" : "cache",
+        whitelist: chainOk && !chain.whitelistStale ? "chain" : "cache",
         revoked: chainOk ? "chain" : "cache",
         fundedWithdrawn: "journal",
         ledger: ledgerSource, // "chain+journal" (all on-chain pays) or "journal" (fallback)
