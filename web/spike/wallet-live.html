@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>AgentPay Wallet — live</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
 <style>
   :root {
     --bg:#0e0d14; --panel:#16151f; --panel-2:#1e1c29; --border:#2b2838; --border-soft:#211f2d;
@@ -14,7 +14,7 @@
     --good:#45cf8c; --good-bg:#45cf8c1a; --warn:#e2b24a; --bad:#ff6f6f; --bad-bg:#ff6f6f1a;
     --shadow:0 1px 0 #ffffff0a inset,0 10px 30px -12px #00000080;
     color-scheme:dark;
-    --d-ui:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+    --d-ui:"IBM Plex Sans","Noto Sans SC",ui-sans-serif,system-ui,sans-serif;
     --d-display:"Bricolage Grotesque",var(--d-ui);
     --d-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
   }
@@ -22,6 +22,7 @@
   body{background:var(--bg);color:var(--fg);font-family:var(--d-ui);line-height:1.5;-webkit-font-smoothing:antialiased;}
   .wrap{max-width:1120px;margin:0 auto;padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px));padding-block:22px 40px;}
   h1,h2,h3{margin:0;font-family:var(--d-display);letter-spacing:-0.01em;}
+  :lang(zh) h1,:lang(zh) h2,:lang(zh) h3{font-family:"Noto Sans SC",var(--d-display);}
   .mono{font-family:var(--d-mono);} .num{font-variant-numeric:tabular-nums;}
   header.bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:20px;}
   .brand{display:flex;align-items:center;gap:11px;margin-right:auto;}
@@ -31,11 +32,14 @@
   .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);}
   .pill.live .dot{background:var(--good);box-shadow:0 0 0 3px var(--good-bg);}
   .pill.net{color:var(--accent-ink);border-color:var(--accent);background:var(--accent-bg);}
+  .langbtn{font:inherit;font-size:12px;font-weight:700;color:var(--accent-ink);background:var(--panel);border:1px solid var(--accent);border-radius:9px;padding:6px 11px;cursor:pointer;letter-spacing:.02em;}
+  .langbtn:hover{background:var(--accent-bg);}
   .grid{display:grid;grid-template-columns:1.15fr 1fr;gap:16px;align-items:start;}
   @media (max-width:760px){.grid{grid-template-columns:1fr;}}
   .panel{background:var(--panel);border:1px solid var(--border);border-radius:15px;box-shadow:var(--shadow);overflow:hidden;}
   .panel .hd{display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid var(--border-soft);}
   .panel .hd h2{font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);}
+  :lang(zh) .panel .hd h2{letter-spacing:.06em;}
   .panel .hd .tag{margin-left:auto;font-size:11px;}
   .bd{padding:16px;display:flex;flex-direction:column;gap:15px;}
   .kv{display:flex;align-items:center;gap:10px;} .kv .k{font-size:11.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;min-width:72px;}
@@ -62,61 +66,60 @@
   .checks{display:flex;flex-direction:column;gap:7px;} .check{display:flex;align-items:center;gap:9px;font-size:12.5px;padding:8px 11px;border-radius:9px;border:1px solid var(--border-soft);background:var(--panel-2);} .check .ic{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;flex-shrink:0;} .check.ok .ic{background:var(--good-bg);color:var(--good);} .check.ok{border-color:var(--good);} .check.no .ic{background:var(--bad-bg);color:var(--bad);} .check.no{border-color:var(--bad);} .check .lab2{flex:1;} .check .q{color:var(--muted);font-family:var(--d-mono);font-size:11.5px;}
   .modal .acts{display:grid;grid-template-columns:1fr 1.4fr;gap:10px;padding:0 18px 18px;}
   .toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:max(18px,env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;z-index:60;width:min(440px,calc(100% - 32px));} .toast{border-radius:11px;padding:11px 14px;font-size:13px;font-weight:600;border:1px solid var(--border);background:var(--panel);box-shadow:0 14px 34px -14px #000000a0;display:flex;gap:9px;align-items:center;} .toast.good{border-color:var(--good);color:var(--good);} .toast.bad{border-color:var(--bad);color:var(--bad);} .toast .mono{color:var(--muted);font-weight:500;font-size:11.5px;}
-  .note{font-size:11.5px;color:var(--faint);line-height:1.5;} .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;} @keyframes sp{to{transform:rotate(360deg);}}
+  .note{font-size:11.5px;color:var(--faint);line-height:1.6;}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="bar">
-    <div class="brand"><div class="glyph">◈</div><div><h1>AgentPay Wallet</h1><div class="sub">Non-custodial · live Ootle L2 · <span class="mono" id="net">localnet</span></div></div></div>
-    <span class="pill net"><span class="dot"></span>LIVE on-chain</span>
-    <span class="pill live"><span class="dot"></span>engine connected</span>
+    <div class="brand"><div class="glyph">◈</div><div><h1>AgentPay Wallet</h1><div class="sub"><span data-i18n="brandSub">Non-custodial · live Ootle L2</span> · <span class="mono" id="net">localnet</span></div></div></div>
+    <span class="pill net"><span class="dot"></span><span data-i18n="liveChain">LIVE on-chain</span></span>
+    <span class="pill live"><span class="dot"></span><span data-i18n="engineConnected">engine connected</span></span>
+    <button class="langbtn" id="langBtn">EN</button>
   </header>
 
   <div class="grid">
     <section class="panel">
-      <div class="hd"><h2>Wallet</h2><span class="tag pill"><span class="dot"></span>key held locally</span></div>
+      <div class="hd"><h2 data-i18n="wallet">Wallet</h2><span class="tag pill"><span class="dot"></span><span data-i18n="keyLocal">key held locally</span></span></div>
       <div class="bd">
-        <div class="kv"><span class="k">Account</span><span class="addr mono" id="acct">…</span></div>
-        <div id="noBudget" class="field" hidden>
-          <p class="note">No budget open yet. Open one from the dApp panel → the owner sets the chain-enforced caps and a session badge is minted into this wallet.</p>
-        </div>
+        <div class="kv"><span class="k" data-i18n="account">Account</span><span class="addr mono" id="acct">…</span></div>
+        <div id="noBudget" class="field" hidden><p class="note" data-i18n="noBudget">No budget open yet. Open one from the dApp panel → the owner sets the chain-enforced caps and a session badge is minted into this wallet.</p></div>
         <div id="budgetBox" hidden>
           <div class="kv" style="justify-content:space-between">
-            <div><div class="lab">Budget vault</div><div class="balance"><span class="big num" id="vault">—</span><span class="unit">XTR</span></div></div>
-            <div style="text-align:right"><div class="lab">Agent role</div><div class="mono small" style="margin-top:7px;color:var(--accent-ink)">holds session badge</div></div>
+            <div><div class="lab" data-i18n="budgetVault">Budget vault</div><div class="balance"><span class="big num" id="vault">—</span><span class="unit">XTR</span></div></div>
+            <div style="text-align:right"><div class="lab" data-i18n="agentRole">Agent role</div><div class="mono small" style="margin-top:7px;color:var(--accent-ink)" data-i18n="holdsBadge">holds session badge</div></div>
           </div>
           <div style="height:4px"></div>
           <div class="budget">
-            <div class="kv"><span class="k">Budget</span><span class="addr mono" id="budgetAddr"></span></div>
+            <div class="kv"><span class="k" data-i18n="budget">Budget</span><span class="addr mono" id="budgetAddr"></span></div>
             <div class="caps">
-              <div class="cap"><div class="lab">Per-transaction cap</div><div class="val num"><span id="perTx">—</span> <span class="muted small">XTR</span></div></div>
-              <div class="cap"><div class="lab">Daily cap</div><div class="val num"><span id="daily">—</span> <span class="muted small">XTR</span></div></div>
+              <div class="cap"><div class="lab" data-i18n="perTxCap">Per-transaction cap</div><div class="val num"><span id="perTx">—</span> <span class="muted small">XTR</span></div></div>
+              <div class="cap"><div class="lab" data-i18n="dailyCap">Daily cap</div><div class="val num"><span id="daily">—</span> <span class="muted small">XTR</span></div></div>
             </div>
             <div>
-              <div class="kv small" style="justify-content:space-between;margin-bottom:6px"><span class="muted">Spent this window</span><span class="mono num"><span id="spent">0</span> / <span id="daily2">—</span></span></div>
+              <div class="kv small" style="justify-content:space-between;margin-bottom:6px"><span class="muted" data-i18n="spentWindow">Spent this window</span><span class="mono num"><span id="spent">0</span> / <span id="daily2">—</span></span></div>
               <div class="meter" id="meter"><span id="bar"></span></div>
             </div>
-            <div class="chips"><span class="chip">whitelist <b id="wlN">1</b> payee</span><span class="chip">window epochs <b id="ep">10</b></span></div>
+            <div class="chips"><span class="chip"><span data-i18n="whitelist">whitelist</span> <b id="wlN">1</b> <span data-i18n="payee">payee</span></span><span class="chip"><span data-i18n="windowEpochs">window epochs</span> <b id="ep">10</b></span></div>
           </div>
         </div>
       </div>
     </section>
 
     <section class="panel">
-      <div class="hd"><h2>Merchant dApp</h2><span class="tag pill"><span class="dot"></span>Caravel storefront</span></div>
+      <div class="hd"><h2 data-i18n="merchantDapp">Merchant dApp</h2><span class="tag pill"><span class="dot"></span><span data-i18n="caravel">Caravel storefront</span></span></div>
       <div class="bd">
-        <p class="note">The storefront only speaks the wallet's HTTP API (standing in for <span class="mono">window.tari</span>). It asks the wallet to pay; the chain enforces the owner's caps.</p>
-        <div class="field"><span class="lab">Amount to charge</span><div class="amt"><input id="payInput" class="num" inputmode="numeric" value="700"><span class="u">XTR</span></div></div>
-        <div class="presets"><button class="preset" data-amt="300">300</button><button class="preset" data-amt="700">700 · in-cap</button><button class="preset" data-amt="900">900</button><button class="preset" data-amt="5000">5000 · over cap</button></div>
-        <button class="btn block" id="payBtn" disabled>Request payment →</button>
+        <p class="note" data-i18n="dappNote">The storefront only speaks the wallet's HTTP API (standing in for window.tari). It asks the wallet to pay; the chain enforces the owner's caps.</p>
+        <div class="field"><span class="lab" data-i18n="amountCharge">Amount to charge</span><div class="amt"><input id="payInput" class="num" inputmode="numeric" value="700"><span class="u">XTR</span></div></div>
+        <div class="presets"><button class="preset" data-amt="300">300</button><button class="preset" data-amt="700">700 · <span data-i18n="inCap">in-cap</span></button><button class="preset" data-amt="900">900</button><button class="preset" data-amt="5000">5000 · <span data-i18n="overCap">over cap</span></button></div>
+        <button class="btn block" id="payBtn" disabled data-i18n="requestPay">Request payment →</button>
         <details class="open-form">
-          <summary>⚙ Open a new budget (owner)</summary>
+          <summary><span data-i18n="openBudgetOwner">⚙ Open a new budget (owner)</span></summary>
           <div class="open-body">
-            <p class="note">Funds a fresh budget on-chain and sets the caps. This really submits <span class="mono">AgentBudget::new</span>.</p>
-            <div class="duo"><div class="mini"><label>Fund (XTR)</label><input id="fFund" class="num" value="5000"></div><div class="mini"><label>Per-tx cap</label><input id="fPer" class="num" value="1000"></div></div>
-            <div class="duo"><div class="mini"><label>Daily cap</label><input id="fDaily" class="num" value="1500"></div><div class="mini"><label>Epochs / window</label><input id="fEp" class="num" value="10"></div></div>
-            <button class="btn sec block" id="openBtn">Open budget on-chain</button>
+            <p class="note" data-i18n="openNote">Funds a fresh budget on-chain and sets the caps. This really submits AgentBudget::new.</p>
+            <div class="duo"><div class="mini"><label data-i18n="fund">Fund (XTR)</label><input id="fFund" class="num" value="5000"></div><div class="mini"><label data-i18n="perTxCapShort">Per-tx cap</label><input id="fPer" class="num" value="1000"></div></div>
+            <div class="duo"><div class="mini"><label data-i18n="dailyCapShort">Daily cap</label><input id="fDaily" class="num" value="1500"></div><div class="mini"><label data-i18n="epochsWindow">Epochs / window</label><input id="fEp" class="num" value="10"></div></div>
+            <button class="btn sec block" id="openBtn" data-i18n="openOnchain">Open budget on-chain</button>
           </div>
         </details>
       </div>
@@ -124,31 +127,108 @@
   </div>
 
   <div style="margin-top:16px" class="panel">
-    <div class="hd"><h2>Bridge · live engine</h2><span class="tag small muted mono" id="idx">indexer …</span></div>
+    <div class="hd"><h2 data-i18n="bridgeLive">Bridge · live engine</h2><span class="tag small muted mono" id="idx">indexer …</span></div>
     <div class="bd" style="padding:12px 14px">
       <div class="log" id="log"></div>
-      <p class="note">Every action here signs and submits a real transaction through the self-built non-custodial engine against the live 0.50.1 swarm. Receipt ids, events and the over-cap abort are returned by the chain.</p>
+      <p class="note" data-i18n="bridgeNote">Every action here signs and submits a real transaction through the self-built non-custodial engine against the live 0.50.1 swarm. Receipt ids, events and the over-cap abort are returned by the chain.</p>
     </div>
   </div>
 </div>
 <div class="toasts" id="toasts"></div>
 
 <script>
+  // ---- i18n dictionary (English / 简体中文) ----
+  const T = {
+    en: {
+      brandSub:"Non-custodial · live Ootle L2", liveChain:"LIVE on-chain", engineConnected:"engine connected",
+      wallet:"Wallet", keyLocal:"key held locally", account:"Account",
+      noBudget:"No budget open yet. Open one from the dApp panel → the owner sets the chain-enforced caps and a session badge is minted into this wallet.",
+      budgetVault:"Budget vault", agentRole:"Agent role", holdsBadge:"holds session badge", budget:"Budget",
+      perTxCap:"Per-transaction cap", dailyCap:"Daily cap", spentWindow:"Spent this window",
+      whitelist:"whitelist", payee:"payee", windowEpochs:"window epochs",
+      merchantDapp:"Merchant dApp", caravel:"Caravel storefront",
+      dappNote:"The storefront only speaks the wallet's HTTP API (standing in for window.tari). It asks the wallet to pay; the chain enforces the owner's caps.",
+      amountCharge:"Amount to charge", inCap:"in-cap", overCap:"over cap", requestPay:"Request payment →",
+      openBudgetOwner:"⚙ Open a new budget (owner)", openNote:"Funds a fresh budget on-chain and sets the caps. This really submits AgentBudget::new.",
+      fund:"Fund (XTR)", perTxCapShort:"Per-tx cap", dailyCapShort:"Daily cap", epochsWindow:"Epochs / window", openOnchain:"Open budget on-chain",
+      bridgeLive:"Bridge · live engine",
+      bridgeNote:"Every action here signs and submits a real transaction through the self-built non-custodial engine against the live 0.50.1 swarm. Receipt ids, events and the over-cap abort are returned by the chain.",
+      langBtn:"中文",
+      // modal
+      approvePayment:"Approve payment", caravelRequests:"Caravel storefront requests",
+      chkWhitelist:"Payee on owner whitelist", chkPerTx:"Within per-transaction cap", chkDaily:"Within daily cap",
+      modalOk:"The wallet will sign and submit; the AgentBudget contract checks the caps on-chain before releasing funds.",
+      modalBad:"The chain will reject budget.pay — only the fee commits, spent stays put. Approving shows exactly that.",
+      reject:"Reject", approveSign:"Approve & sign", approveAnyway:"Approve anyway",
+      // dynamic
+      connecting:"connecting to live engine …", engineReady:(a,n)=>`← engine ready · account ${a} · ${n}`, noBudgetLog:"no budget yet — open one to begin",
+      payReq:(a)=>`→ dApp: tari_signAndSubmitTransaction  budget.pay(${a} XTR → merchant)`,
+      signing:"wallet: resolve → sign → seal → submit …", evt:(e)=>`event ${e}`,
+      committed:(id,p,s)=>`← chain: Commit · ${id}  spent ${p} → ${s}`,
+      payRejected:"← chain: pay REJECTED (fee committed)", abort:(r)=>`abort: ${r}`, spentUnchanged:(s)=>`spent unchanged: ${s}`,
+      openReq:(f,p,d)=>`→ dApp: tari_signAndSubmitTransaction  AgentBudget::new(fund ${f}, caps ${p}/${d})`,
+      badges:"badges minted: owner badge → owner, session badge → agent", openCommit:(b)=>`← chain: Commit · budget ${b}`,
+      userRejected:"← wallet: user rejected (4001)", errLog:(m)=>`error: ${m}`,
+      tPaid:(a)=>`Paid ${a} XTR`, tChainRejected:"Chain rejected the pay", tOverPerTx:"over per-tx cap", tOverDaily:"over daily cap", tRejected:"rejected",
+      tBudgetOpened:"Budget opened", tCaps:(p,d)=>`caps ${p} / ${d}`, tPaymentRejected:"Payment rejected", tOpenFailed:"Open failed",
+      tRequestFailed:"Request failed", tEngineUnreachable:"Engine unreachable", receipt:"receipt",
+    },
+    zh: {
+      brandSub:"非托管 · 实链 Ootle L2", liveChain:"实链运行", engineConnected:"引擎已连接",
+      wallet:"钱包", keyLocal:"私钥本地保管", account:"账户",
+      noBudget:"还没有预算。在右侧 dApp 面板里开一个 → owner 设定链上强制的额度,并把会话徽章铸造进这个钱包。",
+      budgetVault:"预算金库", agentRole:"Agent 身份", holdsBadge:"持有会话徽章", budget:"预算",
+      perTxCap:"单笔上限", dailyCap:"每日上限", spentWindow:"本窗口已花",
+      whitelist:"白名单", payee:"个收款方", windowEpochs:"窗口周期",
+      merchantDapp:"商户 dApp", caravel:"Caravel 商店",
+      dappNote:"商店只会说钱包的 HTTP API(代替 window.tari)。它请求钱包付款;额度由链上强制执行。",
+      amountCharge:"收款金额", inCap:"额度内", overCap:"超额", requestPay:"发起付款 →",
+      openBudgetOwner:"⚙ 开一个新预算(owner)", openNote:"在链上注资开一个新预算并设定额度。这会真实提交 AgentBudget::new。",
+      fund:"注资 (XTR)", perTxCapShort:"单笔上限", dailyCapShort:"每日上限", epochsWindow:"周期/窗口", openOnchain:"链上开预算",
+      bridgeLive:"桥接 · 实链引擎",
+      bridgeNote:"这里每个操作都通过自建非托管引擎,向实链 0.50.1 swarm 真实签名并提交交易。回执 id、事件和超额中止都由链上返回。",
+      langBtn:"EN",
+      approvePayment:"批准付款", caravelRequests:"Caravel 商店请求支付",
+      chkWhitelist:"收款方在 owner 白名单内", chkPerTx:"未超单笔上限", chkDaily:"未超每日上限",
+      modalOk:"钱包将签名并提交;AgentBudget 合约会在放款前于链上检查额度。",
+      modalBad:"链上会拒绝 budget.pay —— 只有手续费入账,已花金额不变。批准即可看到这一结果。",
+      reject:"拒绝", approveSign:"批准并签名", approveAnyway:"仍然批准",
+      connecting:"正在连接实链引擎 …", engineReady:(a,n)=>`← 引擎就绪 · 账户 ${a} · ${n}`, noBudgetLog:"暂无预算 —— 先开一个",
+      payReq:(a)=>`→ dApp:tari_signAndSubmitTransaction  budget.pay(${a} XTR → 商户)`,
+      signing:"钱包:resolve → sign → seal → submit …", evt:(e)=>`事件 ${e}`,
+      committed:(id,p,s)=>`← 链:Commit · ${id}  已花 ${p} → ${s}`,
+      payRejected:"← 链:付款被拒(手续费已入账)", abort:(r)=>`中止:${r}`, spentUnchanged:(s)=>`已花未变:${s}`,
+      openReq:(f,p,d)=>`→ dApp:tari_signAndSubmitTransaction  AgentBudget::new(注资 ${f},额度 ${p}/${d})`,
+      badges:"铸造徽章:owner 徽章 → owner,会话徽章 → agent", openCommit:(b)=>`← 链:Commit · 预算 ${b}`,
+      userRejected:"← 钱包:用户已拒绝(4001)", errLog:(m)=>`错误:${m}`,
+      tPaid:(a)=>`已支付 ${a} XTR`, tChainRejected:"链上拒绝了付款", tOverPerTx:"超单笔上限", tOverDaily:"超每日上限", tRejected:"被拒",
+      tBudgetOpened:"预算已开", tCaps:(p,d)=>`额度 ${p} / ${d}`, tPaymentRejected:"付款已拒绝", tOpenFailed:"开预算失败",
+      tRequestFailed:"请求失败", tEngineUnreachable:"引擎不可达", receipt:"回执",
+    },
+  };
+  let L = "zh";
+  try { const s = localStorage.getItem("ap-lang"); if (s === "en" || s === "zh") L = s; } catch {}
+  const t = (k, ...a) => { const v = T[L][k]; return typeof v === "function" ? v(...a) : v; };
+  function applyLang() {
+    document.documentElement.lang = L;
+    document.querySelectorAll("[data-i18n]").forEach((el) => { const v = T[L][el.getAttribute("data-i18n")]; if (v != null) el.textContent = v; });
+    $("langBtn").textContent = T[L].langBtn;
+    try { localStorage.setItem("ap-lang", L); } catch {}
+  }
+
   const $=(id)=>document.getElementById(id);
   const fmt=(n)=>(n==null?"—":Number(n).toLocaleString("en-US"));
   const short=(a)=>!a?"—":a.slice(0,a.indexOf("_")+1)+a.slice(a.indexOf("_")+1,a.indexOf("_")+9)+"…"+a.slice(-6);
   const logEl=$("log");
-  function log(cls,msg){const t=new Date().toLocaleTimeString("en-US",{hour12:false});const ln=document.createElement("div");ln.className="ln";const s=document.createElement("span");s.className="t";s.textContent=t;const m=document.createElement("span");m.className=cls;m.textContent=msg;ln.append(s,m);logEl.appendChild(ln);logEl.scrollTop=logEl.scrollHeight;while(logEl.children.length>80)logEl.removeChild(logEl.firstChild);}
+  function log(cls,msg){const tm=new Date().toLocaleTimeString("en-US",{hour12:false});const ln=document.createElement("div");ln.className="ln";const s=document.createElement("span");s.className="t";s.textContent=tm;const m=document.createElement("span");m.className=cls;m.textContent=msg;ln.append(s,m);logEl.appendChild(ln);logEl.scrollTop=logEl.scrollHeight;while(logEl.children.length>80)logEl.removeChild(logEl.firstChild);}
   function toast(kind,title,sub){const el=document.createElement("div");el.className="toast "+kind;const a=document.createElement("span");a.textContent=(kind==="good"?"✓ ":"✕ ")+title;el.appendChild(a);if(sub){const b=document.createElement("span");b.className="mono";b.textContent=sub;el.appendChild(b);}$("toasts").appendChild(el);setTimeout(()=>{el.style.opacity="0";el.style.transition="opacity .3s";setTimeout(()=>el.remove(),300);},4600);}
   const api=async(path,method,body)=>{const r=await fetch(path,{method:method||"GET",headers:body?{"content-type":"application/json"}:undefined,body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||("HTTP "+r.status));return j;};
 
   let ST=null;
   function renderBudget(b){
-    $("payBtn").disabled=!b;
-    $("budgetBox").hidden=!b; $("noBudget").hidden=!!b;
+    $("payBtn").disabled=!b; $("budgetBox").hidden=!b; $("noBudget").hidden=!!b;
     if(!b)return;
-    $("budgetAddr").textContent=short(b.address);
-    $("vault").textContent=fmt(b.vault);
+    $("budgetAddr").textContent=short(b.address); $("vault").textContent=fmt(b.vault);
     $("perTx").textContent=fmt(b.perTx); $("daily").textContent=fmt(b.daily); $("daily2").textContent=fmt(b.daily);
     $("spent").textContent=fmt(b.spent); $("wlN").textContent=(b.whitelist||[]).length; $("ep").textContent=b.epochsPerWindow;
     const pct=Math.min(100,Math.round(b.spent/b.daily*100)); $("bar").style.width=pct+"%"; $("meter").classList.toggle("hot",pct>=80);
@@ -156,62 +236,58 @@
   async function refresh(){
     const s=await api("/api/status"); ST=s;
     $("acct").textContent=short(s.account); $("net").textContent=s.network; $("idx").textContent="indexer "+(s.indexer||"").replace(/^https?:\/\//,"");
-    renderBudget(s.budget);
-    return s;
+    renderBudget(s.budget); return s;
   }
 
-  // approval modal (client-side gate) -> real on-chain pay
   function openModal(amount){
     const b=ST.budget; const r=amount<=b.perTx && (b.spent+amount)<=b.daily && amount<=(b.vault??Infinity);
     const checks=[
-      {ok:true,lab:"Payee on owner whitelist",q:short(ST.merchant)},
-      {ok:amount<=b.perTx,lab:"Within per-transaction cap",q:fmt(amount)+" / "+fmt(b.perTx)},
-      {ok:(b.spent+amount)<=b.daily,lab:"Within daily cap",q:fmt(b.spent+amount)+" / "+fmt(b.daily)},
+      {ok:true,lab:t("chkWhitelist"),q:short(ST.merchant)},
+      {ok:amount<=b.perTx,lab:t("chkPerTx"),q:fmt(amount)+" / "+fmt(b.perTx)},
+      {ok:(b.spent+amount)<=b.daily,lab:t("chkDaily"),q:fmt(b.spent+amount)+" / "+fmt(b.daily)},
     ];
+    const esc=(x)=>String(x).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
     const scrim=document.createElement("div");scrim.className="scrim";scrim.id="scrim";
-    const html=['<div class="modal" role="dialog" aria-modal="true"><div class="top"><h3>Approve payment</h3><span class="pill net"><span class="dot"></span>',short(ST.template),'</span></div><div class="mb"><div><div class="lab">Caravel storefront requests</div><div class="pay-amt"><span class="n num">',fmt(amount),'</span> <span class="muted">XTR</span></div></div><div class="checks">',
-      checks.map(c=>'<div class="check '+(c.ok?"ok":"no")+'"><span class="ic">'+(c.ok?"✓":"✕")+'</span><span class="lab2">'+c.lab+'</span><span class="q">'+c.q+'</span></div>').join(""),
-      '</div><p class="note">',r?"The wallet will sign and submit; the AgentBudget contract checks the caps on-chain before releasing funds.":"The chain will reject budget.pay — only the fee commits, spent stays put. Approving shows exactly that.",'</p></div><div class="acts"><button class="btn sec" id="rej">Reject</button><button class="btn" id="apr">',r?"Approve & sign":"Approve anyway",'</button></div></div>'].join("");
-    scrim.innerHTML=html;document.body.appendChild(scrim);
-    $("rej").onclick=()=>{scrim.remove();log("rej","← wallet: user rejected (4001)");toast("bad","Payment rejected","code 4001");};
+    scrim.innerHTML=['<div class="modal" role="dialog" aria-modal="true"><div class="top"><h3>',t("approvePayment"),'</h3><span class="pill net"><span class="dot"></span>',short(ST.template),'</span></div><div class="mb"><div><div class="lab">',t("caravelRequests"),'</div><div class="pay-amt"><span class="n num">',fmt(amount),'</span> <span class="muted">XTR</span></div></div><div class="checks">',
+      checks.map(c=>'<div class="check '+(c.ok?"ok":"no")+'"><span class="ic">'+(c.ok?"✓":"✕")+'</span><span class="lab2">'+esc(c.lab)+'</span><span class="q">'+c.q+'</span></div>').join(""),
+      '</div><p class="note">',esc(r?t("modalOk"):t("modalBad")),'</p></div><div class="acts"><button class="btn sec" id="rej">',t("reject"),'</button><button class="btn" id="apr">',r?t("approveSign"):t("approveAnyway"),'</button></div></div>'].join("");
+    document.body.appendChild(scrim);
+    $("rej").onclick=()=>{scrim.remove();log("rej",t("userRejected"));toast("bad",t("tPaymentRejected"),"code 4001");};
     $("apr").onclick=()=>{scrim.remove();doPay(amount);};
     scrim.addEventListener("mousedown",e=>{if(e.target===scrim)scrim.remove();});
   }
   async function doPay(amount){
-    log("req","→ dApp: tari_signAndSubmitTransaction  budget.pay("+fmt(amount)+" XTR → merchant)");
-    log("sys","  wallet: resolve → sign → seal → submit …");
-    $("payBtn").disabled=true;
+    log("req",t("payReq",fmt(amount))); log("sys",t("signing")); $("payBtn").disabled=true;
     try{
       const r=await api("/api/pay","POST",{amount});
       if(r.committed){
-        (r.events||[]).forEach(e=>log("evt","  event "+e));
-        log("res","← chain: Commit · "+(r.txid?String(r.txid).slice(0,24)+"…":"receipt")+"  spent "+fmt(r.prevSpent)+" → "+fmt(r.spent));
-        toast("good","Paid "+fmt(amount)+" XTR",r.txid?String(r.txid).slice(0,18)+"…":"committed");
+        (r.events||[]).forEach(e=>log("evt",t("evt",e)));
+        log("res",t("committed",r.txid?String(r.txid).slice(0,24)+"…":t("receipt"),fmt(r.prevSpent),fmt(r.spent)));
+        toast("good",t("tPaid",fmt(amount)),r.txid?String(r.txid).slice(0,18)+"…":"");
       }else{
-        log("rej","← chain: pay REJECTED (fee committed)");
-        log("rej","  abort: "+(r.reason||"rejected"));
-        log("sys","  spent unchanged: "+fmt(r.spent));
-        toast("bad","Chain rejected the pay",/per-transaction/.test(r.reason||"")?"over per-tx cap":/daily/.test(r.reason||"")?"over daily cap":"rejected");
+        log("rej",t("payRejected")); log("rej",t("abort",r.reason||"rejected")); log("sys",t("spentUnchanged",fmt(r.spent)));
+        toast("bad",t("tChainRejected"),/per-transaction/.test(r.reason||"")?t("tOverPerTx"):/daily/.test(r.reason||"")?t("tOverDaily"):t("tRejected"));
       }
-    }catch(e){log("rej","  error: "+e.message);toast("bad","Request failed",e.message);}
+    }catch(e){log("rej",t("errLog",e.message));toast("bad",t("tRequestFailed"),e.message);}
     await refresh();
   }
   async function doOpen(){
     const payload={fund:+$("fFund").value||0,perTx:+$("fPer").value||1000,daily:+$("fDaily").value||1500,epochsPerWindow:+$("fEp").value||10};
-    log("req","→ dApp: tari_signAndSubmitTransaction  AgentBudget::new(fund "+fmt(payload.fund)+", caps "+payload.perTx+"/"+payload.daily+")");
-    log("sys","  wallet: resolve → sign → seal → submit …");
-    try{const r=await api("/api/open","POST",payload);log("evt","  badges minted: owner badge → owner, session badge → agent");log("res","← chain: Commit · budget "+short(r.address));toast("good","Budget opened","caps "+payload.perTx+" / "+payload.daily);}
-    catch(e){log("rej","  error: "+e.message);toast("bad","Open failed",e.message);}
+    log("req",t("openReq",fmt(payload.fund),payload.perTx,payload.daily)); log("sys",t("signing"));
+    try{const r=await api("/api/open","POST",payload);log("evt",t("badges"));log("res",t("openCommit",short(r.address)));toast("good",t("tBudgetOpened"),t("tCaps",payload.perTx,payload.daily));}
+    catch(e){log("rej",t("errLog",e.message));toast("bad",t("tOpenFailed"),e.message);}
     await refresh();
   }
 
   document.querySelectorAll(".preset").forEach(b=>b.onclick=()=>{$("payInput").value=b.dataset.amt;});
   $("payBtn").onclick=()=>{if(!ST||!ST.budget)return;const a=parseInt($("payInput").value)||0;if(a>0)openModal(a);};
   $("openBtn").onclick=doOpen;
+  $("langBtn").onclick=()=>{L=(L==="zh")?"en":"zh";applyLang();};
   document.addEventListener("keydown",e=>{if(e.key==="Escape"){const s=$("scrim");if(s)s.remove();}});
 
-  log("sys","connecting to live engine …");
-  refresh().then(s=>{log("res","← engine ready · account "+short(s.account)+" · "+s.network);if(!s.budget)log("sys","no budget yet — open one to begin");}).catch(e=>{log("rej","engine error: "+e.message);toast("bad","Engine unreachable",e.message);});
+  applyLang();
+  log("sys",t("connecting"));
+  refresh().then(s=>{log("res",t("engineReady",short(s.account),s.network));if(!s.budget)log("sys",t("noBudgetLog"));}).catch(e=>{log("rej",t("errLog",e.message));toast("bad",t("tEngineUnreachable"),e.message);});
 </script>
 </body>
 </html>
