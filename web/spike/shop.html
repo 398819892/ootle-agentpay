@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Caravel Storefront</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+  :root{
+    --bg:#0c110f;--panel:#121a17;--panel-2:#17211d;--border:#24322c;--border-soft:#1b2521;
+    --fg:#e9f1ec;--muted:#93a69c;--faint:#63746b;
+    --accent:#2fd4a7;--accent-ink:#79e9c8;--accent-bg:#2fd4a71a;--bad:#ff6f6f;--bad-bg:#ff6f6f1a;--good:#45cf8c;
+    --wallet:#8f7cff;--wallet-ink:#b9adff;
+    color-scheme:dark;
+    --d-ui:"IBM Plex Sans","Noto Sans SC",ui-sans-serif,system-ui,sans-serif;--d-display:"Bricolage Grotesque",var(--d-ui);--d-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  }
+  :lang(zh) h1,:lang(zh) h2,:lang(zh) h3{font-family:"Noto Sans SC",var(--d-display);}
+  *{box-sizing:border-box;} html,body{margin:0;}
+  body{background:var(--bg);color:var(--fg);font-family:var(--d-ui);line-height:1.5;-webkit-font-smoothing:antialiased;
+    padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px));padding-block:18px 28px;max-width:560px;margin:0 auto;}
+  .mono{font-family:var(--d-mono);} .num{font-variant-numeric:tabular-nums;}
+  .top{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+  .logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(145deg,var(--accent),#17a784);display:grid;place-items:center;color:#06110d;font-family:var(--d-display);font-weight:700;}
+  .top h1{margin:0;font-family:var(--d-display);font-size:18px;}
+  .top .sub{font-size:11px;color:var(--muted);}
+  .pill{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:4px 9px;border-radius:999px;border:1px solid var(--border);color:var(--muted);background:var(--panel);cursor:default;}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);} .pill.on{border-color:var(--wallet);color:var(--wallet-ink);} .pill.on .dot{background:var(--wallet);box-shadow:0 0 0 3px #8f7cff22;}
+  .langbtn{font:inherit;font-size:12px;font-weight:700;color:var(--accent-ink);background:var(--panel);border:1px solid var(--accent);border-radius:9px;padding:5px 10px;cursor:pointer;margin-left:10px;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:14px;}
+  .prod{display:flex;gap:13px;align-items:center;}
+  .thumb{width:52px;height:52px;border-radius:11px;background:linear-gradient(145deg,#1d2b26,#243a32);display:grid;place-items:center;font-size:24px;}
+  .prod h2{margin:0;font-size:15px;font-family:var(--d-display);} .prod .d{font-size:12px;color:var(--muted);}
+  .price{margin-left:auto;text-align:right;} .price .n{font-family:var(--d-mono);font-size:20px;font-weight:600;} .price .u{font-size:11px;color:var(--muted);}
+  .lab{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;} :lang(zh) .lab{letter-spacing:.04em;}
+  .presets{display:flex;flex-wrap:wrap;gap:7px;margin-top:7px;} .preset{font:inherit;font-family:var(--d-mono);font-size:12px;color:var(--muted);background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer;} .preset:hover{color:var(--fg);border-color:var(--accent);} .preset.on{color:var(--accent-ink);border-color:var(--accent);background:var(--accent-bg);}
+  .btn{font:inherit;font-weight:700;font-size:14px;color:#06110d;background:linear-gradient(145deg,var(--accent),#1cb78f);border:0;border-radius:11px;padding:13px 16px;cursor:pointer;box-shadow:0 8px 20px -10px var(--accent);width:100%;} .btn:hover{filter:brightness(1.06);} .btn:disabled{opacity:.5;cursor:progress;filter:none;box-shadow:none;}
+  .btn.connect{color:#fff;background:linear-gradient(145deg,var(--wallet),#6b53e0);box-shadow:0 8px 20px -10px var(--wallet);}
+  .status{border:1px dashed var(--border);border-radius:11px;padding:12px 13px;font-size:13px;display:flex;align-items:center;gap:9px;min-height:46px;color:var(--muted);}
+  .status.wait{border-style:solid;border-color:var(--accent);background:var(--accent-bg);color:var(--accent-ink);}
+  .status.ok{border-style:solid;border-color:var(--good);background:#45cf8c14;color:var(--good);}
+  .status.no{border-style:solid;border-color:var(--bad);background:var(--bad-bg);color:var(--bad);}
+  .status .mono{font-size:11px;opacity:.85;}
+  .spin{width:13px;height:13px;border:2px solid #ffffff33;border-top-color:currentColor;border-radius:50%;animation:sp .7s linear infinite;flex-shrink:0;} @keyframes sp{to{transform:rotate(360deg);}}
+  .note{font-size:11px;color:var(--faint);line-height:1.6;}
+  .acct{font-size:11px;color:var(--muted);} .acct b{color:var(--wallet-ink);font-weight:600;font-family:var(--d-mono);}
+  [hidden]{display:none!important;}
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="logo">⌁</div>
+    <div><h1>Caravel</h1><div class="sub" data-i18n="tag">storefront · a dApp</div></div>
+    <span class="pill" id="connPill"><span class="dot"></span><span id="connText" data-i18n="disconnected">未连接钱包</span></span>
+    <button class="langbtn" id="langBtn">EN</button>
+  </div>
+
+  <div class="card">
+    <div class="prod">
+      <div class="thumb">🔑</div>
+      <div><h2 data-i18n="prod">Pro API 额度</h2><div class="d" data-i18n="prodD">按 Agent 计费 · 在 Ootle 结算</div></div>
+      <div class="price"><div class="n num" id="price">700</div><div class="u">XTR</div></div>
+    </div>
+
+    <div id="connectStep">
+      <div class="lab" data-i18n="step1">第一步 · 连接独立钱包</div>
+      <button class="btn connect" id="connectBtn" style="margin-top:7px" data-i18n="connectBtn">连接 AgentPay 钱包</button>
+      <p class="note" style="margin-top:9px" data-i18n="connectNote">点击会打开钱包自己的窗口(另一个来源),并通过中继请求连接。钱包持有私钥;这个商店没有。</p>
+      <p class="note" style="margin-top:2px"><span data-i18n="noPopup">钱包没弹出?</span> <a id="openWalletLink" href="http://127.0.0.1:7777/wallet.html" target="_blank" rel="noopener" style="color:var(--wallet-ink)" data-i18n="openWalletLink">在新标签打开钱包 ↗</a></p>
+    </div>
+
+    <div id="payStep" hidden>
+      <div>
+        <div class="lab" data-i18n="choose">选择金额</div>
+        <div class="presets" id="presets">
+          <button class="preset" data-amt="300">300</button>
+          <button class="preset on" data-amt="700">700</button>
+          <button class="preset" data-amt="900">900</button>
+          <button class="preset" data-amt="5000">5000</button>
+        </div>
+      </div>
+      <button class="btn" id="payBtn" data-i18n="payBtn">用 AgentPay 钱包支付</button>
+      <div class="status" id="status"><span data-i18n="idle">选好金额点支付 —— 钱包会请你批准。</span></div>
+      <div class="acct" id="acct"></div>
+    </div>
+
+    <p class="note" data-i18n="note">这个商店不持有任何私钥,也没有签名后端。它只调用 window.tari;由独立的钱包签名并强制执行 owner 的额度。</p>
+  </div>
+
+<!-- the mechanism: an injected provider that bridges to the wallet's own window (a separate origin) -->
+<script src="/tari-provider.js" data-wallet-origin="http://127.0.0.1:7777" data-wallet-path="/wallet.html"></script>
+<script>
+  const T = {
+    zh:{ tag:"商店 · 一个 dApp", disconnected:"未连接钱包", connected:"钱包已连接", prod:"Pro API 额度",
+      prodD:"按 Agent 计费 · 在 Ootle 结算", choose:"选择金额", payBtn:"用 AgentPay 钱包支付", langBtn:"EN",
+      step1:"第一步 · 连接独立钱包", connectBtn:"连接 AgentPay 钱包",
+      connectNote:"点击会打开钱包自己的窗口(另一个来源),并通过中继请求连接。钱包持有私钥;这个商店没有。",
+      noPopup:"钱包没弹出?", openWalletLink:"在新标签打开钱包 ↗",
+      idle:"选好金额点支付 —— 钱包会请你批准。",
+      note:"这个商店不持有任何私钥,也没有签名后端。它只调用 window.tari;由独立的钱包签名并强制执行 owner 的额度。",
+      connecting:"正在打开钱包窗口…", waiting:"等待钱包批准…", paid:"订单已支付", declined:"被钱包额度拒绝",
+      acct:"从钱包付款 ", connFail:"连接失败" },
+    en:{ tag:"storefront · a dApp", disconnected:"no wallet", connected:"wallet connected", prod:"Pro API credits",
+      prodD:"Agent-metered usage · settle on Ootle", choose:"Choose amount", payBtn:"Pay with AgentPay Wallet", langBtn:"中文",
+      step1:"Step 1 · connect the separate wallet", connectBtn:"Connect AgentPay Wallet",
+      connectNote:"This opens the wallet in its own window (a different origin) and asks to connect over the relay. The wallet holds the key; this storefront does not.",
+      noPopup:"Wallet didn't open?", openWalletLink:"Open the wallet in a new tab ↗",
+      idle:"Pick an amount and pay — the wallet will ask you to approve.",
+      note:"This storefront holds no keys and has no signing backend. It only calls window.tari; the separate wallet signs and enforces the owner's caps.",
+      connecting:"Opening the wallet window…", waiting:"Waiting for wallet approval…", paid:"Order paid", declined:"Declined by the wallet's caps",
+      acct:"Paying from wallet ", connFail:"Connect failed" },
+  };
+  let L=new URLSearchParams(location.search).get("lang")==="en"?"en":"zh"; try{const s=localStorage.getItem("ap-lang");if(s==="en"||s==="zh")L=s;}catch{}
+  const $=(id)=>document.getElementById(id);
+  const t=(k)=>T[L][k];
+  function applyLang(){document.documentElement.lang=L;document.querySelectorAll("[data-i18n]").forEach(el=>{const v=T[L][el.getAttribute("data-i18n")];if(v!=null)el.textContent=v;});$("langBtn").textContent=T[L].langBtn;}
+  const short=(a)=>!a?"":a.slice(0,a.indexOf("_")+1)+a.slice(a.indexOf("_")+1,a.indexOf("_")+9)+"…"+a.slice(-6);
+
+  let amount=700, account=null, statusState={cls:"",key:"idle"};
+  function setStatus(s){ statusState=s; const el=$("status"); el.className="status "+(s.cls||""); el.innerHTML="";
+    if(s.cls==="wait"){const sp=document.createElement("span");sp.className="spin";el.appendChild(sp);}
+    const span=document.createElement("span"); span.textContent=s.text!=null?s.text:t(s.key); el.appendChild(span);
+    if(s.sub){const m=document.createElement("span");m.className="mono";m.textContent=s.sub;el.appendChild(document.createTextNode(" "));el.appendChild(m);}
+  }
+  $("presets").addEventListener("click",(e)=>{const b=e.target.closest(".preset");if(!b)return;amount=+b.dataset.amt;$("price").textContent=amount;document.querySelectorAll(".preset").forEach(p=>p.classList.toggle("on",p===b));});
+  $("langBtn").onclick=()=>{L=(L==="zh")?"en":"zh";try{localStorage.setItem("ap-lang",L);}catch{};applyLang();if(statusState)setStatus(statusState);if(account)showAccount();};
+
+  function showAccount(){$("acct").innerHTML="";const s=document.createElement("span");s.textContent=t("acct");const b=document.createElement("b");b.textContent=short(account);$("acct").append(s,b);}
+
+  $("connectBtn").onclick=async()=>{
+    $("connectBtn").disabled=true;
+    window.tari.openWallet();                              // best-effort: pop the wallet's own window (another origin)
+    try{
+      const accts=await window.tari.connect();            // enqueue on the wallet's relay; the user approves in the wallet
+      account=Array.isArray(accts)?accts[0]:accts;
+      $("connPill").classList.add("on"); $("connText").textContent=t("connected");
+      $("connectStep").hidden=true; $("payStep").hidden=false; showAccount();
+    }catch(e){
+      $("connectBtn").disabled=false;
+      setStatus({cls:"no",text:"✕ "+t("connFail")+" — "+e.message}); $("payStep").hidden=false;
+    }
+  };
+
+  $("payBtn").onclick=async()=>{
+    $("payBtn").disabled=true; setStatus({cls:"wait",key:"waiting"});
+    try{
+      const r=await window.tari.request({method:"tari_signAndSubmitTransaction",params:{pay:{amount,memo:"Caravel · Pro API credits"}}});
+      if(r&&r.committed){ setStatus({cls:"ok",text:"✓ "+t("paid"),sub:r.txid?String(r.txid).slice(0,18)+"…":""}); }
+      else{ const why=/per-transaction/.test(r&&r.reason||"")?(L==="zh"?"超单笔上限":"over per-tx cap"):/daily/.test(r&&r.reason||"")?(L==="zh"?"超每日上限":"over daily cap"):""; setStatus({cls:"no",text:"✕ "+t("declined"),sub:why}); }
+    }catch(err){ setStatus({cls:"no",text:"✕ "+err.message}); }
+    $("payBtn").disabled=false;
+  };
+
+  applyLang();
+</script>
+</body>
+</html>

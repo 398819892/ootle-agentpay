@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AgentPay Wallet</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+  :root{
+    --bg:#0e0d14;--panel:#16151f;--panel-2:#1e1c29;--border:#2b2838;--border-soft:#211f2d;
+    --fg:#ecebf3;--muted:#9c99ad;--faint:#6f6c80;
+    --accent:#8f7cff;--accent-ink:#b9adff;--accent-bg:#8f7cff1a;
+    --dapp:#2fd4a7;--dapp-ink:#79e9c8;
+    --good:#45cf8c;--good-bg:#45cf8c1a;--warn:#e2b24a;--bad:#ff6f6f;--bad-bg:#ff6f6f1a;
+    --shadow:0 1px 0 #ffffff0a inset,0 10px 30px -12px #00000080;
+    color-scheme:dark;
+    --d-ui:"IBM Plex Sans","Noto Sans SC",ui-sans-serif,system-ui,sans-serif;--d-display:"Bricolage Grotesque",var(--d-ui);--d-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  }
+  :lang(zh) h1,:lang(zh) h2,:lang(zh) h3{font-family:"Noto Sans SC",var(--d-display);}
+  *{box-sizing:border-box;} html,body{margin:0;}
+  body{background:var(--bg);color:var(--fg);font-family:var(--d-ui);line-height:1.5;-webkit-font-smoothing:antialiased;
+    padding-inline:max(14px,env(safe-area-inset-left,0px)) max(14px,env(safe-area-inset-right,0px));padding-block:16px 24px;max-width:520px;margin:0 auto;}
+  h1,h2,h3{margin:0;font-family:var(--d-display);letter-spacing:-0.01em;} .mono{font-family:var(--d-mono);} .num{font-variant-numeric:tabular-nums;}
+  header.bar{display:flex;align-items:center;gap:11px;margin-bottom:12px;}
+  .glyph{width:32px;height:32px;border-radius:9px;background:linear-gradient(145deg,var(--accent),#5b45c9);display:grid;place-items:center;color:#fff;font-family:var(--d-display);font-weight:700;}
+  header h1{font-size:17px;} .sub{font-size:11px;color:var(--muted);}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:4px 9px;border-radius:999px;border:1px solid var(--accent);background:var(--accent-bg);color:var(--accent-ink);}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px var(--good-bg);}
+  .pill.sm{border-color:var(--border);background:var(--panel);color:var(--muted);margin-left:auto;}
+  .langbtn{font:inherit;font-size:12px;font-weight:700;color:var(--accent-ink);background:var(--panel);border:1px solid var(--accent);border-radius:9px;padding:5px 10px;cursor:pointer;margin-left:auto;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:15px;box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden;}
+  .panel .hd{display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid var(--border-soft);} .panel .hd h2{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);}
+  .bd{padding:14px;display:flex;flex-direction:column;gap:12px;}
+  .kv{display:flex;align-items:center;gap:10px;} .kv .k{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;min-width:52px;}
+  .addr{font-size:12px;background:var(--panel-2);border:1px solid var(--border-soft);border-radius:8px;padding:5px 9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;}
+  .lab{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;}
+  .budget{border:1px solid var(--border);border-radius:12px;background:var(--panel-2);padding:13px;display:flex;flex-direction:column;gap:11px;}
+  .caps{display:grid;grid-template-columns:1fr 1fr;gap:9px;} .cap{background:var(--panel);border:1px solid var(--border-soft);border-radius:10px;padding:8px 10px;} .cap .val{font-family:var(--d-mono);font-size:16px;font-weight:600;margin-top:2px;}
+  .meter{height:8px;border-radius:6px;background:var(--border);overflow:hidden;} .meter>span{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent-ink));transition:width .45s;} .meter.hot>span{background:linear-gradient(90deg,var(--warn),var(--bad));}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;} .chip{font-size:11px;font-family:var(--d-mono);color:var(--muted);background:var(--panel);border:1px solid var(--border-soft);border-radius:7px;padding:3px 7px;} .chip b{color:var(--accent-ink);}
+  .btn{font:inherit;font-weight:700;font-size:13px;color:#fff;background:linear-gradient(145deg,var(--accent),#6b53e0);border:0;border-radius:10px;padding:10px 14px;cursor:pointer;} .btn.sec{background:var(--panel);color:var(--fg);border:1px solid var(--border);} .btn.sec:hover{border-color:var(--accent);color:var(--accent-ink);} .btn.block{width:100%;} .btn:disabled{opacity:.55;cursor:progress;}
+  .link{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--muted);background:var(--panel-2);border:1px solid var(--border-soft);border-radius:10px;padding:9px 11px;}
+  .link .d{width:8px;height:8px;border-radius:50%;background:var(--faint);flex-shrink:0;} .link.on .d{background:var(--dapp);box-shadow:0 0 0 3px #2fd4a722;} .link b{color:var(--dapp-ink);font-family:var(--d-mono);font-weight:600;}
+  .log{font-family:var(--d-mono);font-size:11px;background:var(--panel-2);border:1px solid var(--border-soft);border-radius:11px;padding:9px 11px;min-height:84px;max-height:150px;overflow:auto;display:flex;flex-direction:column;gap:2px;} .log .ln{display:flex;gap:8px;white-space:pre-wrap;word-break:break-word;} .log .t{color:var(--faint);flex-shrink:0;}
+  .req{color:var(--accent-ink);} .res{color:var(--good);} .rej{color:var(--bad);} .evt{color:var(--warn);} .sys{color:var(--muted);}
+  .hint{font-size:11px;color:var(--faint);line-height:1.6;}
+  /* modal */
+  .scrim{position:fixed;inset:0;background:#06060baa;backdrop-filter:blur(3px);display:grid;place-items:center;padding:16px;z-index:50;} .modal{width:min(430px,100%);background:var(--panel);border:1px solid var(--border);border-radius:17px;box-shadow:0 30px 70px -20px #000000a0;overflow:hidden;} .modal .top{padding:14px 17px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;gap:10px;} .modal .top h3{font-size:15px;} .modal .top .pill{margin-left:auto;background:var(--accent-bg);} .mb{padding:16px 17px;display:flex;flex-direction:column;gap:13px;} .pay-amt .n{font-family:var(--d-mono);font-size:28px;font-weight:600;}
+  .origin{font-size:12px;color:var(--dapp-ink);font-family:var(--d-mono);background:#2fd4a714;border:1px solid #2fd4a73a;border-radius:9px;padding:7px 10px;word-break:break-all;}
+  .checks{display:flex;flex-direction:column;gap:7px;} .check{display:flex;align-items:center;gap:9px;font-size:12.5px;padding:8px 11px;border-radius:9px;border:1px solid var(--border-soft);background:var(--panel-2);} .check .ic{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;flex-shrink:0;} .check.ok .ic{background:var(--good-bg);color:var(--good);} .check.ok{border-color:var(--good);} .check.no .ic{background:var(--bad-bg);color:var(--bad);} .check.no{border-color:var(--bad);} .check .lab2{flex:1;} .check .q{color:var(--muted);font-family:var(--d-mono);font-size:11px;}
+  .acts{display:grid;grid-template-columns:1fr 1.4fr;gap:10px;padding:0 17px 17px;}
+  .note{font-size:11px;color:var(--faint);line-height:1.6;}
+</style>
+</head>
+<body>
+  <header class="bar">
+    <div class="glyph">◈</div>
+    <div><h1 data-i18n="title">AgentPay 钱包</h1><div class="sub" data-i18n="sub">非托管 · 独立个体</div></div>
+    <button class="langbtn" id="langBtn">EN</button>
+  </header>
+
+  <div class="panel">
+    <div class="hd"><h2 data-i18n="wallet">Wallet</h2><span class="pill sm"><span class="dot"></span><span id="netPill">localnet</span></span></div>
+    <div class="bd">
+      <div class="link" id="linkRow"><span class="d"></span><span id="linkText" data-i18n="noLink">尚无 dApp 连接</span></div>
+      <div class="kv"><span class="k" data-i18n="account">账户</span><span class="addr mono" id="acct">…</span></div>
+
+      <div id="budgetBox" hidden>
+        <div class="budget">
+          <div class="kv"><span class="k" data-i18n="budget">预算</span><span class="addr mono" id="budgetAddr"></span></div>
+          <div class="caps">
+            <div class="cap"><div class="lab" data-i18n="perTxCap">单笔上限</div><div class="val num"><span id="perTx">—</span> <span class="muted">XTR</span></div></div>
+            <div class="cap"><div class="lab" data-i18n="dailyCap">每日上限</div><div class="val num"><span id="daily">—</span> <span class="muted">XTR</span></div></div>
+          </div>
+          <div><div class="kv" style="justify-content:space-between;font-size:12px;margin-bottom:6px"><span class="muted" data-i18n="spent">本窗口已花</span><span class="mono num"><span id="spent">0</span> / <span id="daily2">—</span></span></div><div class="meter" id="meter"><span id="bar"></span></div></div>
+          <div class="chips"><span class="chip"><span data-i18n="vault">金库</span> <b id="vault">—</b> XTR</span><span class="chip"><span data-i18n="wl">白名单</span> <b id="wlN">0</b></span></div>
+        </div>
+      </div>
+      <div id="noBudget" hidden><button class="btn sec block" id="openBtn" data-i18n="openBtn">链上开一个预算(5000 · 额度 1000/1500)</button></div>
+
+      <div class="lab" data-i18n="bridgeLog" style="margin-top:2px">桥接流量</div>
+      <div class="log" id="log"></div>
+      <p class="hint" data-i18n="hint">这是独立的钱包窗口。dApp 不持有私钥,只能经 window.tari 向这里发请求;由你批准,钱包在本机签名并提交到链上。</p>
+    </div>
+  </div>
+
+<script>
+  const T={
+    zh:{ title:"AgentPay 钱包", sub:"非托管 · 独立个体", wallet:"钱包", account:"账户", budget:"预算",
+      perTxCap:"单笔上限", dailyCap:"每日上限", spent:"本窗口已花", vault:"金库", wl:"白名单",
+      openBtn:"链上开一个预算(5000 · 额度 1000/1500)", bridgeLog:"桥接流量", langBtn:"EN",
+      noLink:"尚无 dApp 连接", linked:(o)=>`已连接 dApp`,
+      hint:"这是独立的钱包窗口。dApp 不持有私钥,只能经 window.tari 向这里发请求;由你批准,钱包在本机签名并提交到链上。",
+      connTitle:"连接请求", connMsg:"这个 dApp 想连接你的钱包,读取你的账户地址。它不会因此获得花钱的权限 —— 每笔支付仍需你单独批准。",
+      approve:"批准付款", requests:"请求支付", from:"来自", chkWl:"收款方在 owner 白名单内", chkPer:"未超单笔上限", chkDay:"未超每日上限",
+      mOk:"dApp 经桥接发来请求。批准即由钱包签名并提交;额度由链上强制。", mBad:"链上会拒绝这笔付款 —— 手续费入账、已花不变。dApp 收到拒绝。",
+      reject:"拒绝", allow:"允许连接", sign:"批准并签名", anyway:"仍然批准",
+      reqAccts:(o)=>`dApp → 钱包:请求连接 (${o})`, resAccts:(a)=>`钱包 → dApp:账户 ${a}`, connRej:"钱包 → dApp:用户拒绝连接",
+      reqPay:(a)=>`dApp → 钱包:signAndSubmit · pay(${a})`, signing:"钱包:resolve → sign → seal → submit …",
+      ev:(e)=>`事件 ${e}`, commit:(p,s)=>`链:Commit · 已花 ${p} → ${s}`, resPaid:"钱包 → dApp:{ committed: true }",
+      payRej:"链:付款被拒(手续费已入账)", resDecl:(r)=>`钱包 → dApp:{ committed: false, ${r} }`, userRej:"钱包 → dApp:用户拒绝 (4001)",
+      opened:(b)=>`链:Commit · 预算 ${b}`, badOrigin:(o)=>`已忽略来自未授权来源的请求 (${o})` },
+    en:{ title:"AgentPay Wallet", sub:"non-custodial · its own entity", wallet:"Wallet", account:"Account", budget:"Budget",
+      perTxCap:"Per-tx cap", dailyCap:"Daily cap", spent:"Spent this window", vault:"vault", wl:"whitelist",
+      openBtn:"Open a budget on-chain (5000 · caps 1000/1500)", bridgeLog:"Bridge traffic", langBtn:"中文",
+      noLink:"no dApp connected", linked:(o)=>`dApp connected`,
+      hint:"This is the wallet's own window. The dApp holds no key — it can only ask over window.tari; you approve, and the wallet signs locally and submits on-chain.",
+      connTitle:"Connection request", connMsg:"This dApp wants to connect to your wallet and read your account address. That does not let it spend — every payment still needs your separate approval.",
+      approve:"Approve payment", requests:"requests", from:"from", chkWl:"Payee on owner whitelist", chkPer:"Within per-transaction cap", chkDay:"Within daily cap",
+      mOk:"The dApp asked over the bridge. Approve to sign and submit; the chain enforces the caps.", mBad:"The chain will reject this pay — fee commits, spent stays. The dApp gets a decline.",
+      reject:"Reject", allow:"Allow connect", sign:"Approve & sign", anyway:"Approve anyway",
+      reqAccts:(o)=>`dApp → wallet: connect request (${o})`, resAccts:(a)=>`wallet → dApp: account ${a}`, connRej:"wallet → dApp: user rejected connect",
+      reqPay:(a)=>`dApp → wallet: signAndSubmit · pay(${a})`, signing:"wallet: resolve → sign → seal → submit …",
+      ev:(e)=>`event ${e}`, commit:(p,s)=>`chain: Commit · spent ${p} → ${s}`, resPaid:"wallet → dApp: { committed: true }",
+      payRej:"chain: pay REJECTED (fee committed)", resDecl:(r)=>`wallet → dApp: { committed: false, ${r} }`, userRej:"wallet → dApp: user rejected (4001)",
+      opened:(b)=>`chain: Commit · budget ${b}`, badOrigin:(o)=>`ignored a request from an unauthorized origin (${o})` },
+  };
+  const NS="tari-bridge";
+  const params=new URLSearchParams(location.search);
+  // dApp origins this wallet will serve. The opener's declared origin must be on this list.
+  const DAPP_ORIGINS=["http://127.0.0.1:7788","http://localhost:7788"];
+  const DAPP=params.get("dapp");
+  let L=(params.get("lang")==="en")?"en":"zh"; try{const s=localStorage.getItem("ap-lang");if(s==="en"||s==="zh")L=s;}catch{}
+  const $=(id)=>document.getElementById(id);
+  const t=(k,...a)=>{const v=T[L][k];return typeof v==="function"?v(...a):v;};
+  function applyLang(){document.documentElement.lang=L;document.querySelectorAll("[data-i18n]").forEach(el=>{const v=T[L][el.getAttribute("data-i18n")];if(v!=null)el.textContent=v;});$("langBtn").textContent=T[L].langBtn;}
+  const fmt=(n)=>(n==null?"—":Number(n).toLocaleString("en-US"));
+  const short=(a)=>!a?"—":a.slice(0,a.indexOf("_")+1)+a.slice(a.indexOf("_")+1,a.indexOf("_")+9)+"…"+a.slice(-6);
+  const logEl=$("log");
+  function log(cls,msg){const tm=new Date().toLocaleTimeString("en-US",{hour12:false});const ln=document.createElement("div");ln.className="ln";const s=document.createElement("span");s.className="t";s.textContent=tm;const m=document.createElement("span");m.className=cls;m.textContent=msg;ln.append(s,m);logEl.appendChild(ln);logEl.scrollTop=logEl.scrollHeight;while(logEl.children.length>60)logEl.removeChild(logEl.firstChild);}
+  const api=async(path,method,body)=>{const r=await fetch(path,{method:method||"GET",headers:body?{"content-type":"application/json"}:undefined,body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||("HTTP "+r.status));return j;};
+
+  let ST=null, linkedOrigin=null;
+  function renderBudget(b){
+    $("budgetBox").hidden=!b; $("noBudget").hidden=!!b;
+    if(!b)return;
+    $("budgetAddr").textContent=short(b.address);$("perTx").textContent=fmt(b.perTx);$("daily").textContent=fmt(b.daily);$("daily2").textContent=fmt(b.daily);
+    $("spent").textContent=fmt(b.spent);$("vault").textContent=fmt(b.vault);$("wlN").textContent=(b.whitelist||[]).length;
+    const pct=Math.min(100,Math.round(b.spent/b.daily*100));$("bar").style.width=pct+"%";$("meter").classList.toggle("hot",pct>=80);
+  }
+  async function refresh(){const s=await api("/api/status");ST=s;$("acct").textContent=short(s.account);$("netPill").textContent=s.network;renderBudget(s.budget);return s;}
+  function setLinked(o){linkedOrigin=o;const row=$("linkRow");row.classList.toggle("on",!!o);$("linkText").innerHTML="";if(o){const s=document.createElement("span");s.textContent=t("linked")+" · ";const b=document.createElement("b");b.textContent=o;$("linkText").append(s,b);}else{$("linkText").textContent=t("noLink");}}
+
+  // --- approval modals (resolve true/false) ---
+  function modal(html,wire){const sc=document.createElement("div");sc.className="scrim";sc.innerHTML=html;document.body.appendChild(sc);return new Promise((resolve)=>{const done=(v)=>{sc.remove();resolve(v);};wire(sc,done);sc.addEventListener("mousedown",e=>{if(e.target===sc)done(false);});});}
+  const esc=(x)=>String(x).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+  function approveConnect(origin){
+    return modal(
+      ['<div class="modal"><div class="top"><h3>',esc(t("connTitle")),'</h3><span class="pill sm">localnet</span></div><div class="mb"><div class="origin">',esc(origin),'</div><p class="note">',esc(t("connMsg")),'</p></div><div class="acts"><button class="btn sec" id="r">',esc(t("reject")),'</button><button class="btn" id="a">',esc(t("allow")),'</button></div></div>'].join(""),
+      (sc,done)=>{sc.querySelector("#r").onclick=()=>done(false);sc.querySelector("#a").onclick=()=>done(true);});
+  }
+  function approvePay(amount,origin){
+    const b=ST.budget; const ok=amount<=b.perTx&&(b.spent+amount)<=b.daily&&amount<=(b.vault??Infinity);
+    const checks=[{ok:true,lab:t("chkWl"),q:short(ST.merchant)},{ok:amount<=b.perTx,lab:t("chkPer"),q:fmt(amount)+" / "+fmt(b.perTx)},{ok:(b.spent+amount)<=b.daily,lab:t("chkDay"),q:fmt(b.spent+amount)+" / "+fmt(b.daily)}];
+    return modal(
+      ['<div class="modal"><div class="top"><h3>',esc(t("approve")),'</h3><span class="pill sm">',esc(short(ST.template)),'</span></div><div class="mb"><div class="origin">',esc(t("from")),' ',esc(origin),'</div><div><div class="lab">',esc(t("requests")),'</div><div class="pay-amt"><span class="n num">',fmt(amount),'</span> <span class="muted">XTR</span></div></div><div class="checks">',
+        checks.map(c=>'<div class="check '+(c.ok?"ok":"no")+'"><span class="ic">'+(c.ok?"✓":"✕")+'</span><span class="lab2">'+esc(c.lab)+'</span><span class="q">'+c.q+'</span></div>').join(""),
+        '</div><p class="note">',esc(ok?t("mOk"):t("mBad")),'</p></div><div class="acts"><button class="btn sec" id="r">',esc(t("reject")),'</button><button class="btn" id="a">',esc(ok?t("sign"):t("anyway")),'</button></div></div>'].join(""),
+      (sc,done)=>{sc.querySelector("#r").onclick=()=>done(false);sc.querySelector("#a").onclick=()=>done(true);});
+  }
+
+  // --- relay: drain requests the (separate-origin) dApp enqueued, approve, sign, answer ---
+  const inflight=new Set();
+  async function resolveReq(id,result,error){try{await fetch("/bridge/resolve",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id,result,error})});}catch(e){}inflight.delete(id);}
+  async function handleReq(q){
+    const origin=q.origin||"(unknown)";
+    if(q.method==="tari_requestAccounts"){
+      log("req",t("reqAccts",origin));
+      const ok=await approveConnect(origin);
+      if(!ok){log("rej",t("connRej"));return resolveReq(q.id,null,"user rejected connect (4001)");}
+      const s=ST||await refresh(); setLinked(origin);
+      log("res",t("resAccts",short(s.account))); return resolveReq(q.id,[s.account]);
+    }
+    if(q.method==="tari_signAndSubmitTransaction"){
+      const amount=q.params&&q.params.pay&&q.params.pay.amount; log("req",t("reqPay",fmt(amount)));
+      if(!ST||!ST.budget){log("rej","no budget");return resolveReq(q.id,null,"wallet has no budget open");}
+      const okToSign=await approvePay(amount,origin);
+      if(!okToSign){log("rej",t("userRej"));return resolveReq(q.id,null,"user rejected (4001)");}
+      log("sys",t("signing"));
+      try{
+        const r=await api("/api/pay","POST",{amount,memo:(q.params.pay&&q.params.pay.memo)||"Caravel"});
+        if(r.committed){(r.events||[]).forEach(ev=>log("evt",t("ev",ev)));log("res",t("commit",fmt(r.prevSpent),fmt(r.spent)));log("res",t("resPaid"));}
+        else{log("rej",t("payRej"));log("rej",t("resDecl",(r.reason||"").slice(0,42)));}
+        await refresh(); return resolveReq(q.id,r);
+      }catch(err){log("rej",err.message);return resolveReq(q.id,null,err.message);}
+    }
+    return resolveReq(q.id,null,"unsupported method "+q.method);
+  }
+  async function drain(){
+    let r; try{r=await fetch("/bridge/poll");}catch(e){return;} if(!r.ok)return;
+    const {reqs}=await r.json();
+    for(const q of reqs){ if(inflight.has(q.id))continue; inflight.add(q.id); handleReq(q); }
+  }
+  setInterval(drain,800);
+
+  $("openBtn").onclick=async()=>{$("openBtn").disabled=true;try{const r=await api("/api/open","POST",{fund:5000,perTx:1000,daily:1500,epochsPerWindow:10});log("res",t("opened",short(r.address)));await refresh();}catch(e){log("rej",e.message);$("openBtn").disabled=false;}};
+  $("langBtn").onclick=()=>{L=(L==="zh")?"en":"zh";try{localStorage.setItem("ap-lang",L);}catch{};applyLang();setLinked(linkedOrigin);};
+
+  applyLang(); setLinked(null);
+  refresh().catch(e=>log("rej",e.message));
+</script>
+</body>
+</html>

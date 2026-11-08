@@ -41,6 +41,23 @@ const w = new L2Wallet({ ownerSecretHex: key.owner, viewSecretHex: key.view, net
 const provider = await connectIndexer(INDEXER_URL, Network.LocalNet);
 
 const state = { budget: process.env.BUDGET || null, initialFund: null, template: TEMPLATE, merchant: MERCHANT };
+
+// --- dApp <-> wallet relay (WalletConnect-style) ---------------------------------------------------
+// The dApp lives on ANOTHER origin and holds no key. It can only ENQUEUE a request here; it can never
+// sign. The wallet UI (same origin, holds the key) polls /bridge/poll, shows its own approval, signs
+// via /api/pay, and posts the answer to /bridge/resolve. CORS is granted to the dApp origin for the
+// /bridge/* queue ONLY — /api/pay gets NO CORS, so a cross-origin dApp physically cannot call it.
+const DAPP_ORIGINS = (process.env.DAPP_ORIGINS || "http://127.0.0.1:7788,http://localhost:7788").split(",");
+const bridge = { q: [], res: {}, seq: 0 };
+function corsFor(req, res) {
+  const o = req.headers.origin;
+  if (o && DAPP_ORIGINS.includes(o)) {
+    res.setHeader("access-control-allow-origin", o);
+    res.setHeader("vary", "origin");
+    res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
+    res.setHeader("access-control-allow-headers", "content-type");
+  }
+}
 const collect = (x, pfx, out = new Set()) => {
   if (!x) return out;
   if (typeof x === "string") { if (x.startsWith(pfx)) out.add(x); return out; }
@@ -112,7 +129,7 @@ const body = (req) => new Promise((r) => { let d = ""; req.on("data", (c) => d +
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://x");
-    const STATIC = { "/": "wallet-live.html", "/index.html": "wallet-live.html", "/linked": "linked.html", "/linked.html": "linked.html", "/dapp.html": "dapp.html" };
+    const STATIC = { "/": "wallet-live.html", "/index.html": "wallet-live.html", "/linked": "linked.html", "/linked.html": "linked.html", "/dapp.html": "dapp.html", "/wallet.html": "wallet.html", "/wallet": "wallet.html" };
     if (req.method === "GET" && STATIC[url.pathname]) {
       const f = new URL("../" + STATIC[url.pathname], import.meta.url);
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); return res.end(fs.readFileSync(f));
@@ -127,6 +144,37 @@ const server = http.createServer(async (req, res) => {
       if (!(amt > 0)) return send(res, 400, { error: "amount must be a positive integer" });
       return send(res, 200, await doPay({ amount: amt, memo: p.memo }));
     }
+
+    // --- relay: the dApp enqueues (CORS-allowed), the wallet drains + answers (same origin) ---
+    if (url.pathname.startsWith("/bridge/")) {
+      corsFor(req, res);
+      if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
+      if (req.method === "POST" && url.pathname === "/bridge/req") {        // dApp -> enqueue
+        const p = await body(req);
+        if (!p.method) return send(res, 400, { error: "method required" });
+        const id = ++bridge.seq;
+        bridge.q.push({ id, method: p.method, params: p.params, origin: req.headers.origin || "(unknown)", claimed: false });
+        return send(res, 200, { id });
+      }
+      if (req.method === "GET" && url.pathname === "/bridge/res") {         // dApp -> poll for answer
+        const id = Number(url.searchParams.get("id"));
+        const r = bridge.res[id];
+        return send(res, 200, r ? { done: true, result: r.result, error: r.error } : { done: false });
+      }
+      if (req.method === "GET" && url.pathname === "/bridge/poll") {        // wallet -> drain new requests
+        const out = bridge.q.filter((e) => !e.claimed);
+        out.forEach((e) => { e.claimed = true; });
+        return send(res, 200, { reqs: out.map((e) => ({ id: e.id, method: e.method, params: e.params, origin: e.origin })) });
+      }
+      if (req.method === "POST" && url.pathname === "/bridge/resolve") {    // wallet -> post the answer
+        const p = await body(req);
+        bridge.res[p.id] = { result: p.result, error: p.error };
+        bridge.q = bridge.q.filter((e) => e.id !== p.id);
+        return send(res, 200, { ok: true });
+      }
+      return send(res, 404, { error: "unknown bridge route" });
+    }
+
     send(res, 404, { error: "not found" });
   } catch (e) { send(res, 500, { error: String(e.message || e) }); }
 });
