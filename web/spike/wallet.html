@@ -237,7 +237,7 @@
       sent:"已发送", failed:"失败", done:"完成", newSend:"再发一笔", merchantName:"Caravel 商户",
       receiveHint:"把下面的账户地址给付款方。这是你在 Ootle L2 上的地址。", copy:"复制地址", copied:"已复制 ✓",
       netMenuTitle:"网络", netLocal:"Ootle Localnet", netMain:"Ootle 主网(即将)", netTest:"Ootle 测试网(即将)",
-      acctMenuTitle:"账户", copyAddr:"复制地址", sites:"已连接的网站", noSites:"无", settings:"设置(演示)", lock:"锁定(演示)", explorer:"在浏览器中查看",
+      acctMenuTitle:"账户", copyAddr:"复制地址", sites:"已连接的网站", noSites:"无", disconnect:"点击断开连接", disconnected:"已断开", settings:"设置(演示)", lock:"锁定(演示)", explorer:"在浏览器中查看",
       connTitle:"连接请求", connMsg:"这个 dApp 想连接你的钱包,读取你的账户地址。它不会因此获得花钱的权限 —— 每笔支付仍需你单独批准。",
       approve:"批准付款", requests:"请求支付", from:"来自", chkWl:"收款方在 owner 白名单内", chkPer:"未超单笔上限", chkDay:"未超每日上限",
       mOk:"批准即由钱包签名并提交;额度由链上强制。", mBad:"链上会拒绝这笔付款 —— 手续费入账、已花不变。dApp 收到拒绝。",
@@ -259,7 +259,7 @@
       sent:"Sent", failed:"Failed", done:"Done", newSend:"Send another", merchantName:"Caravel merchant",
       receiveHint:"Share your account address with the payer. This is your address on the Ootle L2.", copy:"Copy address", copied:"Copied ✓",
       netMenuTitle:"Network", netLocal:"Ootle Localnet", netMain:"Ootle Mainnet (soon)", netTest:"Ootle Testnet (soon)",
-      acctMenuTitle:"Account", copyAddr:"Copy address", sites:"Connected sites", noSites:"none", settings:"Settings (demo)", lock:"Lock (demo)", explorer:"View in explorer",
+      acctMenuTitle:"Account", copyAddr:"Copy address", sites:"Connected sites", noSites:"none", disconnect:"Tap to disconnect", disconnected:"Disconnected", settings:"Settings (demo)", lock:"Lock (demo)", explorer:"View in explorer",
       connTitle:"Connection request", connMsg:"This dApp wants to connect to your wallet and read your account address. That does not let it spend — every payment still needs your separate approval.",
       approve:"Approve payment", requests:"requests", from:"from", chkWl:"Payee on owner whitelist", chkPer:"Within per-transaction cap", chkDay:"Within daily cap",
       mOk:"Approve to sign and submit; the chain enforces the caps.", mBad:"The chain will reject this pay — fee commits, spent stays. The dApp gets a decline.",
@@ -323,6 +323,7 @@
   async function refresh(){
     const s=await api("/api/status");ST=s;setAccount(s.account);$("netPill")&&($("netPill").textContent=s.network);
     renderBudget(s.budget); $("sendBtn").disabled=false; // the owner can always send their own funds
+    setLinked(s.linkedOrigin||null); // the link lives on the server, so it survives a wallet reload
     try{const a=await api("/api/account");renderAccount(a.balance);}catch(e){}
     return s;
   }
@@ -433,13 +434,14 @@
       +'<button class="mi dim"><span class="ico" style="background:var(--faint)"></span>'+esc(t("netMain"))+'</button>';}
     else{const a=ST?ST.account:""; m.innerHTML='<div class="mt">'+esc(t("acctMenuTitle"))+'</div>'
       +'<button class="mi" id="miCopy"><span class="ava xs"></span><span class="acctname">'+esc(t("acctName"))+'</span><span class="r mono" style="color:var(--muted);font-size:11px">'+esc(short(a))+'</span></button>'
-      +'<div class="sep"></div><div class="mt">'+esc(t("sites"))+'</div><button class="mi dim" id="miSite">'+esc(linkedOrigin||t("noSites"))+'</button>'
+      +'<div class="sep"></div><div class="mt">'+esc(t("sites"))+'</div><button class="mi'+(linkedOrigin?'':' dim')+'" id="miSite"'+(linkedOrigin?' title="'+esc(t("disconnect"))+'"':'')+'>'+esc(linkedOrigin||t("noSites"))+(linkedOrigin?'<span class="r" style="color:var(--muted);font-size:11px">✕</span>':'')+'</button>'
       +'<div class="sep"></div><button class="mi dim">'+esc(t("settings"))+'</button><button class="mi dim">'+esc(t("lock"))+'</button>';}
     m.hidden=false; $("menuScrim").hidden=false;
     const r=anchor.getBoundingClientRect(); const ar=$("app")?0:0;
     m.style.top=(anchor.offsetParent?anchor.offsetTop+anchor.offsetHeight+6:r.bottom+6)+"px";
     m.style.left=Math.max(8,Math.min(r.left, (document.querySelector(".app").clientWidth)-m.offsetWidth-8))+"px";
-    if(which==="acctMenu"){const c=$("miCopy");if(c)c.onclick=async()=>{await copyText(ST?ST.account:"");closeMenus();};}
+    if(which==="acctMenu"){const c=$("miCopy");if(c)c.onclick=async()=>{await copyText(ST?ST.account:"");closeMenus();};
+      const si=$("miSite");if(si&&linkedOrigin)si.onclick=async()=>{const o=linkedOrigin;try{await fetch("/bridge/unlink",{method:"POST"});}catch(e){}setLinked(null);log("res",t("disconnected")+" · "+o);closeMenus();};}
   }
   function closeMenus(){$("netMenu").hidden=true;$("acctMenu").hidden=true;$("menuScrim").hidden=true;}
   $("menuScrim").onclick=closeMenus;

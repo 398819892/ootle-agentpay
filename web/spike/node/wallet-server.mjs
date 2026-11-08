@@ -4,7 +4,7 @@
 // never touches wasm, keys or CORS; the page just fetches these endpoints (same origin).
 //
 //   GET  /                 -> wallet.html (full MetaMask-style wallet)
-//   GET  /api/status       -> { connected, account, network, budget? , caps, spent, vault }
+//   GET  /api/status       -> { connected, account, network, linkedOrigin?, budget? , caps, spent, vault }
 //   GET  /api/account      -> { account, resource, balance }  (the OWNER account's real XTR balance)
 //   POST /api/open  {fund, perTx, daily, epochsPerWindow}  -> opens a fresh budget, returns its state
 //   POST /api/send  {amount, memo}  -> owner->merchant transfer FROM THE OWNER'S OWN FUNDS (not the budget)
@@ -73,8 +73,11 @@ const paySign = (unsignedTransaction) => (agentW || w).request("tari_signAndSubm
 // sign. The wallet UI (same origin, holds the key) polls /bridge/poll, shows its own approval, signs
 // via /api/pay, and posts the answer to /bridge/resolve. CORS is granted to the dApp origin for the
 // /bridge/* queue ONLY — /api/pay gets NO CORS, so a cross-origin dApp physically cannot call it.
-const DAPP_ORIGINS = (process.env.DAPP_ORIGINS || "http://127.0.0.1:7788,http://localhost:7788").split(",");
-const bridge = { q: [], res: {}, seq: 0 };
+const DAPP_ORIGINS = (process.env.DAPP_ORIGINS || "http://127.0.0.1:8787,http://localhost:8787").split(",");
+// `linkedOrigin` is the connected dApp site, kept HERE (not just in the wallet page) so the link
+// survives a wallet reload — like a real wallet's "connected sites". `meta` lets /bridge/resolve
+// tell a connect apart from a pay by the original request's method.
+const bridge = { q: [], res: {}, seq: 0, meta: {}, linkedOrigin: null };
 function corsFor(req, res) {
   const o = req.headers.origin;
   if (o && DAPP_ORIGINS.includes(o)) {
@@ -209,7 +212,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/status") {
       return send(res, 200, { connected: true, account: ACCOUNT, network: "localnet", indexer: INDEXER_URL,
-        template: TEMPLATE, merchant: MERCHANT, agentAccount: PAY_AGENT, twoAccount: !!two, budget: await budgetState() });
+        template: TEMPLATE, merchant: MERCHANT, agentAccount: PAY_AGENT, twoAccount: !!two,
+        linkedOrigin: bridge.linkedOrigin, budget: await budgetState() });
     }
     if (url.pathname === "/api/account") {
       return send(res, 200, { account: ACCOUNT, resource: "XTR", balance: (await ownerBalance()).toString() });
@@ -234,7 +238,9 @@ const server = http.createServer(async (req, res) => {
         const p = await body(req);
         if (!p.method) return send(res, 400, { error: "method required" });
         const id = ++bridge.seq;
-        bridge.q.push({ id, method: p.method, params: p.params, origin: req.headers.origin || "(unknown)", claimed: false });
+        const origin = req.headers.origin || "(unknown)";
+        bridge.q.push({ id, method: p.method, params: p.params, origin, claimed: false });
+        bridge.meta[id] = { origin, method: p.method };
         return send(res, 200, { id });
       }
       if (req.method === "GET" && url.pathname === "/bridge/res") {         // dApp -> poll for answer
@@ -251,6 +257,13 @@ const server = http.createServer(async (req, res) => {
         const p = await body(req);
         bridge.res[p.id] = { result: p.result, error: p.error };
         bridge.q = bridge.q.filter((e) => e.id !== p.id);
+        const m = bridge.meta[p.id];                                        // a connect that the user approved links the site
+        if (m && m.method === "tari_requestAccounts" && !p.error && p.result) bridge.linkedOrigin = m.origin;
+        delete bridge.meta[p.id];
+        return send(res, 200, { ok: true });
+      }
+      if (req.method === "POST" && url.pathname === "/bridge/unlink") {      // wallet -> revoke the connected site
+        bridge.linkedOrigin = null;
         return send(res, 200, { ok: true });
       }
       return send(res, 404, { error: "unknown bridge route" });
