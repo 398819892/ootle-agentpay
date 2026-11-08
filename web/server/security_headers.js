@@ -11,7 +11,9 @@ const { cookieIsSecure } = require("./http_util");
 // throughout the hand-written markup, so `style-src` permits 'unsafe-inline'; this does NOT enable
 // script injection. Google Fonts are the only third-party origin (style + font). `frame-ancestors
 // 'none'` + X-Frame-Options block clickjacking; `object-src`/`base-uri 'none'` close common injection
-// vectors; `connect-src 'self'` keeps the SPA talking only to its own backend.
+// vectors; `connect-src` keeps the SPA talking to its own backend, plus the user's own non-custodial
+// AgentPay wallet relay (a separate localhost origin) so the dashboard can connect to it over window.tari.
+const WALLET_ORIGINS = process.env.WALLET_ORIGINS || "http://127.0.0.1:7777 http://localhost:7777";
 const CSP = [
   "default-src 'self'",
   "base-uri 'none'",
@@ -22,7 +24,7 @@ const CSP = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data:",
-  "connect-src 'self'",
+  "connect-src 'self' " + WALLET_ORIGINS,
 ].join("; ");
 function applySecurityHeaders(req, res) {
   res.setHeader("Content-Security-Policy", CSP);

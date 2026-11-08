@@ -30,5 +30,10 @@
     <div id="modal-root"></div>
 
     <script src="app.js"></script>
+
+    <!-- connect this dashboard to the user's own non-custodial AgentPay wallet (a separate origin, :7777)
+         over window.tari. The dashboard holds no key; the wallet approves, signs and enforces the caps. -->
+    <script src="tari-provider.js" data-wallet-origin="http://127.0.0.1:7777" data-wallet-path="/wallet.html"></script>
+    <script src="wallet-connect.js"></script>
   </body>
 </html>
