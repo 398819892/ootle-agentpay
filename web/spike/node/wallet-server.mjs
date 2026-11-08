@@ -25,6 +25,10 @@ const PORT = parseInt(process.env.PORT) || 7777;
 const INDEXER_URL = process.env.INDEXER_URL || "http://127.0.0.1:12008";
 const TEMPLATE = process.env.AGENT_TEMPLATE || "template_c4b58558181f19c17d6ccc75c93e0707e2c5b75d1ef4de96a70acd0fd2d40e47";
 const MERCHANT = process.env.MERCHANT || "component_c5c2db90a8f9f02981617244b835fd36d4830bdcb80eb7f5cb092932896924e3";
+// Agent session badge label proven on pay. "default" is the badge this wallet's own open() minted;
+// set SESSION to a label the owner issued into this account (issueAgentBadge) to pay a budget this
+// wallet did not open — e.g. a budget opened by the dashboard and shared with this agent.
+const SESSION = process.env.SESSION || "default";
 
 const KEY_FILE = new URL("../.spike-key.json", import.meta.url);
 if (!fs.existsSync(KEY_FILE)) throw new Error(`need a funded dev key at ${KEY_FILE.pathname}`);
@@ -84,7 +88,7 @@ async function doPay({ amount, memo = "Caravel order" }) {
   const full = {
     network: Network.LocalNet, maxEpoch: await w.maxEpoch(), agent: ACCOUNT,
     agentVaults: await accountVaults(provider, ACCOUNT), budget: state.budget, budgetVault: parsed.vault,
-    agentBadge: parsed.agentBadge, session: "default", merchant: MERCHANT,
+    agentBadge: parsed.agentBadge, session: SESSION, merchant: MERCHANT,
     merchantVaults: await accountVaults(provider, MERCHANT), amount, memo, maxFee: 200_000,
   };
   let txid = null, events = [], reason = null;
