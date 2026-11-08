@@ -107,6 +107,39 @@ export function openBudgetTx(p) {
 }
 
 /**
+ * `transfer`: a plain owner→recipient payment straight from the OWNER account's own funds — the
+ * wallet owner spending their real balance, NOT the AgentBudget. `owner.withdraw(resource, amount)`
+ * into a bucket, `recipient.deposit(bucket)`; the owner pays the fee (native XTR). This is the model
+ * boundary the UI needs: the owner's Send decrements the owner account, while the agent budget's
+ * `pay` (below) decrements the budget vault — two independent pools that never move together.
+ *
+ * Inputs mirror `openBudgetTx`: owner + its vaults (written), recipient + its vaults (written, it
+ * receives the bucket), the transferred resource + native XTR for the fee (read). `ownerVaults` /
+ * `recipientVaults` are the CURRENT vault ids (via getVaultIdsForAccount) — the bare indexer cannot
+ * auto-detect inputs, so every vault the transfer touches must be declared.
+ */
+export function transferTx(p) {
+  const resource = p.resource ?? XTR;
+  const b = TransactionBuilder.new(p.network, p.maxEpoch)
+    .withInputs([
+      asInput(p.owner),
+      ...p.ownerVaults.map((v) => asInput(v)),
+      asInput(p.recipient),
+      ...(p.recipientVaults ?? []).map((v) => asInput(v)),
+      asInput(resource, false),
+      ...(resource !== XTR ? [asInput(XTR, false)] : []),
+    ])
+    .feeTransactionPayFromComponent(p.owner, BigInt(p.maxFee ?? 200_000))
+    .callMethod({ componentAddress: p.owner, methodName: "withdraw" }, [
+      resourceAddressLiteral(resource),
+      amountLiteral(BigInt(p.amount)),
+    ])
+    .saveVar("bucket")
+    .callMethod({ componentAddress: p.recipient, methodName: "deposit" }, [{ Workspace: "bucket" }]);
+  return b.buildUnsignedTransaction();
+}
+
+/**
  * `pay`: the agent proves exactly ONE session badge by id (`create_proof_by_non_fungible_ids`),
  * calls `budget.pay`, then drops the proof. The agent pays the fee.
  *

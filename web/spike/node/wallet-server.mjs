@@ -3,10 +3,15 @@
 // whole resolve→sign→seal→submit lifecycle is already proven on the live 0.50.1 swarm — so the browser
 // never touches wasm, keys or CORS; the page just fetches these endpoints (same origin).
 //
-//   GET  /                 -> wallet-live.html
+//   GET  /                 -> wallet.html (full MetaMask-style wallet)
 //   GET  /api/status       -> { connected, account, network, budget? , caps, spent, vault }
+//   GET  /api/account      -> { account, resource, balance }  (the OWNER account's real XTR balance)
 //   POST /api/open  {fund, perTx, daily, epochsPerWindow}  -> opens a fresh budget, returns its state
+//   POST /api/send  {amount, memo}  -> owner->merchant transfer FROM THE OWNER'S OWN FUNDS (not the budget)
 //   POST /api/pay   {amount, memo}  -> { committed, amount, prevSpent, spent, txid?, events?, reason? }
+//
+// Two independent pools: the owner's Send (/api/send) spends the account's real XTR balance; the
+// AgentBudget's pay (/api/pay) spends the budget vault. They never move together — that is the model.
 //
 // Run in WSL ext4 against the local swarm:
 //   node --experimental-wasm-modules --experimental-global-webcrypto node/wallet-server.mjs
@@ -16,9 +21,9 @@ import fs from "node:fs";
 import { webcrypto } from "node:crypto";
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 import { Network } from "@tari-project/ootle";
-import { decodeExecuteResult } from "@tari-project/ootle-wasm-bor";
+import { decodeExecuteResult, decodeSubstateValue } from "@tari-project/ootle-wasm-bor";
 import { L2Wallet } from "../src/l2-wallet.mjs";
-import { openBudgetTx, payTx, templateEvents, parseBudgetSubstate } from "../src/agentpay-tx.js";
+import { openBudgetTx, payTx, transferTx, templateEvents, parseBudgetSubstate, XTR } from "../src/agentpay-tx.js";
 import { connectIndexer, accountVaults } from "../src/chain.js";
 
 const PORT = parseInt(process.env.PORT) || 7777;
@@ -81,6 +86,48 @@ async function budgetState() {
   };
 }
 
+// --- owner account balance (the wallet's OWN funds, independent of any budget) ---------------------
+const XTR_HEX = XTR.replace(/^resource_/, "");
+let xtrVaultIds = null; // cache: just the account's XTR-bearing vault ids (re-scanned if a read misses)
+async function vaultXtr(vaultId) {
+  let c = (await w.request("tari_getSubstate", { substate_id: vaultId }))?.state?.up?.substate;
+  if (typeof c === "string") c = JSON.parse(decodeSubstateValue(c));
+  const s = JSON.stringify(c);
+  if (!s.includes(XTR_HEX)) return null; // a badge/NFT vault, or some other resource
+  const m = s.match(/"revealed_amount":"?(\d+)"?/) || s.match(/"amount":"?(\d+)"?/);
+  return m ? BigInt(m[1]) : null;
+}
+async function ownerBalance() {
+  const ids = xtrVaultIds || (await accountVaults(provider, ACCOUNT));
+  let total = 0n; const hits = [];
+  for (const v of ids) { const a = await vaultXtr(v); if (a != null) { total += a; hits.push(v); } }
+  xtrVaultIds = hits.length ? hits : null; // keep the XTR vaults hot; re-scan next time if none matched
+  return total;
+}
+
+// Owner Send: a plain transfer straight from the owner account's real funds to the merchant. This is
+// the wallet owner spending their OWN balance — it does NOT touch the AgentBudget (that is /api/pay).
+async function doSend({ amount, memo = "Wallet transfer" }) {
+  const b0 = await ownerBalance();
+  const unsigned = transferTx({
+    network: Network.LocalNet, maxEpoch: await w.maxEpoch(), owner: ACCOUNT,
+    ownerVaults: await accountVaults(provider, ACCOUNT), recipient: MERCHANT,
+    recipientVaults: await accountVaults(provider, MERCHANT), amount, memo, maxFee: 200_000,
+  });
+  let txid = null, reason = null;
+  try {
+    const r = await sign(unsigned);
+    txid = r?.result?.Finalized?.transaction_id || null;
+    const d = r?.result?.Finalized?.final_decision;
+    if (d !== "Commit") reason = "final_decision=" + d;
+    const ad = r?.result?.Finalized?.abort_details;
+    if (ad) reason = typeof ad === "string" ? ad : JSON.stringify(ad);
+  } catch (e) { reason = (e.outcome ? e.outcome + ": " : "") + (e.reason ?? e.message); }
+  const balance = await ownerBalance();
+  const committed = balance < b0; // the owner's own funds actually left the account
+  return { committed, amount, prevBalance: b0.toString(), balance: balance.toString(), merchant: MERCHANT, txid, reason };
+}
+
 async function doOpen({ fund = 5000, perTx = 1000, daily = 1500, epochsPerWindow = 10 }) {
   const open = commit(await sign(openBudgetTx({
     network: Network.LocalNet, maxEpoch: await w.maxEpoch(), template: TEMPLATE, owner: ACCOUNT,
@@ -129,14 +176,25 @@ const body = (req) => new Promise((r) => { let d = ""; req.on("data", (c) => d +
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://x");
-    const STATIC = { "/": "wallet-live.html", "/index.html": "wallet-live.html", "/linked": "linked.html", "/linked.html": "linked.html", "/dapp.html": "dapp.html", "/wallet.html": "wallet.html", "/wallet": "wallet.html" };
+    // Root now serves the full MetaMask-style wallet; the old single-page demo stays at /live.
+    const STATIC = { "/": "wallet.html", "/index.html": "wallet.html", "/wallet.html": "wallet.html", "/wallet": "wallet.html",
+      "/live": "wallet-live.html", "/wallet-live.html": "wallet-live.html",
+      "/linked": "linked.html", "/linked.html": "linked.html", "/dapp.html": "dapp.html" };
     if (req.method === "GET" && STATIC[url.pathname]) {
       const f = new URL("../" + STATIC[url.pathname], import.meta.url);
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); return res.end(fs.readFileSync(f));
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }); return res.end(fs.readFileSync(f));
     }
     if (url.pathname === "/api/status") {
       return send(res, 200, { connected: true, account: ACCOUNT, network: "localnet", indexer: INDEXER_URL,
         template: TEMPLATE, merchant: MERCHANT, budget: await budgetState() });
+    }
+    if (url.pathname === "/api/account") {
+      return send(res, 200, { account: ACCOUNT, resource: "XTR", balance: (await ownerBalance()).toString() });
+    }
+    if (req.method === "POST" && url.pathname === "/api/send") {
+      const p = await body(req); const amt = parseInt(p.amount);
+      if (!(amt > 0)) return send(res, 400, { error: "amount must be a positive integer" });
+      return send(res, 200, await doSend({ amount: amt, memo: p.memo }));
     }
     if (req.method === "POST" && url.pathname === "/api/open") return send(res, 200, await doOpen(await body(req)));
     if (req.method === "POST" && url.pathname === "/api/pay") {

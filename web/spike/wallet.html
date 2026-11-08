@@ -226,13 +226,13 @@
     +'<path d="M18.5 24 L21.5 24 L20 26.3 Z" fill="#2b2b33"/></svg>';}
 
   const T={
-    zh:{ acctName:"账户 1", receive:"接收", send:"发送", balSub:"本窗口可用额度", tokens:"代币", activity:"活动",
+    zh:{ acctName:"账户 1", receive:"接收", send:"发送", balSub:"账户余额", tokens:"代币", activity:"活动",
       onOotle:"Ootle L2 · localnet", spendable:"可支配", budget:"预算 · AgentBudget", budgetK:"合约",
       perTxCap:"单笔上限", dailyCap:"每日上限", spent:"本窗口已花", vault:"金库", wl:"白名单",
       openBtn:"链上开一个预算(5000 · 额度 1000/1500)", bridgeLog:"桥接日志", langBtn:"EN",
       noLink:"尚无 dApp 连接", linked:"已连接 dApp",
       hint:"这是独立的钱包窗口。dApp 不持有私钥,只能经 window.tari 向这里发请求;由你批准,钱包在本机签名并提交到链上。",
-      sendTitle:"发送 XTR", receiveTitle:"接收", to:"收款方(预算白名单)", amount:"金额", continue:"继续", sending:"签名并提交中…",
+      sendTitle:"发送 XTR", receiveTitle:"接收", to:"收款方", amount:"金额", continue:"继续", sending:"签名并提交中…",
       sent:"已发送", failed:"失败", done:"完成", newSend:"再发一笔", merchantName:"Caravel 商户",
       receiveHint:"把下面的账户地址给付款方。这是你在 Ootle L2 上的地址。", copy:"复制地址", copied:"已复制 ✓",
       netMenuTitle:"网络", netLocal:"Ootle Localnet", netMain:"Ootle 主网(即将)", netTest:"Ootle 测试网(即将)",
@@ -241,19 +241,20 @@
       approve:"批准付款", requests:"请求支付", from:"来自", chkWl:"收款方在 owner 白名单内", chkPer:"未超单笔上限", chkDay:"未超每日上限",
       mOk:"批准即由钱包签名并提交;额度由链上强制。", mBad:"链上会拒绝这笔付款 —— 手续费入账、已花不变。dApp 收到拒绝。",
       reject:"拒绝", allow:"连接", sign:"确认", anyway:"仍然确认",
+      sendApprove:"确认发送", fromAcct:"从你的账户", chkTo:"收款方", chkBal:"余额充足", sendMok:"从你自己的账户余额转出 —— 与 AgentBudget 无关,两者各自独立。", sendMbad:"账户余额不足。", ownerBal:"账户余额", sentOwner:(p,s)=>`链:Commit · 余额 ${p} → ${s}`,
       actOut:"发送", actConn:"连接", confirmed:"已确认", rejected:"已拒绝", viaDapp:(o)=>`来自 ${o}`, viaSelf:"从钱包发起",
       reqAccts:(o)=>`dApp → 钱包:请求连接 (${o})`, resAccts:(a)=>`钱包 → dApp:账户 ${a}`, connRej:"钱包 → dApp:用户拒绝连接",
       reqPay:(a)=>`dApp → 钱包:signAndSubmit · pay(${a})`, signing:"钱包:resolve → sign → seal → submit …",
       ev:(e)=>`事件 ${e}`, commit:(p,s)=>`链:Commit · 已花 ${p} → ${s}`, resPaid:"钱包 → dApp:{ committed: true }",
       payRej:"链:付款被拒(手续费已入账)", resDecl:(r)=>`钱包 → dApp:{ committed: false, ${r} }`, userRej:"钱包 → dApp:用户拒绝 (4001)",
       opened:(b)=>`链:Commit · 预算 ${b}` },
-    en:{ acctName:"Account 1", receive:"Receive", send:"Send", balSub:"spendable this window", tokens:"Tokens", activity:"Activity",
+    en:{ acctName:"Account 1", receive:"Receive", send:"Send", balSub:"account balance", tokens:"Tokens", activity:"Activity",
       onOotle:"Ootle L2 · localnet", spendable:"spendable", budget:"Budget · AgentBudget", budgetK:"contract",
       perTxCap:"Per-tx cap", dailyCap:"Daily cap", spent:"Spent this window", vault:"vault", wl:"whitelist",
       openBtn:"Open a budget on-chain (5000 · caps 1000/1500)", bridgeLog:"Bridge log", langBtn:"中文",
       noLink:"no dApp connected", linked:"dApp connected",
       hint:"This is the wallet's own window. The dApp holds no key — it can only ask over window.tari; you approve, and the wallet signs locally and submits on-chain.",
-      sendTitle:"Send XTR", receiveTitle:"Receive", to:"To (budget whitelist)", amount:"Amount", continue:"Continue", sending:"Signing & submitting…",
+      sendTitle:"Send XTR", receiveTitle:"Receive", to:"To (payee)", amount:"Amount", continue:"Continue", sending:"Signing & submitting…",
       sent:"Sent", failed:"Failed", done:"Done", newSend:"Send another", merchantName:"Caravel merchant",
       receiveHint:"Share your account address with the payer. This is your address on the Ootle L2.", copy:"Copy address", copied:"Copied ✓",
       netMenuTitle:"Network", netLocal:"Ootle Localnet", netMain:"Ootle Mainnet (soon)", netTest:"Ootle Testnet (soon)",
@@ -262,6 +263,7 @@
       approve:"Approve payment", requests:"requests", from:"from", chkWl:"Payee on owner whitelist", chkPer:"Within per-transaction cap", chkDay:"Within daily cap",
       mOk:"Approve to sign and submit; the chain enforces the caps.", mBad:"The chain will reject this pay — fee commits, spent stays. The dApp gets a decline.",
       reject:"Reject", allow:"Connect", sign:"Confirm", anyway:"Confirm anyway",
+      sendApprove:"Confirm send", fromAcct:"From your account", chkTo:"Payee", chkBal:"Sufficient balance", sendMok:"Sent from your own account balance — nothing to do with the AgentBudget; the two are independent.", sendMbad:"Insufficient account balance.", ownerBal:"account balance", sentOwner:(p,s)=>`chain: Commit · balance ${p} → ${s}`,
       actOut:"Send", actConn:"Connect", confirmed:"Confirmed", rejected:"Rejected", viaDapp:(o)=>`from ${o}`, viaSelf:"from wallet",
       reqAccts:(o)=>`dApp → wallet: connect request (${o})`, resAccts:(a)=>`wallet → dApp: account ${a}`, connRej:"wallet → dApp: user rejected connect",
       reqPay:(a)=>`dApp → wallet: signAndSubmit · pay(${a})`, signing:"wallet: resolve → sign → seal → submit …",
@@ -302,19 +304,26 @@
   }
 
   // ---- render status ----
-  let ST=null, linkedOrigin=null;
+  let ST=null, linkedOrigin=null, OWNER=0;
+  // Budget-available: what the AGENT (dApp) can still spend from the budget this window. Used only by the
+  // dApp pay approval — NOT by the hero balance, which is the owner account's own funds (OWNER).
   function balanceOf(b){ if(!b)return 0; if(b.vault!=null)return b.vault; return Math.max(0,(Number(b.daily)||0)-(Number(b.spent)||0)); }
+  // The hero + Tari XTR row show the OWNER ACCOUNT's real balance, independent of any budget.
+  function renderAccount(bal){ OWNER=Number(bal)||0; $("bal").textContent=fmt(OWNER); $("tokBal").textContent=fmt(OWNER); }
   function renderBudget(b){
     $("budgetBox").hidden=!b; $("noBudget").hidden=!!b;
-    const bal=balanceOf(b); $("bal").textContent=fmt(bal); $("tokBal").textContent=fmt(bal);
-    $("sendBtn").disabled=!b;
     if(!b)return;
     $("budgetAddr").textContent=short(b.address);$("perTx").textContent=fmt(b.perTx);$("daily").textContent=fmt(b.daily);$("daily2").textContent=fmt(b.daily);
     $("spent").textContent=fmt(b.spent);$("vault").textContent=fmt(b.vault);$("wlN").textContent=(b.whitelist||[]).length;
     const pct=Math.min(100,Math.round(b.spent/b.daily*100));$("bar").style.width=pct+"%";$("meter").classList.toggle("hot",pct>=80);
   }
   function setAccount(a){ $("acctAddr").firstChild.textContent=short(a)+" "; }
-  async function refresh(){const s=await api("/api/status");ST=s;setAccount(s.account);$("netPill")&&($("netPill").textContent=s.network);renderBudget(s.budget);return s;}
+  async function refresh(){
+    const s=await api("/api/status");ST=s;setAccount(s.account);$("netPill")&&($("netPill").textContent=s.network);
+    renderBudget(s.budget); $("sendBtn").disabled=false; // the owner can always send their own funds
+    try{const a=await api("/api/account");renderAccount(a.balance);}catch(e){}
+    return s;
+  }
   function setLinked(o){linkedOrigin=o;const row=$("linkRow");row.classList.toggle("on",!!o);$("linkText").innerHTML="";if(o){const s=document.createElement("span");s.textContent=t("linked")+" · ";const b=document.createElement("b");b.textContent=o;$("linkText").append(s,b);}else{$("linkText").textContent=t("noLink");}}
 
   // ---- tabs ----
@@ -333,6 +342,16 @@
         checks.map(c=>'<div class="check '+(c.ok?"ok":"no")+'"><span class="ic">'+(c.ok?"✓":"✕")+'</span><span class="lab2">'+esc(c.lab)+'</span><span class="q">'+c.q+'</span></div>').join(""),
         '</div><p class="note">',esc(ok?t("mOk"):t("mBad")),'</p></div><div class="acts"><button class="btn sec" id="r">',esc(t("reject")),'</button><button class="btn" id="a">',esc(ok?t("sign"):t("anyway")),'</button></div></div>'].join(""),
       (sc,done)=>{sc.querySelector("#r").onclick=()=>done(false);sc.querySelector("#a").onclick=()=>done(true);});
+  }
+  // Owner Send approval: a transfer from the owner account's OWN funds. No budget caps apply here —
+  // the only check is that the account has the balance. This is the pool the dApp can never touch.
+  function approveSend(amount){
+    const enough=amount<=OWNER;
+    const checks=[{ok:true,lab:t("chkTo"),q:short(ST.merchant)},{ok:enough,lab:t("chkBal"),q:fmt(amount)+" / "+fmt(OWNER)}];
+    return modal(['<div class="modal"><div class="top"><div>',foxSVG(40),'</div><h3>',esc(t("sendApprove")),'</h3><span class="pill">',esc(t("fromAcct")),'</span></div><div class="mb"><div class="origin">',esc(t("fromAcct")),' · ',esc(short(ST.account)),'</div><div class="pay-amt"><div class="lab center">',esc(t("amount")),'</div><div><span class="n num">',fmt(amount),'</span> <span class="muted">XTR</span></div></div><div class="checks">',
+        checks.map(c=>'<div class="check '+(c.ok?"ok":"no")+'"><span class="ic">'+(c.ok?"✓":"✕")+'</span><span class="lab2">'+esc(c.lab)+'</span><span class="q">'+c.q+'</span></div>').join(""),
+        '</div><p class="note">',esc(enough?t("sendMok"):t("sendMbad")),'</p></div><div class="acts"><button class="btn sec" id="r">',esc(t("reject")),'</button><button class="btn" id="a" '+(enough?"":"disabled")+'>',esc(t("sign")),'</button></div></div>'].join(""),
+      (sc,done)=>{sc.querySelector("#r").onclick=()=>done(false);sc.querySelector("#a").onclick=()=>done(enough);});
   }
 
   // ---- relay: drain dApp requests ----
@@ -370,25 +389,25 @@
   document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>closeSheet(b.dataset.close));
   let sendAmt=700;
   function renderSend(){
-    const b=ST&&ST.budget; const body=$("sendBody");
+    const body=$("sendBody");
     body.innerHTML=
       '<div class="field"><div class="lab">'+esc(t("to"))+'</div><div class="to"><span class="ava"></span><div><div class="tn">'+esc(t("merchantName"))+'</div><div class="ta">'+esc(short(ST?ST.merchant:""))+'</div></div></div></div>'
       +'<div class="field"><div class="lab">'+esc(t("amount"))+'</div><div class="inbox"><input id="sendInput" type="number" min="1" value="'+sendAmt+'"><span class="unit">XTR</span></div>'
       +'<div class="presets" id="sendPresets">'+[300,700,900,5000].map(v=>'<button class="preset'+(v===sendAmt?" on":"")+'" data-v="'+v+'">'+v+'</button>').join("")+'</div></div>'
-      +'<div class="hint">'+esc(L==="zh"?"预算只能付给 owner 白名单上的收款方;额度由链上 AgentBudget 合约强制执行。":"The budget can only pay a payee on the owner's whitelist; caps are enforced by the on-chain AgentBudget contract.")+'</div>'
-      +'<button class="btn block" id="sendGo" '+(b?"":"disabled")+'>'+esc(t("continue"))+'</button>';
+      +'<div class="hint">'+esc(L==="zh"?"这是从你自己的账户余额转出的付款,直接上链 —— 与 AgentBudget(dApp 的额度)互不相干,不会一起减少。":"This pays from your own account balance, straight on-chain — separate from the AgentBudget (the dApp's allowance); the two never decrease together.")+'</div>'
+      +'<button class="btn block" id="sendGo" '+(ST?"":"disabled")+'>'+esc(t("continue"))+'</button>';
     $("sendPresets").addEventListener("click",(e)=>{const p=e.target.closest(".preset");if(!p)return;sendAmt=+p.dataset.v;$("sendInput").value=sendAmt;document.querySelectorAll("#sendPresets .preset").forEach(x=>x.classList.toggle("on",x===p));});
     $("sendInput").addEventListener("input",(e)=>{sendAmt=parseInt(e.target.value)||0;document.querySelectorAll("#sendPresets .preset").forEach(x=>x.classList.toggle("on",+x.dataset.v===sendAmt));});
     $("sendGo").onclick=doSend;
   }
   async function doSend(){
     const amount=sendAmt; if(!(amount>0))return;
-    const ok=await approvePay(amount, t("viaSelf")); if(!ok)return;
+    const ok=await approveSend(amount); if(!ok)return;
     const body=$("sendBody"); body.innerHTML='<div class="result"><div class="big ok" style="background:var(--surface-2);color:var(--blue)">…</div><div>'+esc(t("sending"))+'</div></div>';
     try{
-      const r=await api("/api/pay","POST",{amount,memo:"wallet send"});
-      if(r.committed){addActivity({kind:"pay",sub:t("viaSelf"),amount:r.amount,status:"ok"});body.innerHTML='<div class="result"><div class="big ok">✓</div><h3>'+esc(t("sent"))+'</h3><div class="pay-amt"><span class="n num">'+fmt(r.amount)+'</span> <span class="muted">XTR</span></div><div class="asub">'+esc(t("commit",fmt(r.prevSpent),fmt(r.spent)))+'</div></div><button class="btn block" id="sdone">'+esc(t("done"))+'</button>';}
-      else{addActivity({kind:"pay",sub:t("viaSelf"),amount:r.amount,status:"failed"});body.innerHTML='<div class="result"><div class="big no">✕</div><h3>'+esc(t("failed"))+'</h3><div class="note">'+esc((r.reason||"").slice(0,80))+'</div></div><button class="btn block" id="sdone">'+esc(t("done"))+'</button>';}
+      const r=await api("/api/send","POST",{amount,memo:"wallet send"});
+      if(r.committed){addActivity({kind:"send",sub:t("viaSelf"),amount:r.amount,status:"ok"});body.innerHTML='<div class="result"><div class="big ok">✓</div><h3>'+esc(t("sent"))+'</h3><div class="pay-amt"><span class="n num">'+fmt(r.amount)+'</span> <span class="muted">XTR</span></div><div class="asub">'+esc(t("sentOwner",fmt(r.prevBalance),fmt(r.balance)))+'</div></div><button class="btn block" id="sdone">'+esc(t("done"))+'</button>';}
+      else{addActivity({kind:"send",sub:t("viaSelf"),amount:r.amount,status:"failed"});body.innerHTML='<div class="result"><div class="big no">✕</div><h3>'+esc(t("failed"))+'</h3><div class="note">'+esc((r.reason||"").slice(0,80))+'</div></div><button class="btn block" id="sdone">'+esc(t("done"))+'</button>';}
       $("sdone").onclick=()=>{closeSheet("sheetSend");renderSend();};
       await refresh();
     }catch(e){body.innerHTML='<div class="result"><div class="big no">✕</div><div class="note">'+esc(e.message)+'</div></div><button class="btn block" id="sdone">'+esc(t("done"))+'</button>';$("sdone").onclick=()=>{closeSheet("sheetSend");renderSend();};}
