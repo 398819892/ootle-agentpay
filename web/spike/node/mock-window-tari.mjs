@@ -28,7 +28,7 @@ globalThis.window = {
 
 const { TariWindowWallet, coreInstructions, describeTariError, normaliseNetwork } =
   await import("../src/tari-window.js");
-const { openBudgetTx, payTx, findNewComponent, templateEvents, parseBudgetSubstate } =
+const { openBudgetTx, payTx, setLimitsTx, addMerchantTx, removeMerchantTx, findNewComponent, templateEvents, parseBudgetSubstate } =
   await import("../src/agentpay-tx.js");
 
 // --- test fixtures (structurally valid 64-hex ids; owner is the real walletd account from this session)
@@ -189,6 +189,32 @@ console.log("== 5. error mapping: { code, message } rejection ==");
   let msg;
   try { await TariWindowWallet.connect(); } catch (e) { msg = describeTariError(e); }
   eq(msg, "User rejected the request (4001)", "describeTariError maps code 4001");
+}
+
+console.log("== 6. owner ops: set_limits / add_merchant / remove_merchant builders ==");
+{
+  // Owner-badge-gated governance builders: each must put an owner-badge PROOF in the auth zone (the
+  // on-chain access rule has no proof arg) and call the owner method, with the fee kept out of the body.
+  const common = { network: NETWORK_ID, maxEpoch: 0, owner: OWNER, ownerVaults: [], budget: NEWBUDGET, ownerBadge: "resource_" + OBADGE, maxFee: 200_000 };
+
+  const sl = setLimitsTx({ ...common, perTxCap: 250, dailyCap: 900 });
+  const slBody = JSON.stringify(coreInstructions(sl));
+  ok(slBody.includes("set_limits"), "set_limits body calls set_limits");
+  ok(slBody.includes(OBADGE), "set_limits body references the owner badge (proof in the auth zone)");
+  ok(Array.isArray(sl.fee_instructions) && sl.fee_instructions.length >= 1, "set_limits keeps the fee in fee_instructions");
+  ok(!slBody.includes("pay_fee"), "set_limits body excludes the pay_fee call");
+
+  const am = addMerchantTx({ ...common, merchant: MERCHANT });
+  const amBody = JSON.stringify(coreInstructions(am));
+  ok(amBody.includes("add_merchant"), "add_merchant body calls add_merchant");
+  ok(amBody.includes(h("11")), "add_merchant body references the merchant address");
+  ok(amBody.includes(OBADGE), "add_merchant body references the owner badge (proof)");
+
+  const rm = removeMerchantTx({ ...common, merchant: MERCHANT });
+  const rmBody = JSON.stringify(coreInstructions(rm));
+  ok(rmBody.includes("remove_merchant"), "remove_merchant body calls remove_merchant");
+  ok(rmBody.includes(h("11")), "remove_merchant body references the merchant address");
+  ok(rmBody.includes(OBADGE), "remove_merchant body references the owner badge (proof)");
 }
 
 console.log(`\n==== ${fail === 0 ? "ALL PASS" : "FAILURES"} : ${pass} passed, ${fail} failed ====`);

@@ -358,6 +358,15 @@
       (sc,done)=>{sc.querySelector("#r").onclick=()=>done(false);sc.querySelector("#a").onclick=()=>done(enough);});
   }
 
+  // Owner governance approval (set limits / add-remove merchant). Owner-badge gated on-chain; this is
+  // the human approving the owner op the dApp requested. Rows are informational (the values to apply).
+  function approveOwnerOp(title,rows,origin){
+    return modal(['<div class="modal"><div class="top"><div>',foxSVG(40),'</div><h3>',esc(title),'</h3><span class="pill">',esc(short(ST?ST.template:"")),'</span></div><div class="mb"><div class="origin">',esc(L==="zh"?"来自 ":"from "),esc(origin),'</div><div class="checks">',
+        rows.map(r=>'<div class="check ok"><span class="ic">·</span><span class="lab2">'+esc(r.lab)+'</span><span class="q">'+esc(r.val)+'</span></div>').join(""),
+        '</div><p class="note">',esc(L==="zh"?"这是所有者操作,由你的 owner 徽章在链上授权。":"An owner action, authorized on-chain by your owner badge."),'</p></div><div class="acts"><button class="btn sec" id="r">',esc(t("reject")),'</button><button class="btn" id="a">',esc(t("sign")),'</button></div></div>'].join(""),
+      (sc,done)=>{sc.querySelector("#r").onclick=()=>done(false);sc.querySelector("#a").onclick=()=>done(true);});
+  }
+
   // ---- relay: drain dApp requests ----
   const inflight=new Set();
   async function resolveReq(id,result,error){try{await fetch("/bridge/resolve",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id,result,error})});}catch(e){}inflight.delete(id);}
@@ -370,7 +379,7 @@
       const s=ST||await refresh(); setLinked(origin); addActivity({kind:"connect",sub:origin,status:"ok"});
       log("res",t("resAccts",short(s.account))); return resolveReq(q.id,[s.account]);
     }
-    if(q.method==="tari_signAndSubmitTransaction"){
+    if(q.method==="tari_signAndSubmitTransaction"&&q.params&&q.params.pay){
       const amount=q.params&&q.params.pay&&q.params.pay.amount; log("req",t("reqPay",fmt(amount)));
       if(!ST||!ST.budget){log("rej","no budget");return resolveReq(q.id,null,"wallet has no budget open");}
       const okToSign=await approvePay(amount,origin);
@@ -382,6 +391,24 @@
         else{log("rej",t("payRej"));log("rej",t("resDecl",(r.reason||"").slice(0,42)));addActivity({kind:"pay",sub:t("viaDapp",origin),amount:r.amount,status:"failed"});}
         await refresh(); return resolveReq(q.id,r);
       }catch(err){log("rej",err.message);return resolveReq(q.id,null,err.message);}
+    }
+    if(q.method==="tari_signAndSubmitTransaction"&&q.params&&q.params.setLimits){
+      const sl=q.params.setLimits; log("req",L==="zh"?"请求改限额":"set-limits request");
+      if(!ST||!ST.budget){log("rej","no budget");return resolveReq(q.id,null,"wallet has no budget open");}
+      const ok=await approveOwnerOp(L==="zh"?"修改额度":"Change limits",[{lab:L==="zh"?"单笔上限":"Per-tx cap",val:fmt(sl.perTxCap)+" XTR"},{lab:L==="zh"?"每日上限":"Daily cap",val:fmt(sl.dailyCap)+" XTR"}],origin);
+      if(!ok){log("rej",t("userRej"));return resolveReq(q.id,null,"user rejected (4001)");}
+      log("sys",t("signing"));
+      try{const r=await api("/api/limits","POST",{perTxCap:String(sl.perTxCap),dailyCap:String(sl.dailyCap)});log("res",L==="zh"?"额度已更新":"limits updated");addActivity({kind:"owner",sub:t("viaDapp",origin),status:"ok"});await refresh();return resolveReq(q.id,r);}catch(err){log("rej",err.message);addActivity({kind:"owner",sub:t("viaDapp",origin),status:"failed"});return resolveReq(q.id,null,err.message);}
+    }
+    if(q.method==="tari_signAndSubmitTransaction"&&q.params&&(q.params.addMerchant||q.params.removeMerchant)){
+      const adding=!!q.params.addMerchant; const m=((q.params.addMerchant||q.params.removeMerchant)||{}).merchant;
+      log("req",adding?(L==="zh"?"请求加白名单":"add-merchant request"):(L==="zh"?"请求移出白名单":"remove-merchant request"));
+      if(!ST||!ST.budget){log("rej","no budget");return resolveReq(q.id,null,"wallet has no budget open");}
+      if(!m||!String(m).startsWith("component_")){return resolveReq(q.id,null,"merchant must be a component_ address");}
+      const ok=await approveOwnerOp(adding?(L==="zh"?"加入白名单":"Whitelist merchant"):(L==="zh"?"移出白名单":"Remove merchant"),[{lab:L==="zh"?"商户":"Merchant",val:short(m)}],origin);
+      if(!ok){log("rej",t("userRej"));return resolveReq(q.id,null,"user rejected (4001)");}
+      log("sys",t("signing"));
+      try{const r=await api(adding?"/api/merchant/add":"/api/merchant/remove","POST",{merchant:m});log("res",adding?(L==="zh"?"已加入白名单":"merchant added"):(L==="zh"?"已移出白名单":"merchant removed"));addActivity({kind:"owner",sub:t("viaDapp",origin),status:"ok"});await refresh();return resolveReq(q.id,r);}catch(err){log("rej",err.message);addActivity({kind:"owner",sub:t("viaDapp",origin),status:"failed"});return resolveReq(q.id,null,err.message);}
     }
     if(q.method==="tari_getBudget"||q.method==="tari_getState"){
       // READ over the relay: no signing, no approval modal — just hand a LINKED dApp the budget it

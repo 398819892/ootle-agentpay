@@ -183,6 +183,51 @@ export function payTx(p) {
   return b.buildUnsignedTransaction();
 }
 
+// --- owner governance ops (owner-badge gated) --------------------------------------------------
+// set_limits / add_merchant / remove_merchant are gated by the component access rule
+// `rule!(resource(owner_badge))` (see templates/agent_budget/src/lib.rs) — they take NO proof arg, so
+// the transaction must put an OWNER-BADGE proof in the auth zone. The instruction equivalent of the
+// manifest `owner.create_proof_for_resource(owner_badge); budget.<op>(...); drop_all_proofs!()` is
+// `createProof(owner, ownerBadge).saveVar("p").withAuthorizedProof("p", b => b.callMethod(<op>)).
+// dropAllProofsInWorkspace()`. The OWNER signs + pays the fee (native XTR). `ownerVaults` are the
+// owner account's CURRENT vault ids (declared as inputs — the bare indexer can't auto-detect them):
+// they hold the owner badge the proof needs and the XTR the fee is paid from.
+const ownerOpInputs = (p, extra = []) => [
+  asInput(p.owner),
+  ...p.ownerVaults.map((v) => asInput(v)),
+  asInput(p.budget),
+  asInput(p.ownerBadge, false),
+  asInput(XTR, false),
+  ...extra,
+];
+
+function ownerOpTx(p, methodName, args, extraInputs = []) {
+  return TransactionBuilder.new(p.network, p.maxEpoch)
+    .withInputs(ownerOpInputs(p, extraInputs))
+    .feeTransactionPayFromComponent(p.owner, BigInt(p.maxFee ?? 200_000))
+    .createProof(p.owner, p.ownerBadge)
+    .saveVar("ownerProof")
+    .withAuthorizedProof("ownerProof", (b) =>
+      b.callMethod({ componentAddress: p.budget, methodName }, args))
+    .dropAllProofsInWorkspace()
+    .buildUnsignedTransaction();
+}
+
+/** `set_limits`: owner updates the per-transaction and daily caps (base-unit strings/bigints). */
+export function setLimitsTx(p) {
+  return ownerOpTx(p, "set_limits", [amountLiteral(BigInt(p.perTxCap)), amountLiteral(BigInt(p.dailyCap))]);
+}
+
+/** `add_merchant`: owner whitelists `p.merchant` (declared as a read input — it is an arg address). */
+export function addMerchantTx(p) {
+  return ownerOpTx(p, "add_merchant", [componentAddressLiteral(p.merchant)], [asInput(p.merchant, false)]);
+}
+
+/** `remove_merchant`: owner removes `p.merchant` from the whitelist. */
+export function removeMerchantTx(p) {
+  return ownerOpTx(p, "remove_merchant", [componentAddressLiteral(p.merchant)], [asInput(p.merchant, false)]);
+}
+
 // --- receipt / substate readers ----------------------------------------------------------------
 /**
  * The `finalize` object (result + events + up_substates) of a committed receipt. On 0.50 the

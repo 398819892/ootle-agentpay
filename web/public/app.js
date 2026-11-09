@@ -3284,6 +3284,15 @@ async function walletReadBudget(timeoutMs = 9000) {
   return tari.request({ method: "tari_getBudget", timeoutMs });
 }
 
+// Route an owner op (set limits / add-remove merchant) through the connected wallet: the wallet pops its
+// OWN approval, signs with the owner badge, and the chain enforces it — so no dashboard step-up is needed.
+// On an on-chain commit, re-read the wallet budget into the view. Returns {ok, reason?}.
+async function walletOwnerOp(params) {
+  const r = await walletProvider().request({ method: "tari_signAndSubmitTransaction", params });
+  if (r && r.committed) { await refreshState(true); return { ok: true }; }
+  return { ok: false, reason: (r && r.reason) || "" };
+}
+
 // Overlay the wallet's authoritative budget onto a backend-shaped state object, so every tile keeps
 // rendering (backend shape) while the money figures + component identity become the wallet's. Degraded
 // fields (funded/withdrawn/ledger/sessions) stay from the backend until Phase 3 serves them from the
@@ -3477,6 +3486,17 @@ async function revokeSession(session, btn) {
 
 async function removeMerchant(address, name, btn) {
   const label = name || shorten(address, 10, 6);
+  // Non-custodial: the wallet's own approval modal IS the confirmation; skip the dashboard step-up.
+  if (S.wallet.connected && walletProvider()) {
+    await withPending(btn, t("p_removing"), async () => {
+      try {
+        const wr = await walletOwnerOp({ removeMerchant: { merchant: address } });
+        if (wr.ok) { render(); toast("success", t("t_merchant_removed"), t("t_merchant_removed_msg", { name: esc(label) })); }
+        else toast("error", t("t_merchant_remove_failed"), wr.reason);
+      } catch (e) { toast("error", t("t_merchant_remove_failed"), e.message); }
+    });
+    return;
+  }
   const res = await confirmDialog({
     tone: "warn",
     icon: "x",
@@ -3767,6 +3787,17 @@ function wireMerchants() {
     const name = el("g-merchant").value.trim();
     setErr("g-merchant", !name);
     if (!name) return;
+    // Non-custodial: route the whitelist add through the wallet's owner-badge approval; no step-up here.
+    if (S.wallet.connected && walletProvider()) {
+      await withPending(el("g-add"), t("p_adding"), async () => {
+        try {
+          const wr = await walletOwnerOp({ addMerchant: { merchant: name } });
+          if (wr.ok) { render(); toast("success", t("t_merchant_wl"), t("t_merchant_wl_msg", { name: esc(name) })); }
+          else toast("error", t("t_merchant_failed"), wr.reason);
+        } catch (err) { toast("error", t("t_merchant_failed"), err.message); }
+      });
+      return;
+    }
     const gate = await stepUpToken("addMerchant", { merchant: name });
     if (!gate) return;
     await withPending(el("g-add"), t("p_adding"), async () => {
@@ -3808,6 +3839,17 @@ function wireManage() {
       const cur = S.data.budget;
       if (amtBig(perTxCap) === amtBig(cur.perTxCap) && amtBig(dailyCap) === amtBig(cur.dailyCap)) {
         toast("info", t("limits_title"), t("limits_unchanged"));
+        return;
+      }
+      // Non-custodial: the connected wallet approves + signs with the owner badge; no step-up here.
+      if (S.wallet.connected && walletProvider()) {
+        await withPending(el("g-limits"), t("p_updating_limits"), async () => {
+          try {
+            const wr = await walletOwnerOp({ setLimits: { perTxCap, dailyCap } });
+            if (wr.ok) { render(); toast("success", t("t_limits_updated"), t("t_limits_updated_msg", { perTx: fmt(perTxCap), daily: fmt(dailyCap), unit: UNIT })); }
+            else toast("error", t("t_limits_failed"), wr.reason);
+          } catch (err) { toast("error", t("t_limits_failed"), err.message); }
+        });
         return;
       }
       // The step-up token is bound to this exact (perTxCap, dailyCap) pair; the op call sends the same.

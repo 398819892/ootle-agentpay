@@ -23,7 +23,7 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 import { Network } from "@tari-project/ootle";
 import { decodeExecuteResult, decodeSubstateValue } from "@tari-project/ootle-wasm-bor";
 import { L2Wallet } from "../src/l2-wallet.mjs";
-import { openBudgetTx, payTx, transferTx, templateEvents, parseBudgetSubstate, XTR } from "../src/agentpay-tx.js";
+import { openBudgetTx, payTx, transferTx, setLimitsTx, addMerchantTx, removeMerchantTx, templateEvents, parseBudgetSubstate, XTR } from "../src/agentpay-tx.js";
 import { connectIndexer, accountVaults } from "../src/chain.js";
 import { createDappBridge } from "../src/dapp-bridge.mjs";
 
@@ -190,6 +190,32 @@ async function doPay({ amount, memo = "Caravel order" }) {
   return { committed, amount, prevSpent: b0, spent: after.spent, vault: after.vault, txid, events, reason };
 }
 
+// --- owner governance ops (owner-badge gated) ---------------------------------------------------
+// The OWNER signs these (sign(), not paySign) and pays the fee; the on-chain access rule requires the
+// owner-badge proof the builder puts in the auth zone. Each returns the fresh budget state so the dApp
+// re-renders from chain. On a chain rejection, commit() throws → the route answers 5xx and the wallet's
+// bridge resolves an error to the dApp.
+async function ownerOpCommon() {
+  if (!state.budget) throw new Error("no budget open yet");
+  const parsed = await parseBudgetSubstate(await w.request("tari_getSubstate", { substate_id: state.budget }));
+  return {
+    network: Network.LocalNet, maxEpoch: await w.maxEpoch(), owner: ACCOUNT,
+    ownerVaults: await accountVaults(provider, ACCOUNT), budget: state.budget, ownerBadge: parsed.ownerBadge, maxFee: 200_000,
+  };
+}
+async function doSetLimits({ perTxCap, dailyCap }) {
+  commit(await sign(setLimitsTx({ ...(await ownerOpCommon()), perTxCap, dailyCap })), "set_limits");
+  return { committed: true, ...(await budgetState()) };
+}
+async function doAddMerchant({ merchant }) {
+  commit(await sign(addMerchantTx({ ...(await ownerOpCommon()), merchant })), "add_merchant");
+  return { committed: true, ...(await budgetState()) };
+}
+async function doRemoveMerchant({ merchant }) {
+  commit(await sign(removeMerchantTx({ ...(await ownerOpCommon()), merchant })), "remove_merchant");
+  return { committed: true, ...(await budgetState()) };
+}
+
 const send = (res, code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
 const body = (req) => new Promise((r) => { let d = ""; req.on("data", (c) => d += c); req.on("end", () => { try { r(JSON.parse(d || "{}")); } catch { r({}); } }); });
 
@@ -222,6 +248,18 @@ const server = http.createServer(async (req, res) => {
       const p = await body(req); const amt = parseInt(p.amount);
       if (!(amt > 0)) return send(res, 400, { error: "amount must be a positive integer" });
       return send(res, 200, await doPay({ amount: amt, memo: p.memo }));
+    }
+    // Owner governance (owner-badge gated, owner-signed) — the dApp reaches these only via the bridge.
+    if (req.method === "POST" && url.pathname === "/api/limits") {
+      const p = await body(req); const perTxCap = String(p.perTxCap), dailyCap = String(p.dailyCap);
+      if (!/^\d+$/.test(perTxCap) || !/^\d+$/.test(dailyCap) || BigInt(dailyCap) < BigInt(perTxCap))
+        return send(res, 400, { error: "perTxCap/dailyCap must be positive integers with daily >= perTx" });
+      return send(res, 200, await doSetLimits({ perTxCap, dailyCap }));
+    }
+    if (req.method === "POST" && (url.pathname === "/api/merchant/add" || url.pathname === "/api/merchant/remove")) {
+      const p = await body(req); const merchant = String(p.merchant || "");
+      if (!merchant.startsWith("component_")) return send(res, 400, { error: "merchant must be a component_ address" });
+      return send(res, 200, url.pathname.endsWith("/add") ? await doAddMerchant({ merchant }) : await doRemoveMerchant({ merchant }));
     }
 
     // --- relay: the dApp enqueues (CORS-allowed), the wallet drains + answers (same origin) ---
