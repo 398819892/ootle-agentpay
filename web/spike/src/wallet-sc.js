@@ -33,7 +33,9 @@ const walletOf = () => SecretKeyWallet.fromSecretKey(fromHex(unlocked.owner), NE
 const PANELS = ["pOnboard", "pCreate", "pRestore", "pSetPass", "pUnlock", "pMain"];
 function show(panel) {
   for (const p of PANELS) $(p).hidden = p !== panel;
+  $("btnLock").hidden = panel !== "pMain"; // the header lock only makes sense once unlocked
 }
+const shortAddr = (a) => (a && a.length > 20) ? a.slice(0, 10) + "…" + a.slice(-6) : (a || "");
 
 // in-memory, cleared on lock
 let pending = null; // { owner: Uint8Array, view: Uint8Array } awaiting a passphrase
@@ -163,31 +165,40 @@ async function enterMain() {
   $("sendErr").textContent = "";
   $("sendOk").textContent = "";
   $("recvView").hidden = true;
+  // the fund action button back to its resting state (busy state set by its handler)
+  $("btnFund").disabled = false;
+  $("fundLabel").textContent = "充值";
   if (account) {
     // an on-chain account (imported / funded): show the component address + live balance
-    $("addrLabel").textContent = "账户";
-    $("mainAddr").textContent = account;
-    $("fundBlock").hidden = true;
+    $("addrLabel").textContent = "账户余额(链上读取)";
+    setAddress(account);
     $("balBlock").hidden = false;
-    $("recvBlock").hidden = false; // an on-chain account can receive
-    $("sendBlock").hidden = !INDEXER; // sending needs the indexer to resolve inputs + submit
+    $("btnRecvOpen").hidden = false;         // an on-chain account can receive
+    $("btnSendOpen").hidden = false;
+    $("btnSendOpen").disabled = !INDEXER;    // sending needs the indexer to resolve inputs + submit
+    $("btnFund").hidden = true;              // already has an account
     $("actBlock").hidden = false;
     renderActivity(account);
     await refreshBalance(account);
   } else {
     // a fresh self-custody key with no on-chain account yet: show the derived key address, offer funding
-    $("addrLabel").textContent = "密钥地址(未充值,链上尚无账户)";
+    $("addrLabel").textContent = "未充值 · 链上尚无账户";
     $("balBlock").hidden = true;
-    $("recvBlock").hidden = true; // nothing to receive into until an account exists
-    $("sendBlock").hidden = true; // nothing to send until an account exists
+    $("tokBal").textContent = "—";
+    $("btnRecvOpen").hidden = true;          // nothing to receive into until an account exists
+    $("btnSendOpen").hidden = true;          // nothing to send until an account exists
+    $("btnFund").hidden = !INDEXER;          // funding needs the localnet indexer/faucet
     $("actBlock").hidden = true;
-    $("mainAddr").textContent = "派生中…";
-    try { $("mainAddr").textContent = await addressOf(fromHex(unlocked.owner), fromHex(unlocked.view)); }
-    catch (e) { $("mainAddr").textContent = "地址派生失败: " + (e?.message || e); }
-    $("btnFund").disabled = false;
-    $("btnFund").textContent = "创建账户并领取测试币(localnet)";
-    $("fundBlock").hidden = !INDEXER; // funding needs the localnet indexer/faucet
+    setAddress("派生中…");
+    try { setAddress(await addressOf(fromHex(unlocked.owner), fromHex(unlocked.view))); }
+    catch (e) { setAddress("地址派生失败: " + (e?.message || e)); }
   }
+}
+
+// the full address lives in #mainAddr (used by copy + QR); the hero shows a short, copyable chip
+function setAddress(addr) {
+  $("mainAddr").textContent = addr;
+  $("addrShort").textContent = /^(otl_|component_)/.test(addr) ? shortAddr(addr) : addr;
 }
 
 // --- activity: this wallet's OWN fund/send actions, recorded locally (keyed by account) -----------
@@ -211,36 +222,40 @@ function ago(t) {
 function renderActivity(account) {
   const list = loadActivity().filter((e) => e.account === account);
   const box = $("actList");
-  if (!list.length) { box.innerHTML = '<p class="mut" style="font-size:12px">暂无记录。</p>'; return; }
+  if (!list.length) { box.innerHTML = '<div class="empty">暂无记录。</div>'; return; }
   box.innerHTML = list.map((e) => {
     const tx = e.txId ? String(e.txId).slice(0, 10) + "…" : "";
     const when = ago(e.t);
     if (e.kind === "send") {
-      const to = e.to ? e.to.slice(0, 14) + "…" : "";
-      return `<div class="act"><div><div class="k">发送</div><div class="m">→ ${to} · ${tx}</div></div>`
-        + `<div style="text-align:right"><div class="amt">−${groupNum(e.amount)} XTR</div><div class="m">${when}</div></div></div>`;
+      const to = e.to ? shortAddr(e.to) : "";
+      return `<div class="arow"><div class="aic out">↑</div>`
+        + `<div><div class="atitle">发送</div><div class="asub">→ ${to} · ${tx} · ${when}</div></div>`
+        + `<div class="aamt">−${groupNum(e.amount)} XTR</div></div>`;
     }
-    return `<div class="act"><div><div class="k">充值领取</div><div class="m">${tx}</div></div>`
-      + `<div style="text-align:right"><div class="amt mut">领取测试币</div><div class="m">${when}</div></div></div>`;
+    return `<div class="arow"><div class="aic in">↓</div>`
+      + `<div><div class="atitle">充值领取</div><div class="asub">${tx} · ${when}</div></div>`
+      + `<div class="aamt faint">测试币</div></div>`;
   }).join("");
 }
 
 async function refreshBalance(account) {
   $("balNum").textContent = "…";
+  $("tokBal").textContent = "…";
   await ensureIndexer();
-  if (!INDEXER) { $("balNum").textContent = "—"; return; }
+  if (!INDEXER) { $("balNum").textContent = "—"; $("tokBal").textContent = "—"; return; }
   try {
     const bal = await balanceOf(await indexer(), account);
-    $("balNum").textContent = groupNum(bal.toString());
-  } catch (e) { $("balNum").textContent = "读取失败"; console.warn("balance read:", e); }
+    const g = groupNum(bal.toString());
+    $("balNum").textContent = g;
+    $("tokBal").textContent = g;
+  } catch (e) { $("balNum").textContent = "读取失败"; $("tokBal").textContent = "—"; console.warn("balance read:", e); }
 }
 
 // create + fund the account on localnet, signed in the browser by the user's own key
 $("btnFund").onclick = async () => {
   $("fundErr").textContent = "";
   $("btnFund").disabled = true;
-  const prev = $("btnFund").textContent;
-  $("btnFund").textContent = "创建中…(约 10–30 秒)";
+  $("fundLabel").textContent = "创建中…";
   try {
     await ensureIndexer();
     if (!INDEXER) throw new Error("无法连接本地索引器");
@@ -254,7 +269,7 @@ $("btnFund").onclick = async () => {
   } catch (e) {
     $("fundErr").textContent = "创建失败: " + (e?.reason || e?.message || e);
     $("btnFund").disabled = false;
-    $("btnFund").textContent = prev;
+    $("fundLabel").textContent = "充值";
   }
 };
 // --- receive: a scannable QR of the account address (vendored global `qrcode`, same as classic) ---
@@ -320,9 +335,13 @@ $("btnSendDo").onclick = async () => {
     $("btnSendDo").textContent = prev;
   }
 };
-$("btnCopy").onclick = async () => {
-  try { await navigator.clipboard.writeText($("mainAddr").textContent); $("btnCopy").textContent = "已复制"; setTimeout(() => ($("btnCopy").textContent = "复制地址"), 1200); } catch {}
-};
+// copy the full address from either the hero chip or the token-row address box
+async function copyAddress(el) {
+  const prev = $("addrShort").textContent;
+  try { await navigator.clipboard.writeText($("mainAddr").textContent); $("addrShort").textContent = "已复制 ✓"; setTimeout(() => ($("addrShort").textContent = prev), 1200); } catch {}
+}
+$("addrChip").onclick = copyAddress;
+$("mainAddr").onclick = copyAddress;
 $("btnLock").onclick = () => { unlocked = null; $("unlockPass").value = ""; $("unlockErr").textContent = ""; show("pUnlock"); };
 
 $("btnShowPhrase").onclick = () => { $("phraseReveal").hidden = false; $("revealErr").textContent = ""; $("revealPass").focus(); };
