@@ -145,13 +145,32 @@
   .recv-net.main{color:var(--warn);background:#fff6e6;border-color:#f0d49a;} .recv-net.main .d{background:var(--warn);}
   .recv-warn{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;line-height:1.55;color:#8a5a00;background:#fff8ed;border:1px solid #f0dcae;border-radius:11px;padding:10px 12px;}
   .recv-warn .wi{flex-shrink:0;font-size:13px;line-height:1.3;}
+
+  /* ---- network tones + mismatch banner + settings + lock ---- */
+  .chipbtn .dot.warn{background:var(--warn);box-shadow:0 0 0 3px #fff2d6;}
+  .chipbtn .dot.bad{background:var(--bad);box-shadow:0 0 0 3px var(--bad-bg);}
+  .chipbtn .dot.muted{background:var(--faint);box-shadow:0 0 0 3px var(--surface-3);}
+  .mismatch{display:flex;gap:9px;align-items:center;font-size:12px;line-height:1.5;color:#8a5a00;background:#fff8ed;border:1px solid #f0dcae;border-radius:11px;padding:10px 12px;}
+  .mismatch.bad{color:var(--bad);background:var(--bad-bg);border-color:#f3c2c7;}
+  .mismatch .wi{flex-shrink:0;} .mismatch .mtext{min-width:0;} .mismatch b{font-weight:700;}
+  .mismatch .sw{margin-left:auto;border:1px solid currentColor;background:transparent;color:inherit;border-radius:999px;padding:4px 11px;font-size:11px;font-weight:600;flex-shrink:0;}
+  .menu .mi .tag{margin-left:auto;font-size:10px;font-weight:700;padding:1px 7px;border-radius:999px;}
+  .menu .mi .tag.ok{color:#1c6b30;background:var(--good-bg);} .menu .mi .tag.real{color:var(--bad);background:var(--bad-bg);}
+  .menu .mi .tag+.r{margin-left:8px;}
+  .set-grp{font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;padding:2px 2px 4px;}
+  .set-row{display:flex;align-items:center;gap:10px;background:var(--surface-2);border:1px solid var(--border-soft);border-radius:11px;padding:11px 12px;width:100%;text-align:left;}
+  button.set-row{cursor:pointer;} button.set-row:hover{border-color:var(--border);}
+  .set-row .sk{font-size:12.5px;color:var(--fg);} .set-row .sv{margin-left:auto;font-size:12px;font-weight:600;font-family:var(--mono);color:var(--muted);text-align:right;word-break:break-all;max-width:62%;}
+  .set-row .sv.act{color:var(--blue);} .set-row.danger .sk{color:var(--bad);}
+  .lockscreen{position:absolute;inset:0;z-index:55;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:15px;padding:24px;text-align:center;}
+  .lockscreen .ava{width:58px;height:58px;} .lockscreen h2{font-size:17px;} .lockscreen p{font-size:12.5px;color:var(--muted);max-width:250px;line-height:1.6;margin:0;}
   [hidden]{display:none!important;}
 </style>
 </head>
 <body>
 <div class="app">
   <header>
-    <button class="chipbtn" id="netBtn"><span class="dot"></span><span id="netName">Ootle Localnet</span><span class="car">▾</span></button>
+    <button class="chipbtn" id="netBtn"><span class="dot" id="netDot"></span><span id="netName">Ootle Localnet</span><span class="car">▾</span></button>
     <button class="chipbtn acctsel" id="acctBtn"><span class="ava xs"></span><span class="acctname" id="acctNameTop" data-i18n="acctName">账户 1</span><span class="car">▾</span></button>
     <button class="langbtn" id="langBtn">EN</button>
     <button class="iconbtn" id="menuBtn">⋮</button>
@@ -175,6 +194,7 @@
     </div>
 
     <div class="wrap">
+      <div class="mismatch" id="mmBanner" hidden></div>
       <div class="link" id="linkRow"><span class="d"></span><span id="linkText" data-i18n="noLink">尚无 dApp 连接</span></div>
 
       <div id="tab-tokens" style="display:flex;flex-direction:column;gap:12px">
@@ -220,10 +240,23 @@
     <div class="sheet-hd"><h2 data-i18n="receiveTitle">接收</h2><button class="iconbtn" data-close="sheetReceive">✕</button></div>
     <div class="sheet-bd" id="receiveBody"></div>
   </div>
+  <!-- settings sheet -->
+  <div class="sheet" id="sheetSettings" hidden>
+    <div class="sheet-hd"><h2 data-i18n="set_title">设置</h2><button class="iconbtn" data-close="sheetSettings">✕</button></div>
+    <div class="sheet-bd" id="settingsBody"></div>
+  </div>
   <!-- menus -->
   <div class="scrim2" id="menuScrim" hidden></div>
   <div class="menu" id="netMenu" hidden></div>
   <div class="menu" id="acctMenu" hidden></div>
+
+  <!-- lock screen (privacy screen lock; does not encrypt the key) -->
+  <div class="lockscreen" id="lockScreen" hidden>
+    <div class="ava lg"></div>
+    <h2 data-i18n="lock_title">钱包已锁定</h2>
+    <p data-i18n="lock_body"></p>
+    <button class="btn" id="unlockBtn" data-i18n="lock_unlock">解锁</button>
+  </div>
 </div>
 
 <!-- Vendored QR generator (Kazuhiko Arase, MIT) — real scannable receive QR, no external CDN. -->
@@ -250,7 +283,14 @@
       yourAddr:"你的收款地址", scanHint:"让付款方扫码,或复制地址",
       onlyOotle:"只向此地址转入 Ootle L2 上的 XTR。转错网络或转入其他资产将无法找回。",
       netMenuTitle:"网络", netLocal:"Ootle Localnet", netMain:"Ootle 主网(即将)", netTest:"Ootle 测试网(即将)",
-      acctMenuTitle:"账户", copyAddr:"复制地址", sites:"已连接的网站", noSites:"无", disconnect:"点击断开连接", disconnected:"已断开", settings:"设置(演示)", lock:"锁定(演示)", explorer:"在浏览器中查看",
+      acctMenuTitle:"账户", copyAddr:"复制地址", sites:"已连接的网站", noSites:"无", disconnect:"点击断开连接", disconnected:"已断开", settings:"设置", lock:"锁定", explorer:"在浏览器中查看",
+      net_localnet:"Ootle Localnet", net_testnet:"Ootle 测试网", net_mainnet:"Ootle 主网", netConnectedTag:"已连接", netRealTag:"真币",
+      mm_not_conn:"未连接到", mm_current:"当前连接", mm_switch:"切回", mm_mainnet:"主网:真实资金,务必核对地址与网络。",
+      set_title:"设置", set_g_network:"网络", set_g_account:"账户", set_g_appearance:"外观", set_g_security:"安全", set_g_sites:"已连接的网站",
+      set_connected_net:"已连接网络", set_node:"节点", set_acct_name:"账户名称", set_rename:"重命名", set_address:"地址", set_lang_k:"语言",
+      set_lock:"锁定钱包", set_about:"关于 · 非托管", set_about_body:"这是一个非托管钱包:私钥留在本机,链上的每一步都要你亲自批准并签名,后端不替你动用资金。", set_none:"无", set_disconnect:"断开",
+      rename_ph:"输入账户名称", rename_save:"保存", rename_cancel:"取消",
+      lock_title:"钱包已锁定", lock_body:"点击解锁以查看余额并继续操作。这是屏幕隐私锁,并不加密你的私钥。", lock_unlock:"解锁",
       connTitle:"连接请求", connMsg:"这个 dApp 想连接你的钱包,读取你的账户地址。它不会因此获得花钱的权限 —— 每笔支付仍需你单独批准。",
       approve:"批准付款", requests:"请求支付", from:"来自", chkWl:"收款方在 owner 白名单内", chkPer:"未超单笔上限", chkDay:"未超每日上限",
       mOk:"批准即由钱包签名并提交;额度由链上强制。", mBad:"链上会拒绝这笔付款 —— 手续费入账、已花不变。dApp 收到拒绝。",
@@ -274,7 +314,14 @@
       yourAddr:"Your receiving address", scanHint:"Have the payer scan the code, or copy the address",
       onlyOotle:"Only send Ootle L2 XTR to this address. Funds sent on the wrong network, or other assets, can't be recovered.",
       netMenuTitle:"Network", netLocal:"Ootle Localnet", netMain:"Ootle Mainnet (soon)", netTest:"Ootle Testnet (soon)",
-      acctMenuTitle:"Account", copyAddr:"Copy address", sites:"Connected sites", noSites:"none", disconnect:"Tap to disconnect", disconnected:"Disconnected", settings:"Settings (demo)", lock:"Lock (demo)", explorer:"View in explorer",
+      acctMenuTitle:"Account", copyAddr:"Copy address", sites:"Connected sites", noSites:"none", disconnect:"Tap to disconnect", disconnected:"Disconnected", settings:"Settings", lock:"Lock", explorer:"View in explorer",
+      net_localnet:"Ootle Localnet", net_testnet:"Ootle Testnet", net_mainnet:"Ootle Mainnet", netConnectedTag:"connected", netRealTag:"real funds",
+      mm_not_conn:"Not connected to", mm_current:"Connected to", mm_switch:"Switch back", mm_mainnet:"Mainnet: real funds — double-check the address and network.",
+      set_title:"Settings", set_g_network:"Network", set_g_account:"Account", set_g_appearance:"Appearance", set_g_security:"Security", set_g_sites:"Connected sites",
+      set_connected_net:"Connected network", set_node:"Node", set_acct_name:"Account name", set_rename:"Rename", set_address:"Address", set_lang_k:"Language",
+      set_lock:"Lock wallet", set_about:"About · non-custodial", set_about_body:"This is a non-custodial wallet: the private key stays on this device, every on-chain step needs your own approval and signature, and the backend never moves funds for you.", set_none:"none", set_disconnect:"Disconnect",
+      rename_ph:"Enter an account name", rename_save:"Save", rename_cancel:"Cancel",
+      lock_title:"Wallet locked", lock_body:"Tap to unlock to see balances and continue. This is a privacy screen lock; it does not encrypt your key.", lock_unlock:"Unlock",
       connTitle:"Connection request", connMsg:"This dApp wants to connect to your wallet and read your account address. That does not let it spend — every payment still needs your separate approval.",
       approve:"Approve payment", requests:"requests", from:"from", chkWl:"Payee on owner whitelist", chkPer:"Within per-transaction cap", chkDay:"Within daily cap",
       mOk:"Approve to sign and submit; the chain enforces the caps.", mBad:"The chain will reject this pay — fee commits, spent stays. The dApp gets a decline.",
@@ -298,6 +345,22 @@
   const short=(a)=>!a?"—":a.slice(0,a.indexOf("_")+1)+a.slice(a.indexOf("_")+1,a.indexOf("_")+9)+"…"+a.slice(-6);
   const esc=(x)=>String(x).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
   async function copyText(s){try{await navigator.clipboard.writeText(s);return true;}catch(e){try{const ta=document.createElement("textarea");ta.value=s;document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();return true;}catch{return false;}}}
+
+  // ---- network context + account label (client-side; the live engine is pinned to ST.network) ----
+  // The engine connects to ONE network (ST.network). The user may SELECT another to prepare for it, but
+  // we never show this network's address under another network's badge — selecting an unconnected network
+  // puts the wallet into a clear, safe "not connected here" state instead of faking funds on it.
+  const NET_META={localnet:{tone:"good"},testnet:{tone:"muted"},mainnet:{tone:"bad",warn:true}};
+  function netKey(n){n=String(n||"").toLowerCase();if(n.indexOf("main")>=0)return "mainnet";if(n.indexOf("test")>=0)return "testnet";return "localnet";}
+  let selectedNet=null;try{const s=localStorage.getItem("ap-net");if(s==="localnet"||s==="testnet"||s==="mainnet")selectedNet=s;}catch{}
+  let acctLabel=null;try{const s=localStorage.getItem("ap-acct-label");if(s)acctLabel=s;}catch{}
+  let locked=false;
+  function connectedNet(){return netKey(ST?ST.network:"localnet");}
+  function activeNet(){return selectedNet||connectedNet();}
+  function netMismatch(){return!!selectedNet&&selectedNet!==connectedNet();}
+  function acctName(){return acctLabel||t("acctName");}
+  function netLabel(k){return t("net_"+k);}
+  function setSelectedNet(k){selectedNet=(k===connectedNet())?null:k;try{selectedNet?localStorage.setItem("ap-net",selectedNet):localStorage.removeItem("ap-net");}catch{}closeMenus();renderNet();}
 
   const logEl=$("log");
   function log(cls,msg){const tm=new Date().toLocaleTimeString("en-US",{hour12:false});const ln=document.createElement("div");ln.className="ln";const s=document.createElement("span");s.className="t";s.textContent=tm;const m=document.createElement("span");m.className=cls;m.textContent=msg;ln.append(s,m);logEl.appendChild(ln);logEl.scrollTop=logEl.scrollHeight;while(logEl.children.length>80)logEl.removeChild(logEl.firstChild);}
@@ -341,9 +404,67 @@
     setLinked(s.linkedOrigin||null); // the link lives on the server, so it survives a wallet reload
     try{const a=await api("/api/account");renderAccount(a.balance);}catch(e){}
     lastRefresh=Date.now();
+    renderNet();
     return s;
   }
   function setLinked(o){linkedOrigin=o;const row=$("linkRow");row.classList.toggle("on",!!o);$("linkText").innerHTML="";if(o){const s=document.createElement("span");s.textContent=t("linked")+" · ";const b=document.createElement("b");b.textContent=o;$("linkText").append(s,b);}else{$("linkText").textContent=t("noLink");}}
+
+  // Reflect the ACTIVE (selected-or-connected) network across the header chip, account name, the mismatch
+  // banner, and the actions. A selected network the engine is NOT connected to becomes a clear, safe
+  // "not connected here" state: balances hidden, send/receive off, no address shown under a wrong badge.
+  function renderNet(){
+    const act=activeNet(), conn=connectedNet(), meta=NET_META[act]||{}, mism=netMismatch();
+    const nd=$("netDot"); if(nd)nd.className="dot "+(meta.tone||"good");
+    $("netName").textContent=netLabel(act);
+    $("acctNameTop").textContent=acctName();
+    const mb=$("mmBanner");
+    if(mism){
+      const bad=act==="mainnet";
+      mb.className="mismatch"+(bad?" bad":"");
+      mb.innerHTML='<span class="wi">⚠</span><span class="mtext">'+esc(t("mm_not_conn"))+' <b>'+esc(netLabel(act))+'</b> · '+esc(t("mm_current"))+' '+esc(netLabel(conn))+(bad?'<br>'+esc(t("mm_mainnet")):'')+'</span><button class="sw" id="mmSwitch">'+esc(t("mm_switch"))+'</button>';
+      mb.hidden=false; const sw=$("mmSwitch"); if(sw)sw.onclick=()=>setSelectedNet(conn);
+    } else mb.hidden=true;
+    $("sendBtn").disabled=mism; $("receiveBtn").disabled=mism;
+    const tt=$("tab-tokens"); if(tt){tt.style.opacity=mism?"0.4":"";tt.style.pointerEvents=mism?"none":"";}
+    if(mism){$("bal").textContent="•••";$("tokBal").textContent="•••";} else renderAccount(OWNER);
+  }
+  function toggleLang(){L=(L==="zh")?"en":"zh";try{localStorage.setItem("ap-lang",L);}catch{}applyLang();setLinked(linkedOrigin);renderActivity();renderNet();}
+
+  // ---- settings sheet (real; no "demo") ----
+  function renderSettings(){
+    const body=$("settingsBody"); const a=ST?ST.account:""; const conn=connectedNet();
+    body.innerHTML=
+      '<div class="set-grp">'+esc(t("set_g_network"))+'</div>'
+      +'<div class="set-row"><span class="sk">'+esc(t("set_connected_net"))+'</span><span class="sv act">'+esc(netLabel(conn))+'</span></div>'
+      +'<div class="set-row"><span class="sk">'+esc(t("set_node"))+'</span><span class="sv">'+esc((ST&&ST.indexer)||"—")+'</span></div>'
+      +'<div class="set-grp">'+esc(t("set_g_account"))+'</div>'
+      +'<button class="set-row" id="stRename"><span class="sk">'+esc(t("set_acct_name"))+'</span><span class="sv act">'+esc(acctName())+' ✎</span></button>'
+      +'<button class="set-row" id="stCopy"><span class="sk">'+esc(t("set_address"))+'</span><span class="sv">'+esc(short(a))+' ⧉</span></button>'
+      +'<div class="set-grp">'+esc(t("set_g_appearance"))+'</div>'
+      +'<button class="set-row" id="stLang"><span class="sk">'+esc(t("set_lang_k"))+'</span><span class="sv act">'+(L==="zh"?"中文":"English")+'</span></button>'
+      +'<div class="set-grp">'+esc(t("set_g_sites"))+'</div>'
+      +(linkedOrigin?'<button class="set-row danger" id="stDisc"><span class="sk" style="word-break:break-all">'+esc(linkedOrigin)+'</span><span class="sv act">'+esc(t("set_disconnect"))+'</span></button>':'<div class="set-row"><span class="sk dim">'+esc(t("set_none"))+'</span></div>')
+      +'<div class="set-grp">'+esc(t("set_g_security"))+'</div>'
+      +'<button class="set-row" id="stLock"><span class="sk">'+esc(t("set_lock"))+'</span><span class="sv act">→</span></button>'
+      +'<div class="set-row" style="flex-direction:column;align-items:flex-start;gap:5px"><span class="sk">'+esc(t("set_about"))+'</span><span class="sk dim" style="font-weight:400;line-height:1.55">'+esc(t("set_about_body"))+'</span></div>';
+    $("stCopy").onclick=async()=>{await copyText(a);const sv=$("stCopy").querySelector(".sv");sv.textContent=t("copied");setTimeout(()=>sv.textContent=short(a)+" ⧉",1200);};
+    $("stLang").onclick=()=>{toggleLang();renderSettings();};
+    $("stLock").onclick=()=>{closeSheet("sheetSettings");lockWallet();};
+    $("stRename").onclick=renameAccount;
+    const dc=$("stDisc"); if(dc)dc.onclick=async()=>{const o=linkedOrigin;try{await fetch("/bridge/unlink",{method:"POST"});}catch(e){}setLinked(null);log("res",t("disconnected")+" · "+o);renderSettings();};
+  }
+  function openSettings(){renderSettings();openSheet("sheetSettings");}
+  function renameAccount(){
+    const cur=acctName();
+    const html='<div class="modal"><div class="top"><h3>'+esc(t("set_rename"))+'</h3></div><div class="mb"><input id="rnI" value="'+esc(cur)+'" placeholder="'+esc(t("rename_ph"))+'" maxlength="24" style="width:100%;border:1px solid var(--border);border-radius:10px;padding:11px 13px;font:inherit;font-size:16px;background:var(--surface);color:var(--fg)"></div><div class="acts"><button class="btn sec" id="rnC">'+esc(t("rename_cancel"))+'</button><button class="btn" id="rnS">'+esc(t("rename_save"))+'</button></div></div>';
+    modal(html,(sc,done)=>{const inp=sc.querySelector("#rnI");setTimeout(()=>{inp.focus();inp.select();},30);sc.querySelector("#rnC").onclick=()=>done(false);sc.querySelector("#rnS").onclick=()=>done((inp.value||"").trim());inp.addEventListener("keydown",e=>{if(e.key==="Enter")done((inp.value||"").trim());});}).then(v=>{
+      if(v===false)return;
+      acctLabel=v||null; try{v?localStorage.setItem("ap-acct-label",v):localStorage.removeItem("ap-acct-label");}catch{}
+      $("acctNameTop").textContent=acctName(); renderSettings();
+    });
+  }
+  function lockWallet(){locked=true;closeMenus();["sheetSend","sheetReceive","sheetSettings"].forEach(closeSheet);$("lockScreen").hidden=false;}
+  function unlockWallet(){locked=false;$("lockScreen").hidden=true;}
 
   // ---- tabs ----
   document.querySelector(".tabs").addEventListener("click",(e)=>{const b=e.target.closest(".tab");if(!b)return;document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===b));const tab=b.dataset.tab;$("tab-tokens").style.display=tab==="tokens"?"flex":"none";$("tab-activity").hidden=tab!=="activity";$("tab-activity").style.display=tab==="activity"?"flex":"none";});
@@ -510,12 +631,12 @@
     return foxSVG(80);
   }
   function renderReceive(){
-    const a=ST?ST.account:""; const net=ST?ST.network:""; const mainnet=/main/i.test(net);
+    const a=ST?ST.account:""; const ck=connectedNet(); const mainnet=ck==="mainnet";
     const body=$("receiveBody");
     body.innerHTML=
       '<div class="recv-acct"><span class="ava lg"></span>'
-        +'<div class="acctname" style="font-weight:600">'+esc(t("acctName"))+'</div>'
-        +'<span class="recv-net'+(mainnet?" main":"")+'"><span class="d"></span>'+esc(net||"—")+'</span></div>'
+        +'<div class="acctname" style="font-weight:600">'+esc(acctName())+'</div>'
+        +'<span class="recv-net'+(mainnet?" main":"")+'"><span class="d"></span>'+esc(netLabel(ck))+'</span></div>'
       +'<div class="qr">'+qrSvgFor(a)+'</div>'
       +'<div class="lab center" style="text-align:center">'+esc(t("scanHint"))+'</div>'
       +'<div class="field"><div class="lab">'+esc(t("yourAddr"))+'</div><div class="bigaddr">'+esc(a)+'</div></div>'
@@ -528,20 +649,26 @@
   // ---- menus ----
   function openMenu(which,anchor){
     const m=$(which); const other=which==="netMenu"?"acctMenu":"netMenu"; $(other).hidden=true;
-    if(which==="netMenu"){m.innerHTML='<div class="mt">'+esc(t("netMenuTitle"))+'</div>'
-      +'<button class="mi"><span class="ico" style="background:var(--good)"></span>'+esc(t("netLocal"))+'<span class="r">✓</span></button>'
-      +'<button class="mi dim"><span class="ico" style="background:var(--faint)"></span>'+esc(t("netTest"))+'</button>'
-      +'<button class="mi dim"><span class="ico" style="background:var(--faint)"></span>'+esc(t("netMain"))+'</button>';}
+    if(which==="netMenu"){const act=activeNet(),conn=connectedNet();
+      m.innerHTML='<div class="mt">'+esc(t("netMenuTitle"))+'</div>'+["localnet","testnet","mainnet"].map(k=>{
+        const meta=NET_META[k]||{}, col=meta.tone==="good"?"good":meta.tone==="bad"?"bad":"faint";
+        return '<button class="mi" data-net="'+k+'"><span class="ico" style="background:var(--'+col+')"></span>'+esc(netLabel(k))
+          +(k===conn?'<span class="tag ok">'+esc(t("netConnectedTag"))+'</span>':(meta.warn?'<span class="tag real">'+esc(t("netRealTag"))+'</span>':''))
+          +(k===act?'<span class="r">✓</span>':'')+'</button>';
+      }).join("");}
     else{const a=ST?ST.account:""; m.innerHTML='<div class="mt">'+esc(t("acctMenuTitle"))+'</div>'
-      +'<button class="mi" id="miCopy"><span class="ava xs"></span><span class="acctname">'+esc(t("acctName"))+'</span><span class="r mono" style="color:var(--muted);font-size:11px">'+esc(short(a))+'</span></button>'
+      +'<button class="mi" id="miCopy"><span class="ava xs"></span><span class="acctname">'+esc(acctName())+'</span><span class="r mono" style="color:var(--muted);font-size:11px">'+esc(short(a))+'</span></button>'
       +'<div class="sep"></div><div class="mt">'+esc(t("sites"))+'</div><button class="mi'+(linkedOrigin?'':' dim')+'" id="miSite"'+(linkedOrigin?' title="'+esc(t("disconnect"))+'"':'')+'>'+esc(linkedOrigin||t("noSites"))+(linkedOrigin?'<span class="r" style="color:var(--muted);font-size:11px">✕</span>':'')+'</button>'
-      +'<div class="sep"></div><button class="mi dim">'+esc(t("settings"))+'</button><button class="mi dim">'+esc(t("lock"))+'</button>';}
+      +'<div class="sep"></div><button class="mi" id="miSettings">'+esc(t("settings"))+'</button><button class="mi" id="miLock">'+esc(t("lock"))+'</button>';}
     m.hidden=false; $("menuScrim").hidden=false;
     const r=anchor.getBoundingClientRect(); const ar=$("app")?0:0;
     m.style.top=(anchor.offsetParent?anchor.offsetTop+anchor.offsetHeight+6:r.bottom+6)+"px";
     m.style.left=Math.max(8,Math.min(r.left, (document.querySelector(".app").clientWidth)-m.offsetWidth-8))+"px";
+    if(which==="netMenu"){m.querySelectorAll("[data-net]").forEach(b=>b.onclick=()=>setSelectedNet(b.dataset.net));}
     if(which==="acctMenu"){const c=$("miCopy");if(c)c.onclick=async()=>{await copyText(ST?ST.account:"");closeMenus();};
-      const si=$("miSite");if(si&&linkedOrigin)si.onclick=async()=>{const o=linkedOrigin;try{await fetch("/bridge/unlink",{method:"POST"});}catch(e){}setLinked(null);log("res",t("disconnected")+" · "+o);closeMenus();};}
+      const si=$("miSite");if(si&&linkedOrigin)si.onclick=async()=>{const o=linkedOrigin;try{await fetch("/bridge/unlink",{method:"POST"});}catch(e){}setLinked(null);log("res",t("disconnected")+" · "+o);closeMenus();};
+      const ms=$("miSettings");if(ms)ms.onclick=()=>{closeMenus();openSettings();};
+      const ml=$("miLock");if(ml)ml.onclick=()=>{closeMenus();lockWallet();};}
   }
   function closeMenus(){$("netMenu").hidden=true;$("acctMenu").hidden=true;$("menuScrim").hidden=true;}
   $("menuScrim").onclick=closeMenus;
@@ -551,11 +678,11 @@
   $("acctAddr").onclick=async()=>{const ok=await copyText(ST?ST.account:"");const ci=$("acctAddr").querySelector(".ci");if(ci){ci.textContent="✓";setTimeout(()=>ci.textContent="⧉",1200);}};
 
   $("openBtn").onclick=async()=>{$("openBtn").disabled=true;try{const r=await api("/api/open","POST",{fund:5000,perTx:1000,daily:1500,epochsPerWindow:10});log("res",t("opened",short(r.address)));await refresh();}catch(e){log("rej",e.message);$("openBtn").disabled=false;}};
-  $("langBtn").onclick=()=>{L=(L==="zh")?"en":"zh";try{localStorage.setItem("ap-lang",L);}catch{};applyLang();setLinked(linkedOrigin);renderActivity();};
+  $("langBtn").onclick=toggleLang;
+  $("unlockBtn").onclick=unlockWallet;
 
   // init
-  (function initAva(){document.querySelectorAll(".ava").forEach(a=>{});})();
-  applyLang(); setLinked(null); renderActivity();
+  applyLang(); setLinked(null); renderActivity(); renderNet();
   refresh().catch(e=>log("rej",e.message));
 </script>
 </body>
