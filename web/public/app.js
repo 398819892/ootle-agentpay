@@ -76,6 +76,15 @@ function t(key, p) {
   if (p) v = String(v).replace(/\{(\w+)\}/g, (m, k) => (p[k] != null ? p[k] : m));
   return v;
 }
+// Non-custodial-aware lookup: when the deployment runs non-custodial, prefer a `${key}_nc` string if
+// one exists, else fall back to the base key. Lets the interface tell the "connect your wallet" story
+// without disturbing custodial deployments (flag off → always the base key).
+function tnc(key, p) {
+  if (S && S.nonCustodial && ((I18N[LANG] && I18N[LANG][key + "_nc"] != null) || I18N.en[key + "_nc"] != null)) {
+    return t(key + "_nc", p);
+  }
+  return t(key, p);
+}
 /** A rough wall-clock label for a count of minutes, localized. */
 function formatApprox(minutes) {
   const m = Math.max(0, Math.round(minutes));
@@ -127,6 +136,28 @@ const I18N = {
     nav_start: "Get started",
     start_sub: "First steps for a new user — from signing in to your agent's first payment.",
     start_custodial_note: "This is a hosted (custodial) console: the wallet is held and signed server-side by walletd, and the dashboard is already connected to the chain. You do not connect a wallet in the browser.",
+    /* non-custodial single-mode (S.nonCustodial) — the owner connects their :7777 AgentPay wallet */
+    start_sub_nc: "First steps — connect your AgentPay wallet, set your limits and whitelist, then make a payment. Every change is approved in your wallet.",
+    nco_note: "Non-custodial: your AgentPay wallet (:7777) holds the keys. The dashboard reads this budget from the wallet and routes every change — payments, limits, merchants, lifecycle — through the wallet for your approval; the chain enforces the caps. The backend never signs for you.",
+    nco_s1_t: "1 · Connect your AgentPay wallet",
+    nco_s1_b: "Open your AgentPay wallet (:7777) and connect it here. The dashboard then reads this budget from the wallet, and every owner action is approved there — the browser never drives a custodial signer.",
+    nco_connect_cta: "Connect wallet",
+    nco_connect_hint: "Keep your wallet (:7777) open — the connect request waits there for your approval.",
+    nco_connected: "Wallet connected · {acct}",
+    nco_not_connected: "Wallet not connected",
+    nco_s2_t: "2 · Your budget",
+    nco_s2_b: "Once connected, the overview, balances and activity all come from your wallet's budget — not a server-side copy.",
+    nco_budget_ready: "Budget loaded from your wallet",
+    nco_budget_wait: "Connect your wallet to load the budget",
+    nco_s3_t: "3 · Set limits & whitelist",
+    nco_s3_b: "In Manage set the per-transaction and daily caps; in Merchants add the payees the agent may pay. Each change pops a wallet approval and is enforced on-chain.",
+    nco_s4_t: "4 · Make a payment",
+    nco_s4_b: "Send a payment from the Pay page; your wallet approves it and the chain enforces the cap and whitelist. Receipts land on the Receipts page.",
+    meta_desc_nc: "AgentPay — a non-custodial console for on-chain, validator-enforced AI-agent spending budgets on Tari Ootle. Your wallet holds the keys and approves every change.",
+    about_body_nc: "AgentPay is a non-custodial, on-chain hard-limit wallet and gateway for AI agents. Your wallet holds the keys and approves each change; the real spending limits are enforced by the on-chain validator, which never lets anyone move funds beyond them.",
+    create_trust_title_nc: "Non-custodial, enforced on-chain.",
+    create_trust_body_nc: "You approve every change in your own wallet — the backend never holds your keys. The caps and whitelist you set here are compiled into the budget's on-chain component and enforced by the validators, not by this app.",
+    login_intro_nc: "Sign in to your AgentPay console. On-chain actions are approved in your connected wallet — the console never holds your keys.",
     start_s1_t: "1 · Sign in",
     start_s1_b: "You reach this console with the password your provider gave you — there is no self-serve sign-up. Keep that password private.",
     start_s1_done: "Signed in",
@@ -699,6 +730,28 @@ const I18N = {
     nav_start: "开始使用",
     start_sub: "新手第一步 —— 从登录到你的 AI 完成第一笔付款。",
     start_custodial_note: "这是托管式控制台:钱包由服务端的 walletd 持有并签名,面板已经连接到链。你无需在浏览器里连接钱包。",
+    /* 非托管单模式(S.nonCustodial)—— 所有者连接自己的 :7777 AgentPay 钱包 */
+    start_sub_nc: "起步几步 —— 连接你的 AgentPay 钱包、设好额度与白名单,然后发起一笔支付。每次变更都在你的钱包里批准。",
+    nco_note: "非托管:密钥由你的 AgentPay 钱包(:7777)持有。仪表盘从钱包读取这个预算,并把每一次变更 —— 付款、额度、商户、生命周期 —— 都交给钱包弹窗批准;额度由链上强制。后端不再替你签名。",
+    nco_s1_t: "1 · 连接你的 AgentPay 钱包",
+    nco_s1_b: "打开你的 AgentPay 钱包(:7777)并在此连接。连接后仪表盘从钱包读取这个预算,所有者的每一步操作都在钱包里批准 —— 浏览器不再驱动托管签名器。",
+    nco_connect_cta: "连接钱包",
+    nco_connect_hint: "请保持钱包(:7777)开着 —— 连接请求会在那里等你批准。",
+    nco_connected: "钱包已连接 · {acct}",
+    nco_not_connected: "钱包未连接",
+    nco_s2_t: "2 · 你的预算",
+    nco_s2_b: "连接之后,总览、余额和动态都来自你钱包里的这个预算,而不是服务端的副本。",
+    nco_budget_ready: "已从你的钱包载入预算",
+    nco_budget_wait: "连接钱包后载入预算",
+    nco_s3_t: "3 · 设置额度与白名单",
+    nco_s3_b: "在「管理」里设置单笔与每日上限;在「商户」里添加代理可付款的收款人。每次变更都会弹出钱包批准,并由链上强制执行。",
+    nco_s4_t: "4 · 发起支付",
+    nco_s4_b: "在「支付」页发起一笔付款;你的钱包批准,链上强制额度与白名单。回执出现在「回执」页。",
+    meta_desc_nc: "AgentPay —— 一个非托管控制台,用于管理 Tari Ootle 上由验证节点强制执行的 AI 代理链上消费预算。密钥由你的钱包持有,每次变更都经钱包批准。",
+    about_body_nc: "AgentPay 是面向 AI 代理的非托管链上硬额度钱包与网关。密钥由你的钱包持有、每次变更由你批准;真正的额度由链上验证节点强制执行,任何人都无法越过额度动用资金。",
+    create_trust_title_nc: "非托管,且由链上强制。",
+    create_trust_body_nc: "每一次变更都由你在自己的钱包里批准 —— 后端绝不持有你的密钥。你在这里设定的上限与白名单,会被编译进预算的链上组件,由验证节点强制执行,而不是靠这个应用本身。",
+    login_intro_nc: "登录你的 AgentPay 控制台。链上操作在你连接的钱包里批准 —— 控制台绝不持有你的密钥。",
     start_s1_t: "1 · 登录",
     start_s1_b: "用部署方发给你的口令进入本控制台——没有自助注册。请妥善保管这个口令。",
     start_s1_done: "已登录",
@@ -1244,7 +1297,7 @@ function applyStaticI18n() {
     document.documentElement.setAttribute("lang", LANG === "zh" ? "zh-CN" : "en");
     document.title = t("meta_title");
     const meta = document.querySelector('meta[name="description"]');
-    if (meta) meta.setAttribute("content", t("meta_desc"));
+    if (meta) meta.setAttribute("content", tnc("meta_desc"));
     const bootP = document.querySelector(".boot p");
     if (bootP) bootP.textContent = t("boot_connecting");
   } catch {
@@ -1794,7 +1847,7 @@ function viewSettings() {
           <div class="brand__mark" style="width:38px;height:38px">${icon("shield", 20)}</div>
           <div><div style="font-weight:700">AgentPay</div><div class="muted" style="font-size:13px">${esc(t("brand_sub"))}</div></div>
         </div>
-        <p class="muted" style="font-size:13.5px;line-height:1.6;margin:0">${esc(t("about_body"))}</p>
+        <p class="muted" style="font-size:13.5px;line-height:1.6;margin:0">${esc(tnc("about_body"))}</p>
       </div></div>
     </div>`
   );
@@ -2336,7 +2389,7 @@ function viewCreate() {
       <div class="stack">
         <div class="card"><div class="card__body">
           <div class="callout">${icon("lock", 18)}
-            <div><b>${esc(t("create_trust_title"))}</b> ${esc(t("create_trust_body"))}</div>
+            <div><b>${esc(tnc("create_trust_title"))}</b> ${esc(tnc("create_trust_body"))}</div>
           </div>
         </div></div>
         <div class="card">
@@ -2764,7 +2817,7 @@ function renderLogin() {
         <div class="brand__mark">${icon("shield", 22)}</div>
         <div><h1>AgentPay</h1><div class="auth__sub">${esc(t("login_sub"))}</div></div>
       </div>
-      <p class="muted" style="font-size:13.5px">${esc(t("login_intro"))}</p>
+      <p class="muted" style="font-size:13.5px">${esc(tnc("login_intro"))}</p>
       <form id="login-form" novalidate>
         <div class="field" style="margin:0">
           <label class="field__label" for="login-pw">${esc(t("password"))}</label>
@@ -2989,7 +3042,48 @@ function startNonCustodialSteps() {
   return s1 + s2 + s3 + s4 + s5;
 }
 
+// Non-custodial OWNER onboarding (single-mode): the owner connects their :7777 AgentPay wallet; the
+// dashboard then reads the budget from it and routes every owner action through it for approval. No
+// custodial/self-hosted-agent mode toggle here — this is the whole flow when S.nonCustodial is on.
+function startNonCustodialOwnerSteps() {
+  const d = S.data || {};
+  const b = d.budget || null;
+  const connected = !!(S.wallet && S.wallet.connected);
+  const acct = (S.wallet && S.wallet.account) || null;
+  const wl = b && Array.isArray(b.whitelist) ? b.whitelist.length : 0;
+  const hasBudget = connected && !!(b && b.component);
+
+  const s1status = connected
+    ? startChip("ok", "wallet", t("nco_connected", { acct: acct ? shorten(acct, 8, 5) : "—" }))
+    : startChip("warn", "plug", t("nco_not_connected"));
+  const s1extra = connected
+    ? ""
+    : `<div class="start-step__cta row row--wrap"><button class="btn btn--primary btn--sm" id="nco-connect">${icon("plug", 15)} ${esc(t("nco_connect_cta"))}</button></div><p class="start-step__body muted" style="margin-top:8px">${esc(t("nco_connect_hint"))}</p>`;
+  const s1 = startStep(1, connected, t("nco_s1_t"), t("nco_s1_b"), s1status, s1extra);
+
+  const s2status = hasBudget
+    ? startChip("ok", "check", t("nco_budget_ready"))
+    : startChip("muted", "lock", t("nco_budget_wait"));
+  const s2 = startStep(2, hasBudget, t("nco_s2_t"), t("nco_s2_b"), s2status, "");
+
+  const s3status = wl > 0 ? startChip("ok", "check", t("start_wl_n", { n: wl })) : startChip("muted", "store", t("start_wl_none"));
+  const s3 = startStep(3, wl > 0, t("nco_s3_t"), t("nco_s3_b"), s3status,
+    `<div class="start-step__cta row row--wrap"><button class="btn btn--primary btn--sm" data-nav="manage">${icon("shield", 15)} ${esc(t("start_cta_manage"))}</button><button class="btn btn--secondary btn--sm" data-nav="merchants">${icon("store", 15)} ${esc(t("start_cta_merchants"))}</button></div>`);
+
+  const s4 = startStep(4, false, t("nco_s4_t"), t("nco_s4_b"), "",
+    `<div class="start-step__cta row row--wrap"><button class="btn btn--primary btn--sm" data-nav="pay">${icon("send", 15)} ${esc(t("start_cta_pay"))}</button><button class="btn btn--secondary btn--sm" data-nav="receipts">${icon("receipt", 15)} ${esc(t("start_cta_receipts"))}</button></div>`);
+  return s1 + s2 + s3 + s4;
+}
+
 function viewStart() {
+  // Non-custodial single-mode: no custodial/self-hosted toggle — one flow, centered on the wallet.
+  if (S.nonCustodial) {
+    return (
+      pageHead(t("nav_start"), t("start_sub_nc")) +
+      `<div class="callout">${icon("info", 18)}<div>${esc(t("nco_note"))}</div></div>` +
+      `<div class="card"><div class="card__body"><ol class="start-steps">${startNonCustodialOwnerSteps()}</ol></div></div>`
+    );
+  }
   const mode = startMode();
   const seg = (m, label) =>
     `<button class="seg__btn ${mode === m ? "is-active" : ""}" data-start-mode="${m}">${esc(label)}</button>`;
@@ -3024,6 +3118,23 @@ function wireStart() {
       }
       go("start");
     }));
+
+  // Non-custodial single-mode: the "connect wallet" step enqueues window.tari.connect(); the wallet
+  // (:7777) drains + approves it, then tari#connect flips S.wallet.connected and re-renders.
+  const ncoConnect = el("nco-connect");
+  if (ncoConnect) {
+    ncoConnect.addEventListener("click", () => {
+      if (!window.tari || typeof window.tari.connect !== "function") {
+        toast("error", t("nco_connect_cta"), "window.tari ×");
+        return;
+      }
+      ncoConnect.disabled = true;
+      Promise.resolve(window.tari.connect()).catch((e) => {
+        ncoConnect.disabled = false;
+        toast("error", t("nco_connect_cta"), (e && e.message) || String(e));
+      });
+    });
+  }
 
   const issueBtn = el("nc-issue");
   if (!issueBtn) return;
@@ -4040,6 +4151,7 @@ async function boot() {
     S.authRequired = false;
     S.authed = true;
   }
+  applyStaticI18n(); // re-apply now that S.nonCustodial is known, so static chrome (meta description) picks the non-custodial copy
   if (S.authRequired && !S.authed) {
     S.booting = false;
     renderLogin();
