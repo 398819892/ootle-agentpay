@@ -29,8 +29,11 @@
       .w { font-family:ui-monospace,monospace; font-size:12px; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
       .w b { color:var(--mut); font-weight:400; margin-right:6px; user-select:none; }
       .pill { display:inline-block; padding:1px 8px; border-radius:10px; border:1px solid var(--line); color:var(--mut); font-size:11px; margin-left:6px; }
+      .qr { background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px; max-width:216px; margin:10px auto 0; }
+      .qr svg { width:100%; height:auto; display:block; }
       [hidden] { display:none !important; }
     </style>
+    <script src="/qrcode.js"></script>
   </head>
   <body>
     <div class="card">
@@ -106,6 +109,13 @@
         <div class="row">
           <button id="btnCopy" class="ghost">复制地址</button>
           <button id="btnLock" class="ghost">锁定</button>
+        </div>
+        <div id="recvBlock" hidden style="margin-top:4px">
+          <button id="btnRecvOpen" class="ghost wide">收款(二维码)</button>
+          <div id="recvView" hidden>
+            <div class="qr" id="qrBox"></div>
+            <p class="mut" style="font-size:12px;text-align:center;margin:8px 0 0">扫码或复制上面的账户地址即可向此钱包付款(仅限 Ootle L2 的 XTR)。</p>
+          </div>
         </div>
         <div id="sendBlock" hidden style="margin-top:4px">
           <button id="btnSendOpen" class="ghost wide">付款(发送 XTR)</button>

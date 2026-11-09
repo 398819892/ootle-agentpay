@@ -157,22 +157,25 @@ async function enterMain() {
   $("fundErr").textContent = "";
   await ensureIndexer();
   const account = currentAccount();
-  // reset the send form each time we (re-)enter the main view
+  // reset the send + receive forms each time we (re-)enter the main view
   $("sendForm").hidden = true;
   $("sendErr").textContent = "";
   $("sendOk").textContent = "";
+  $("recvView").hidden = true;
   if (account) {
     // an on-chain account (imported / funded): show the component address + live balance
     $("addrLabel").textContent = "账户";
     $("mainAddr").textContent = account;
     $("fundBlock").hidden = true;
     $("balBlock").hidden = false;
+    $("recvBlock").hidden = false; // an on-chain account can receive
     $("sendBlock").hidden = !INDEXER; // sending needs the indexer to resolve inputs + submit
     await refreshBalance(account);
   } else {
     // a fresh self-custody key with no on-chain account yet: show the derived key address, offer funding
     $("addrLabel").textContent = "密钥地址(未充值,链上尚无账户)";
     $("balBlock").hidden = true;
+    $("recvBlock").hidden = true; // nothing to receive into until an account exists
     $("sendBlock").hidden = true; // nothing to send until an account exists
     $("mainAddr").textContent = "派生中…";
     try { $("mainAddr").textContent = await addressOf(fromHex(unlocked.owner), fromHex(unlocked.view)); }
@@ -214,6 +217,22 @@ $("btnFund").onclick = async () => {
     $("btnFund").textContent = prev;
   }
 };
+// --- receive: a scannable QR of the account address (vendored global `qrcode`, same as classic) ---
+function qrSvgFor(addr) {
+  const q = globalThis.qrcode;
+  if (!addr || typeof q !== "function") return '<p class="mut" style="font-size:12px">二维码生成器未加载,请复制上面的地址。</p>';
+  for (const ecc of ["M", "L"]) {
+    try { const qr = q(0, ecc); qr.addData(addr); qr.make(); return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); }
+    catch { /* address too long for this ECC level; try the next */ }
+  }
+  return '<p class="mut" style="font-size:12px">地址过长,无法生成二维码,请复制上面的地址。</p>';
+}
+$("btnRecvOpen").onclick = () => {
+  const open = $("recvView").hidden;
+  if (open) $("qrBox").innerHTML = qrSvgFor(currentAccount() || $("mainAddr").textContent);
+  $("recvView").hidden = !open;
+};
+
 // --- send: owner → recipient payment, signed in the browser -------------------------------------
 $("btnSendOpen").onclick = () => {
   $("sendErr").textContent = "";
