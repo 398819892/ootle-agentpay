@@ -34,7 +34,8 @@
   }
 
   // Enqueue one request on the wallet's relay, then poll for the wallet's answer.
-  async function relayRequest(method, params) {
+  async function relayRequest(method, params, opts) {
+    const timeoutMs = (opts && opts.timeoutMs) || 180000;
     let posted;
     try {
       posted = await fetch(WALLET_ORIGIN + "/bridge/req", {
@@ -48,7 +49,7 @@
     if (!posted.ok) throw new Error("wallet relay refused the request (" + posted.status + ")");
     const { id } = await posted.json();
 
-    const deadline = Date.now() + 180000; // give the human time to approve
+    const deadline = Date.now() + timeoutMs; // default 3min to let the human approve; reads pass a short one
     while (Date.now() < deadline) {
       await sleep(700);
       let r;
@@ -94,7 +95,7 @@
     },
     request(args) {
       args = args || {};
-      return relayRequest(args.method, args.params);
+      return relayRequest(args.method, args.params, { timeoutMs: args.timeoutMs });
     },
     disconnect() { connected = false; account = null; window.dispatchEvent(new CustomEvent("tari#disconnect")); },
   };

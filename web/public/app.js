@@ -1332,6 +1332,11 @@ const S = {
   // CSRF synchronizer token for this session (from /api/session or the login response). Echoed in the
   // X-CSRF-Token header on every POST so the cookie alone is not enough to drive a state change.
   csrf: null,
+  // Non-custodial wallet link (window.tari / :7777). When connected, the budget the dashboard READS and
+  // PAYS against is the WALLET's on-chain budget (chain-enforced), not the backend's custodial one. The
+  // connect UI is wallet-connect.js; app.js only observes the link (tari#connect/#disconnect) and, when
+  // linked, overlays the wallet's budget + routes pay over the relay. See the wallet transport below.
+  wallet: { connected: false, account: null, error: null },
 };
 
 /* ---- API client ----------------------------------------------------------- */
@@ -2700,6 +2705,29 @@ function frozenBanner() {
   </div>`;
 }
 
+// Non-custodial banner: on every view, say plainly when the dashboard's budget + payments are coming
+// from the connected wallet (and warn if that wallet is linked but unreachable). Bilingual inline to
+// avoid widening the I18N table for a Phase-1 status strip.
+function walletBanner() {
+  if (!S.wallet.connected) return "";
+  const zh = (document.documentElement.lang || "zh").toLowerCase().indexOf("en") !== 0;
+  if (S.wallet.error) {
+    return `<div class="banner banner--danger" role="alert">${icon("alert", 20)}
+      <div class="banner__text"><b>${esc(zh ? "钱包未连上 " : "Wallet unreachable ")}</b>${esc(
+        zh ? "打开你的 AgentPay 钱包(:7777)并保持运行;此刻显示的是后端缓存视图。"
+           : "Open your AgentPay wallet (:7777) and keep it running; showing the backend view meanwhile.",
+      )}</div></div>`;
+  }
+  const wb = S.data && S.data._walletBacked;
+  const comp = wb && wb.component;
+  const acct = (wb && wb.account) || S.wallet.account;
+  const tail = (comp ? " · " + shorten(comp, 12, 6) : "") + (acct ? " · " + shorten(acct, 10, 6) : "");
+  return `<div class="banner" role="status">${icon("wallet", 20)}
+    <div class="banner__text"><b>${esc(zh ? "非托管 · 由你的钱包担保" : "Non-custodial · backed by your wallet")}</b>${esc(
+      (zh ? "预算与支付来自你的钱包" : "Budget & payments come from your wallet") + tail,
+    )}</div></div>`;
+}
+
 function noBudget(title, sub) {
   return (
     pageHead(title, sub) +
@@ -2830,7 +2858,7 @@ function render() {
     default:
       body = viewOverview();
   }
-  app.innerHTML = sidebar() + `<main class="main">${frozenBanner()}${body}</main>`;
+  app.innerHTML = sidebar() + `<main class="main">${frozenBanner()}${walletBanner()}${body}</main>`;
   wire();
 }
 
@@ -3241,9 +3269,78 @@ async function doCopy(btn) {
   }, 1200);
 }
 
+/* ---- non-custodial wallet transport (window.tari / :7777) ------------------
+ * When a wallet is connected, the money the dashboard shows and spends is the WALLET's on-chain budget,
+ * read + paid over the WalletConnect-style relay (the dApp holds no key). We still fetch the backend
+ * /api/state for the page's full shape (agents, ledger, tx health — Phase 3 moves those too), but the
+ * budget's caps/spent/treasury/whitelist and the component identity are OVERLAID from the wallet, and
+ * `pay` is routed through window.tari so the wallet approves + signs and the chain enforces the caps. */
+function walletProvider() { return (typeof window !== "undefined" && window.tari) || null; }
+
+async function walletReadBudget(timeoutMs = 9000) {
+  const tari = walletProvider();
+  if (!tari) throw new Error("window.tari not available");
+  // A READ over the relay: the wallet auto-resolves it (no approval) with the budget it is displaying.
+  return tari.request({ method: "tari_getBudget", timeoutMs });
+}
+
+// Overlay the wallet's authoritative budget onto a backend-shaped state object, so every tile keeps
+// rendering (backend shape) while the money figures + component identity become the wallet's. Degraded
+// fields (funded/withdrawn/ledger/sessions) stay from the backend until Phase 3 serves them from the
+// wallet. `_walletBacked` lets the UI say, honestly, where the numbers come from.
+function overlayWalletBudget(base, w) {
+  const out = base && typeof base === "object" ? { ...base } : {};
+  const wb = w && w.budget;
+  out._walletBacked = { account: (w && w.account) || null, component: (wb && wb.address) || null, merchant: (w && w.merchant) || null };
+  if (!wb) return out; // linked but no budget open in the wallet — show the shell + the connect hint
+  const prev = out.budget || {};
+  const perTxCap = String(wb.perTx);
+  const dailyCap = String(wb.daily);
+  const spent = String(wb.spent);
+  // Treasury = the budget vault's real on-chain balance (the wallet reads it). `funded` (a lifetime
+  // total) isn't on-chain, so approximate "money in this window" as vault+spent — enough for the
+  // treasury meter's denominator; the exact lifetime totals are a Phase-3 wallet read.
+  const vault = wb.vault != null ? String(wb.vault) : null;
+  const treasury = vault != null ? vault : prev.treasury;
+  const funded = vault != null ? String((Number(vault) || 0) + (Number(spent) || 0)) : prev.funded;
+  const names = {};
+  (out.merchants || []).forEach((m) => { if (m && m.address) names[m.address] = m.name; });
+  out.budget = {
+    ...prev,
+    component: wb.address,
+    perTxCap, dailyCap, spent, treasury, funded,
+    dailyRemaining: String(Math.max(0, (Number(dailyCap) || 0) - (Number(spent) || 0))),
+    whitelist: (wb.whitelist || []).map((address) => ({ address, name: names[address] || null })),
+    // The wallet read doesn't carry the window-RESET timing (epoch length, reset countdown), so drop the
+    // live window object and let the card fall back to the window spent/remaining computed from the caps.
+    window: null,
+    source: {
+      ...(prev.source || {}),
+      treasury: vault != null ? "wallet" : (prev.source && prev.source.treasury) || "unavailable",
+      spent: "wallet", caps: "wallet", whitelist: "wallet", chainRead: true, backedBy: "wallet",
+    },
+  };
+  return out;
+}
+
 async function refreshState(silent) {
   try {
-    S.data = await api("/api/state");
+    const base = await api("/api/state");
+    if (S.wallet.connected && walletProvider()) {
+      try {
+        const w = await walletReadBudget();
+        S.wallet.account = (w && w.account) || S.wallet.account;
+        S.wallet.error = null;
+        S.data = overlayWalletBudget(base, w);
+      } catch (e) {
+        // the wallet is linked but unreachable (closed / not draining): keep the backend shell visible
+        // and flag the stale link in the banner, rather than blanking the page.
+        S.wallet.error = e.message;
+        S.data = overlayWalletBudget(base, null);
+      }
+    } else {
+      S.data = base;
+    }
     S.lastSync = Date.now();
     S.connError = null;
     if (!silent) render();
@@ -3598,6 +3695,37 @@ function wirePay() {
     const vals = readInputs();
     if (!validate(vals)) return;
     slot.innerHTML = "";
+    // Non-custodial: route the pay through the connected wallet (window.tari). The wallet pops its own
+    // approval, signs, and the chain enforces the caps — the dashboard's custodial walletd path is never
+    // touched. (The wallet pays its OWN whitelisted merchant; the banner says so. Phase 2 adds owner ops.)
+    if (S.wallet.connected && walletProvider()) {
+      const payee = (S.data && S.data._walletBacked && S.data._walletBacked.merchant) || vals.merchant;
+      await withPending(el("p-pay"), t("p_submitting"), async () => {
+        try {
+          const r = await walletProvider().request({
+            method: "tari_signAndSubmitTransaction",
+            // amount as a NUMBER: the wallet's own cap self-check does arithmetic (spent + amount), so a
+            // string would concat and mis-flag it. The chain enforcement is unaffected either way.
+            params: { pay: { amount: Number(vals.amount), memo: vals.memo || undefined } },
+          });
+          if (r && r.committed) {
+            toast("success", t("t_payment_sent"), t("t_payment_sent_msg", { amount: fmt(r.amount != null ? r.amount : vals.amount), unit: UNIT, merchant: esc(payee) }));
+          } else {
+            const reason = (r && r.reason) || "";
+            el("verdict-slot") &&
+              (el("verdict-slot").innerHTML = `<div class="verdict verdict--reject">${icon("ban", 18)}
+                <div><div class="verdict__title">${esc(t("verdict_paid_reject_title"))}</div>
+                <div class="verdict__body">${t("verdict_paid_reject_body", { reason: esc(reason || t("t_payment_failed")) })}</div></div></div>`);
+            toast("error", t("t_rejected_onchain"), reason || t("t_payment_failed"));
+          }
+          await refreshState(true);
+          render();
+        } catch (err) {
+          toast("error", t("t_payment_failed"), err.message);
+        }
+      });
+      return;
+    }
     await withPending(el("p-pay"), t("p_submitting"), async () => {
       try {
         const r = await idemPost(
@@ -3808,4 +3936,31 @@ async function boot() {
   S.booting = false;
   render();
 }
+
+/* ---- observe the non-custodial wallet link (the connect UI lives in wallet-connect.js) ---------
+ * app.js doesn't own the connect button — the floating widget does. We just listen for the provider's
+ * link events: on connect, flip to wallet-backed reads/pay and refresh; on disconnect, fall back to the
+ * backend view. (If the provider is already connected — e.g. a hot reload — pick that up on load.) */
+function initWalletLink() {
+  if (typeof window === "undefined") return;
+  const zh = () => (document.documentElement.lang || "zh").toLowerCase().indexOf("en") !== 0;
+  window.addEventListener("tari#connect", (e) => {
+    S.wallet.connected = true;
+    S.wallet.account = (e && e.detail && e.detail.account) || (window.tari && window.tari.account) || null;
+    S.wallet.error = null;
+    toast("success", zh() ? "钱包已连接" : "Wallet linked",
+      zh() ? "预算与支付现在都来自你的非托管钱包。" : "The budget and payments now come from your non-custodial wallet.");
+    refreshState();
+  });
+  window.addEventListener("tari#disconnect", () => {
+    S.wallet.connected = false; S.wallet.account = null; S.wallet.error = null;
+    refreshState();
+  });
+  if (window.tari && window.tari.connected) {
+    S.wallet.connected = true;
+    S.wallet.account = window.tari.account || null;
+  }
+}
+initWalletLink();
+
 boot();

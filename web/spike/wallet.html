@@ -305,7 +305,7 @@
   }
 
   // ---- render status ----
-  let ST=null, linkedOrigin=null, OWNER=0;
+  let ST=null, linkedOrigin=null, OWNER=0, lastRefresh=0;
   // Budget-available: what the AGENT (dApp) can still spend from the budget this window. Used only by the
   // dApp pay approval — NOT by the hero balance, which is the owner account's own funds (OWNER).
   function balanceOf(b){ if(!b)return 0; if(b.vault!=null)return b.vault; return Math.max(0,(Number(b.daily)||0)-(Number(b.spent)||0)); }
@@ -325,6 +325,7 @@
     renderBudget(s.budget); $("sendBtn").disabled=false; // the owner can always send their own funds
     setLinked(s.linkedOrigin||null); // the link lives on the server, so it survives a wallet reload
     try{const a=await api("/api/account");renderAccount(a.balance);}catch(e){}
+    lastRefresh=Date.now();
     return s;
   }
   function setLinked(o){linkedOrigin=o;const row=$("linkRow");row.classList.toggle("on",!!o);$("linkText").innerHTML="";if(o){const s=document.createElement("span");s.textContent=t("linked")+" · ";const b=document.createElement("b");b.textContent=o;$("linkText").append(s,b);}else{$("linkText").textContent=t("noLink");}}
@@ -381,6 +382,16 @@
         else{log("rej",t("payRej"));log("rej",t("resDecl",(r.reason||"").slice(0,42)));addActivity({kind:"pay",sub:t("viaDapp",origin),amount:r.amount,status:"failed"});}
         await refresh(); return resolveReq(q.id,r);
       }catch(err){log("rej",err.message);return resolveReq(q.id,null,err.message);}
+    }
+    if(q.method==="tari_getBudget"||q.method==="tari_getState"){
+      // READ over the relay: no signing, no approval modal — just hand a LINKED dApp the budget it
+      // displays, so a non-custodial dashboard shows (and pays against) THIS wallet's on-chain budget.
+      // Gate on the linked origin and throttle the chain re-read so a polling dApp can't hammer the indexer.
+      if(!linkedOrigin||origin!==linkedOrigin){return resolveReq(q.id,null,"connect the wallet first (4100)");}
+      try{
+        if(!ST||Date.now()-lastRefresh>2500)await refresh();
+        return resolveReq(q.id,{account:ST.account,network:ST.network,merchant:ST.merchant,template:ST.template,agentAccount:ST.agentAccount,twoAccount:ST.twoAccount,linkedOrigin:ST.linkedOrigin,budget:ST.budget});
+      }catch(err){return resolveReq(q.id,null,err.message);}
     }
     return resolveReq(q.id,null,"unsupported method "+q.method);
   }

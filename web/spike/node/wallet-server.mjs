@@ -93,7 +93,11 @@ const sign = (unsignedTransaction) => w.request("tari_signAndSubmitTransaction",
 async function budgetState() {
   if (!state.budget) return null;
   const b = await parseBudgetSubstate(await w.request("tari_getSubstate", { substate_id: state.budget }));
-  const vault = state.initialFund != null ? Math.max(0, state.initialFund - b.spentInWindow) : null;
+  let vault = state.initialFund != null ? Math.max(0, state.initialFund - b.spentInWindow) : null;
+  // When this wallet didn't open the budget (reused via BUDGET / the two-account file), initialFund is
+  // unknown — read the budget vault's real XTR balance on-chain so a connected dApp can show the true
+  // treasury instead of a blank. vaultXtr() is hoisted (async function declaration) and resource-filters.
+  if (vault == null && b.vault) { try { const v = await vaultXtr(b.vault); if (v != null) vault = Number(v); } catch { /* leave null */ } }
   return {
     address: state.budget, perTx: b.perTxCap, daily: b.dailyCap, spent: b.spentInWindow,
     vault, whitelist: b.whitelist, agentBadge: b.agentBadge, epochsPerWindow: b.epochsPerWindow,
