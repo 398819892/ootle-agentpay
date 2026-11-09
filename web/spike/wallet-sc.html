@@ -31,6 +31,11 @@
       .pill { display:inline-block; padding:1px 8px; border-radius:10px; border:1px solid var(--line); color:var(--mut); font-size:11px; margin-left:6px; }
       .qr { background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px; max-width:216px; margin:10px auto 0; }
       .qr svg { width:100%; height:auto; display:block; }
+      .act { display:flex; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid var(--line); font-size:13px; }
+      .act:first-child { border-top:none; }
+      .act .k { color:var(--fg); }
+      .act .m { color:var(--mut); font-size:11px; font-family:ui-monospace,monospace; word-break:break-all; }
+      .act .amt { white-space:nowrap; font-variant-numeric:tabular-nums; }
       [hidden] { display:none !important; }
     </style>
     <script src="/qrcode.js"></script>
@@ -140,6 +145,11 @@
           <button id="btnRevealDo">显示</button>
           <div class="words" id="revealGrid" hidden></div>
           <button id="btnHidePhrase" class="ghost" hidden>隐藏</button>
+        </div>
+        <div id="actBlock" hidden style="margin-top:18px">
+          <h2 style="font-size:14px;margin:0 0 4px">活动</h2>
+          <p class="mut" style="font-size:11px;margin:0 0 6px">本机记录的本钱包操作(充值/发送);他人向你的转账不在此列。</p>
+          <div id="actList"></div>
         </div>
         <p class="mut" style="font-size:12px;margin-top:14px">收款:把上面的账户地址发给对方即可。付款:用「付款」按钮向对方的 component_ 账户地址转账,交易在本浏览器内用你的私钥签名。</p>
       </section>

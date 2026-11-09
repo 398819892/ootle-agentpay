@@ -15,6 +15,7 @@ import { connect as scConnect, fundViaFaucet, balanceOf, sendXtr, ownerPublicHex
 const $ = (id) => document.getElementById(id);
 const VAULT_KEY = "ap-sc-vault";
 const ACCOUNT_KEY = "ap-sc-account"; // the on-chain account component (public; stored in the clear)
+const ACTIVITY_KEY = "ap-sc-activity"; // this wallet's own fund/send actions, recorded locally per account
 const NETWORK = Network.LocalNet; // identity address is net-scoped; localnet for now (prefix otl_loc_)
 
 let INDEXER = null; // indexer URL, learned from the backend's /api/status; enables on-chain ops
@@ -170,6 +171,8 @@ async function enterMain() {
     $("balBlock").hidden = false;
     $("recvBlock").hidden = false; // an on-chain account can receive
     $("sendBlock").hidden = !INDEXER; // sending needs the indexer to resolve inputs + submit
+    $("actBlock").hidden = false;
+    renderActivity(account);
     await refreshBalance(account);
   } else {
     // a fresh self-custody key with no on-chain account yet: show the derived key address, offer funding
@@ -177,6 +180,7 @@ async function enterMain() {
     $("balBlock").hidden = true;
     $("recvBlock").hidden = true; // nothing to receive into until an account exists
     $("sendBlock").hidden = true; // nothing to send until an account exists
+    $("actBlock").hidden = true;
     $("mainAddr").textContent = "派生中…";
     try { $("mainAddr").textContent = await addressOf(fromHex(unlocked.owner), fromHex(unlocked.view)); }
     catch (e) { $("mainAddr").textContent = "地址派生失败: " + (e?.message || e); }
@@ -184,6 +188,41 @@ async function enterMain() {
     $("btnFund").textContent = "创建账户并领取测试币(localnet)";
     $("fundBlock").hidden = !INDEXER; // funding needs the localnet indexer/faucet
   }
+}
+
+// --- activity: this wallet's OWN fund/send actions, recorded locally (keyed by account) -----------
+// Honest scope: these are the actions THIS wallet took (the txIds it produced), not a full chain
+// history — incoming receives from others are not here (that would need a chain scan). Local only.
+function loadActivity() {
+  try { return JSON.parse(localStorage.getItem(ACTIVITY_KEY)) || []; } catch { return []; }
+}
+function logActivity(entry) {
+  const all = loadActivity();
+  all.unshift({ t: Date.now(), ...entry });
+  try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(all.slice(0, 50))); } catch { /* storage full/blocked: skip */ }
+}
+function ago(t) {
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return s + " 秒前";
+  const m = Math.floor(s / 60); if (m < 60) return m + " 分钟前";
+  const h = Math.floor(m / 60); if (h < 24) return h + " 小时前";
+  return Math.floor(h / 24) + " 天前";
+}
+function renderActivity(account) {
+  const list = loadActivity().filter((e) => e.account === account);
+  const box = $("actList");
+  if (!list.length) { box.innerHTML = '<p class="mut" style="font-size:12px">暂无记录。</p>'; return; }
+  box.innerHTML = list.map((e) => {
+    const tx = e.txId ? String(e.txId).slice(0, 10) + "…" : "";
+    const when = ago(e.t);
+    if (e.kind === "send") {
+      const to = e.to ? e.to.slice(0, 14) + "…" : "";
+      return `<div class="act"><div><div class="k">发送</div><div class="m">→ ${to} · ${tx}</div></div>`
+        + `<div style="text-align:right"><div class="amt">−${groupNum(e.amount)} XTR</div><div class="m">${when}</div></div></div>`;
+    }
+    return `<div class="act"><div><div class="k">充值领取</div><div class="m">${tx}</div></div>`
+      + `<div style="text-align:right"><div class="amt mut">领取测试币</div><div class="m">${when}</div></div></div>`;
+  }).join("");
 }
 
 async function refreshBalance(account) {
@@ -207,9 +246,10 @@ $("btnFund").onclick = async () => {
     if (!INDEXER) throw new Error("无法连接本地索引器");
     const provider = await indexer();
     const ownerPub = ownerPublicHex(fromHex(unlocked.owner));
-    const { account } = await fundViaFaucet(provider, walletOf(), ownerPub);
+    const { txId, account } = await fundViaFaucet(provider, walletOf(), ownerPub);
     if (!account) throw new Error("交易已提交但未找到新账户");
     localStorage.setItem(ACCOUNT_KEY, account);
+    logActivity({ kind: "fund", account, txId });
     await enterMain();
   } catch (e) {
     $("fundErr").textContent = "创建失败: " + (e?.reason || e?.message || e);
@@ -269,6 +309,8 @@ $("btnSendDo").onclick = async () => {
     $("sendTo").value = "";
     $("sendAmt").value = "";
     $("sendForm").hidden = true;
+    logActivity({ kind: "send", account: from, to, amount: amount.toString(), txId });
+    renderActivity(from);
     await refreshBalance(from);
   } catch (e) {
     $("sendErr").textContent = "发送失败: " + (e?.reason || e?.message || e);
