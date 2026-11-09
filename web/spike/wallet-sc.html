@@ -107,6 +107,21 @@
           <button id="btnCopy" class="ghost">复制地址</button>
           <button id="btnLock" class="ghost">锁定</button>
         </div>
+        <div id="sendBlock" hidden style="margin-top:4px">
+          <button id="btnSendOpen" class="ghost wide">付款(发送 XTR)</button>
+          <div id="sendForm" hidden>
+            <label>收款账户地址(component_…)</label>
+            <input id="sendTo" class="mono" placeholder="component_…" autocomplete="off" spellcheck="false" />
+            <label>金额(XTR,基础单位)</label>
+            <input id="sendAmt" inputmode="numeric" placeholder="例如 1000000" autocomplete="off" />
+            <div class="bad" id="sendErr"></div>
+            <div class="ok" id="sendOk" style="font-size:13px;min-height:18px"></div>
+            <div class="row">
+              <button id="btnSendDo">确认发送</button>
+              <button id="btnSendCancel" class="ghost">取消</button>
+            </div>
+          </div>
+        </div>
         <button id="btnShowPhrase" class="ghost wide">显示恢复短语(需口令)</button>
         <div id="phraseReveal" hidden>
           <label>输入口令以显示</label>
@@ -116,7 +131,7 @@
           <div class="words" id="revealGrid" hidden></div>
           <button id="btnHidePhrase" class="ghost" hidden>隐藏</button>
         </div>
-        <p class="mut" style="font-size:12px;margin-top:14px">收款:把上面的账户地址发给对方即可。付款(send)将在下一增量接入。</p>
+        <p class="mut" style="font-size:12px;margin-top:14px">收款:把上面的账户地址发给对方即可。付款:用「付款」按钮向对方的 component_ 账户地址转账,交易在本浏览器内用你的私钥签名。</p>
       </section>
     </div>
     <script type="module" src="/src/wallet-sc.js"></script>

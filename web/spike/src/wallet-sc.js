@@ -10,7 +10,7 @@ import {
 } from "./self-custody.mjs";
 import { Network } from "@tari-project/ootle";
 import { SecretKeyWallet } from "@tari-project/ootle-secret-key-wallet";
-import { connect as scConnect, fundViaFaucet, balanceOf, ownerPublicHex } from "./sc-chain.mjs";
+import { connect as scConnect, fundViaFaucet, balanceOf, sendXtr, ownerPublicHex } from "./sc-chain.mjs";
 
 const $ = (id) => document.getElementById(id);
 const VAULT_KEY = "ap-sc-vault";
@@ -157,17 +157,23 @@ async function enterMain() {
   $("fundErr").textContent = "";
   await ensureIndexer();
   const account = currentAccount();
+  // reset the send form each time we (re-)enter the main view
+  $("sendForm").hidden = true;
+  $("sendErr").textContent = "";
+  $("sendOk").textContent = "";
   if (account) {
     // an on-chain account (imported / funded): show the component address + live balance
     $("addrLabel").textContent = "账户";
     $("mainAddr").textContent = account;
     $("fundBlock").hidden = true;
     $("balBlock").hidden = false;
+    $("sendBlock").hidden = !INDEXER; // sending needs the indexer to resolve inputs + submit
     await refreshBalance(account);
   } else {
     // a fresh self-custody key with no on-chain account yet: show the derived key address, offer funding
     $("addrLabel").textContent = "密钥地址(未充值,链上尚无账户)";
     $("balBlock").hidden = true;
+    $("sendBlock").hidden = true; // nothing to send until an account exists
     $("mainAddr").textContent = "派生中…";
     try { $("mainAddr").textContent = await addressOf(fromHex(unlocked.owner), fromHex(unlocked.view)); }
     catch (e) { $("mainAddr").textContent = "地址派生失败: " + (e?.message || e); }
@@ -206,6 +212,51 @@ $("btnFund").onclick = async () => {
     $("fundErr").textContent = "创建失败: " + (e?.reason || e?.message || e);
     $("btnFund").disabled = false;
     $("btnFund").textContent = prev;
+  }
+};
+// --- send: owner → recipient payment, signed in the browser -------------------------------------
+$("btnSendOpen").onclick = () => {
+  $("sendErr").textContent = "";
+  $("sendOk").textContent = "";
+  $("sendForm").hidden = false;
+  $("sendTo").focus();
+};
+$("btnSendCancel").onclick = () => {
+  $("sendForm").hidden = true;
+  $("sendTo").value = "";
+  $("sendAmt").value = "";
+  $("sendErr").textContent = "";
+};
+$("btnSendDo").onclick = async () => {
+  $("sendErr").textContent = "";
+  $("sendOk").textContent = "";
+  const to = $("sendTo").value.trim();
+  const amtStr = $("sendAmt").value.trim();
+  if (!/^component_[0-9a-f]{64}$/.test(to)) return void ($("sendErr").textContent = "收款地址应为 component_ 开头的 64 位十六进制账户地址");
+  const from = currentAccount();
+  if (to === from) return void ($("sendErr").textContent = "不能给自己转账");
+  let amount;
+  try { amount = BigInt(amtStr); } catch { return void ($("sendErr").textContent = "金额必须是整数"); }
+  if (amount <= 0n) return void ($("sendErr").textContent = "金额必须大于 0");
+  $("btnSendDo").disabled = true;
+  $("btnSendCancel").disabled = true;
+  const prev = $("btnSendDo").textContent;
+  $("btnSendDo").textContent = "发送中…(约 10–30 秒)";
+  try {
+    await ensureIndexer();
+    if (!INDEXER) throw new Error("无法连接本地索引器");
+    const { txId } = await sendXtr(await indexer(), walletOf(), from, to, amount);
+    $("sendOk").textContent = "已发送 ✓ tx " + String(txId).slice(0, 16) + "…";
+    $("sendTo").value = "";
+    $("sendAmt").value = "";
+    $("sendForm").hidden = true;
+    await refreshBalance(from);
+  } catch (e) {
+    $("sendErr").textContent = "发送失败: " + (e?.reason || e?.message || e);
+  } finally {
+    $("btnSendDo").disabled = false;
+    $("btnSendCancel").disabled = false;
+    $("btnSendDo").textContent = prev;
   }
 };
 $("btnCopy").onclick = async () => {

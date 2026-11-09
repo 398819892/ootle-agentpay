@@ -14,7 +14,7 @@ import {
 } from "@tari-project/ootle";
 import { publicKeyFromSecretKey } from "@tari-project/ootle-wasm";
 import { decodeSubstateValue } from "@tari-project/ootle-wasm-bor";
-import { findNewComponent, XTR } from "./agentpay-tx.js";
+import { findNewComponent, transferTx, XTR } from "./agentpay-tx.js";
 import { connectIndexer, accountVaults, maxEpoch, signSealSubmit } from "./chain.js";
 
 const XTR_HEX = XTR.replace(/^resource_/, "");
@@ -49,6 +49,31 @@ export async function fundViaFaucet(provider, wallet, ownerPubHex) {
     .buildUnsignedTransaction();
   const { txId, receipt } = await signSealSubmit(provider, [wallet], unsigned);
   return { txId, account: findNewComponent(receipt) };
+}
+
+/**
+ * Send `amount` (XTR base units) from `fromAccount` to `toAccount`, signed in the browser by the
+ * user's own key — the owner spending their real balance (transferTx's owner→recipient recipe, NOT
+ * the AgentBudget). Both accounts' current vaults are declared as inputs (the bare indexer can't
+ * auto-detect them); a brand-new recipient may have no vault yet, so a lookup failure there is fine —
+ * the deposit creates the vault. Returns { txId }.
+ */
+export async function sendXtr(provider, wallet, fromAccount, toAccount, amount) {
+  const ownerVaults = await accountVaults(provider, fromAccount);
+  let recipientVaults = [];
+  try { recipientVaults = await accountVaults(provider, toAccount); } catch { /* fresh recipient: no vault yet */ }
+  const unsigned = transferTx({
+    network: Network.LocalNet,
+    maxEpoch: await maxEpoch(provider),
+    owner: fromAccount,
+    ownerVaults,
+    recipient: toAccount,
+    recipientVaults,
+    amount: BigInt(amount),
+    maxFee: 200_000,
+  });
+  const { txId } = await signSealSubmit(provider, [wallet], unsigned);
+  return { txId };
 }
 
 // --- balance: sum the account's XTR-bearing vaults (same logic as the backend's ownerBalance) --------
