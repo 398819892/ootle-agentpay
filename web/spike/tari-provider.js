@@ -71,8 +71,19 @@
     // Open the wallet in its own window. Best effort: in a normal browser this is a popup/tab; some
     // embedded webviews navigate in place instead, so the dApp should also let the user open it by hand.
     openWallet() {
+      // Open the wallet in ITS OWN browsing context — never the dApp's. `window.open(url, name,
+      // features)` makes some embedded webviews (and popup blockers) navigate THIS tab in place, which
+      // destroys the dApp page and its pending connect()/request() — the connect then hangs forever. A
+      // named-target anchor click always targets a SEPARATE context (new tab, or the existing
+      // "tari-wallet" one reused), so the dApp page is preserved whether the wallet opens, is reused, or
+      // is suppressed. Returns true on a best-effort open; the dApp should still offer a manual link.
       const url = WALLET_ORIGIN + WALLET_PATH + "?lang=" + encodeURIComponent(currentLang());
-      try { return window.open(url, "tari-wallet", "width=460,height=760"); } catch { return null; }
+      try {
+        const a = document.createElement("a");
+        a.href = url; a.target = "tari-wallet"; a.rel = "noopener";
+        document.body.appendChild(a); a.click(); a.remove();
+        return true;
+      } catch { return false; }
     },
     async connect() {
       const accts = await relayRequest("tari_requestAccounts");

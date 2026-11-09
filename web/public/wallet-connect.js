@@ -19,18 +19,18 @@
   var T = {
     zh: {
       launch: "连接钱包", connected: "钱包已连接", title: "AgentPay 钱包", sub: "非托管 · 独立来源 :7777",
-      connectBtn: "连接 AgentPay 钱包", connecting: "正在连接钱包…",
-      connectNote: "会打开钱包自己的窗口(另一个来源 :7777),由你在那边批准。面板不持有私钥。",
-      noPopup: "钱包没弹出?", openWallet: "打开钱包 ↗",
+      connectBtn: "连接 AgentPay 钱包", connecting: "等待钱包批准…",
+      connectNote: "点连接后,在你的 AgentPay 钱包(另一个来源 :7777)里批准。钱包没开就先打开它——面板不持有私钥,也不会碰这个页面。",
+      noPopup: "钱包还没打开?", openWallet: "打开钱包 ↗",
       payFrom: "付款账户", choose: "选择金额", payBtn: "用钱包支付", paying: "等待钱包批准…",
       paid: "已支付", declined: "被钱包额度拒绝", overTx: "超单笔上限", overDaily: "超每日上限",
       idle: "选好金额点支付,钱包会请你批准。", connFail: "连接失败", disconnect: "断开连接", close: "关闭",
     },
     en: {
       launch: "Connect wallet", connected: "Wallet connected", title: "AgentPay Wallet", sub: "non-custodial · origin :7777",
-      connectBtn: "Connect AgentPay Wallet", connecting: "Connecting…",
-      connectNote: "Opens the wallet's own window (a separate origin, :7777) where you approve. The dashboard holds no key.",
-      noPopup: "Wallet didn't open?", openWallet: "Open wallet ↗",
+      connectBtn: "Connect AgentPay Wallet", connecting: "Waiting for wallet approval…",
+      connectNote: "After you connect, approve in your AgentPay wallet (a separate origin, :7777). Open it first if it isn't running — the dashboard holds no key and won't touch this page.",
+      noPopup: "Wallet not open yet?", openWallet: "Open wallet ↗",
       payFrom: "Paying from", choose: "Choose amount", payBtn: "Pay with wallet", paying: "Waiting for wallet approval…",
       paid: "Paid", declined: "Declined by the wallet's caps", overTx: "over per-tx cap", overDaily: "over daily cap",
       idle: "Pick an amount and pay — the wallet will ask you to approve.", connFail: "Connect failed", disconnect: "Disconnect", close: "Close",
@@ -143,8 +143,11 @@
   $(".apw-x").addEventListener("click", function () { openPanel(false); });
 
   $(".apw-connectBtn").addEventListener("click", function () {
+    // Do NOT open the wallet from here. Opening a window from the dApp (window.open or even a
+    // target=_blank anchor) navigates THIS tab in place in embedded webviews / when windows can't be
+    // spawned, destroying the dApp and this pending connect(). We only ENQUEUE the connect; the wallet
+    // (opened by the user via the "open wallet ↗" link below, or already running) drains + approves it.
     var btn = $(".apw-connectBtn"); btn.disabled = true; btn.textContent = t("connecting");
-    try { tari.openWallet(); } catch (e) {}
     tari.connect().then(function (accts) {
       account = Array.isArray(accts) ? accts[0] : accts;
       setLaunch(); toPayStep();
