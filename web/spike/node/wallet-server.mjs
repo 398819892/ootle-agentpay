@@ -90,6 +90,30 @@ const commit = (r, label) => {
   return r;
 };
 const sign = (unsignedTransaction) => w.request("tari_signAndSubmitTransaction", { unsignedTransaction });
+const txidOf = (r) => r?.result?.Finalized?.transaction_id || null;
+const abortedOf = (r) => r?.result?.Finalized?.abort_details || null; // set on AcceptFeeRejectRest
+
+// --- wallet-side activity journal (Phase 3) -----------------------------------------------------
+// The indexer exposes NO per-component transaction/event history (only getSubstate + getTransactionResult
+// by id), so — unlike the custodial backend, which scans walletd's listTransactions — the wallet cannot
+// rebuild a budget's pay/session history from chain. Instead it keeps its OWN small ledger of everything
+// it submits, so a connected dApp can show recent activity / tx-count / sessions / funded-withdrawn from
+// the wallet. It is authoritative for wallet-driven activity going forward; it does NOT back-fill a
+// budget's pre-existing on-chain history (a one-time `seeded` baseline makes funded + the default session
+// sensible on first sight). Persisted per budget component in .spike-ledger.json.
+const LEDGER_FILE = new URL("../.spike-ledger.json", import.meta.url);
+let journal = {};
+try { journal = JSON.parse(fs.readFileSync(LEDGER_FILE, "utf8")); } catch { /* fresh */ }
+function saveJournal() { try { fs.writeFileSync(LEDGER_FILE, JSON.stringify(journal)); } catch (e) { console.error("journal save:", e.message); } }
+function jFor(component) {
+  if (!journal[component]) journal[component] = { funded: "0", withdrawn: "0", pays: [], sessions: {}, seeded: false };
+  return journal[component];
+}
+const recordPay = (c, { merchant, amount, memo, txid }) => { jFor(c).pays.push({ merchant, amount: String(amount), memo: memo || "", txid: txid || null, ts: Date.now(), via: "wallet" }); saveJournal(); };
+const recordFund = (c, amount) => { const j = jFor(c); j.funded = (BigInt(j.funded) + BigInt(amount)).toString(); saveJournal(); };
+const recordWithdraw = (c, amount) => { const j = jFor(c); j.withdrawn = (BigInt(j.withdrawn) + BigInt(amount)).toString(); saveJournal(); };
+const recordIssue = (c, session) => { jFor(c).sessions[session] = { revoked: false }; saveJournal(); };
+const recordRevokeSession = (c, session) => { jFor(c).sessions[session] = { revoked: true }; saveJournal(); };
 async function budgetState() {
   if (!state.budget) return null;
   const b = await parseBudgetSubstate(await w.request("tari_getSubstate", { substate_id: state.budget }));
@@ -98,9 +122,24 @@ async function budgetState() {
   // unknown — read the budget vault's real XTR balance on-chain so a connected dApp can show the true
   // treasury instead of a blank. vaultXtr() is hoisted (async function declaration) and resource-filters.
   if (vault == null && b.vault) { try { const v = await vaultXtr(b.vault); if (v != null) vault = Number(v); } catch { /* leave null */ } }
+  // Seed the journal once per component so funded + the default session are sensible on first sight
+  // (the wallet never saw this budget's pre-existing history). funded0 ≈ what is net in the vault now.
+  const j = jFor(state.budget);
+  if (!j.seeded) {
+    if (vault != null) j.funded = String((Number(vault) || 0) + (Number(b.spentInWindow) || 0));
+    if (!j.sessions[PAY_SESSION]) j.sessions[PAY_SESSION] = { revoked: false };
+    j.seeded = true; saveJournal();
+  }
   return {
     address: state.budget, perTx: b.perTxCap, daily: b.dailyCap, spent: b.spentInWindow,
     vault, whitelist: b.whitelist, agentBadge: b.agentBadge, epochsPerWindow: b.epochsPerWindow,
+    // Phase 3 wallet-side history (the indexer can't rebuild it from chain) — see the journal note above.
+    funded: j.funded, withdrawn: j.withdrawn,
+    sessions: Object.entries(j.sessions).map(([session, v]) => ({ session, revoked: !!v.revoked })),
+    ledger: j.pays.map((p, index) => ({
+      index, merchant: p.merchant, amount: p.amount, memo: p.memo, onchainMemo: p.memo,
+      txKind: "pay", status: "confirmed", txId: p.txid, via: p.via || "wallet", ts: p.ts,
+    })),
   };
 }
 
@@ -187,6 +226,7 @@ async function doPay({ amount, memo = "Caravel order" }) {
   }
   const after = await budgetState();
   const committed = after.spent > b0;
+  if (committed) recordPay(state.budget, { merchant: MERCHANT, amount, memo, txid });
   return { committed, amount, prevSpent: b0, spent: after.spent, vault: after.vault, txid, events, reason };
 }
 
@@ -226,18 +266,24 @@ async function doRemoveMerchant({ merchant }) {
 // rest are owner-badge gated. All owner-signed + owner-paid. Each returns the fresh budget state.
 async function doTopUp({ amount }) {
   commit(await sign(topUpTx({ ...(await ownerOpCommon()), amount })), "top_up");
+  recordFund(state.budget, amount);
   return { committed: true, ...(await budgetState()) };
 }
 async function doWithdraw({ amount }) {
   commit(await sign(withdrawTx({ ...(await ownerOpCommon()), amount })), "withdraw");
+  recordWithdraw(state.budget, amount);
   return { committed: true, ...(await budgetState()) };
 }
 async function doIssueSession({ session }) {
-  commit(await sign(issueBadgeTx({ ...(await ownerOpCommon()), session })), "issue_agent_badge");
+  const r = commit(await sign(issueBadgeTx({ ...(await ownerOpCommon()), session })), "issue_agent_badge");
+  // Only journal the session if the mint actually landed (a fee-only AcceptFeeRejectRest still finalizes
+  // as Commit — see the issue-deposit note in agentpay-tx.js), so a phantom session can't appear.
+  if (!abortedOf(r)) recordIssue(state.budget, session);
   return { committed: true, ...(await budgetState()) };
 }
 async function doRevokeSession({ session }) {
   commit(await sign(revokeSessionTx({ ...(await ownerOpCommon()), session })), "revoke_session");
+  recordRevokeSession(state.budget, session);
   return { committed: true, ...(await budgetState()) };
 }
 async function doRevoke() {

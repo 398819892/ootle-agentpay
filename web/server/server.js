@@ -147,6 +147,19 @@ const { adminPasswordMatches, issueConfirmToken, verifyConfirmToken } = createSt
 });
 const stepUp = { required: () => STEP_UP_ON, verify: verifyConfirmToken };
 
+// Non-custodial mode (Phase 3): when on, the BROWSER can no longer drive the custodial walletd for the
+// on-chain writes — it must submit them through its own connected wallet (window.tari). These routes are
+// then refused for browser (cookie/Origin) callers and kept ONLY for /api/v1, which authenticates with an
+// API key and is dispatched earlier (before this gate). The owner-console writes already route through the
+// wallet when connected; this makes it enforced server-side even if a client falls back. Local-only ops
+// (/api/reset, /api/freeze, /api/unfreeze — a server-side lock, not a chain write) are unaffected.
+const NONCUSTODIAL = process.env.AGENTPAY_NONCUSTODIAL === "1" || process.env.AGENTPAY_NONCUSTODIAL === "true";
+const CHAIN_WRITE_KEYS = new Set([
+  "POST /api/budget", "POST /api/pay", "POST /api/merchants", "POST /api/merchants/remove",
+  "POST /api/limits", "POST /api/withdraw", "POST /api/top-up", "POST /api/revoke",
+  "POST /api/sessions", "POST /api/sessions/revoke",
+]);
+
 /** Request identity for the authorizer/audit trail. Never carries a password. */
 function requestCtx(req, body) {
   const session = AUTH_ON ? verifySession(parseCookies(req)[COOKIE_NAME]) : null;
@@ -438,6 +451,7 @@ const server = http.createServer(async (req, res) => {
       authRequired: AUTH_ON,
       authed: AUTH_ON ? session !== null : true,
       stepUpRequired: STEP_UP_ON,
+      nonCustodial: NONCUSTODIAL, // browser chain-writes must go through the connected wallet
       frozen: Boolean(store.frozen),
       // The CSRF token for this session; the SPA echoes it in the X-CSRF-Token header on every POST.
       csrfToken: session && session.sid ? csrfTokenFor(session.sid) : null,
@@ -507,6 +521,13 @@ const server = http.createServer(async (req, res) => {
     // confirm THIS action (same amount / payee / caps / budget). The client must send those same
     // fields on the subsequent op call, or verification fails at execute time.
     return sendJson(res, 200, { stepUp: true, token: issueConfirmToken(op, body) });
+  }
+
+  // Non-custodial gate: refuse the browser's custodial chain-writes (see NONCUSTODIAL above). /api/v1 is
+  // already dispatched before this point, so the machine-to-machine surface is unaffected.
+  if (NONCUSTODIAL && CHAIN_WRITE_KEYS.has(key)) {
+    audit.append({ actor: "?", ip: clientIp(req), op: "request", tier: "auth", status: "denied", reason: "non_custodial" });
+    return sendJson(res, 409, { error: "Non-custodial mode: submit this through your connected wallet.", nonCustodial: true });
   }
 
   const handler = api[key];

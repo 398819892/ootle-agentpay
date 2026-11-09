@@ -1329,6 +1329,8 @@ const S = {
   authed: true,
   // Whether high-risk actions need a step-up confirmation (set from /api/session; true iff auth on).
   stepUpRequired: false,
+  // Non-custodial mode (set from /api/session): the backend refuses browser chain-writes; use the wallet.
+  nonCustodial: false,
   // CSRF synchronizer token for this session (from /api/session or the login response). Echoed in the
   // X-CSRF-Token header on every POST so the cookie alone is not enough to drive a state change.
   csrf: null,
@@ -2709,8 +2711,18 @@ function frozenBanner() {
 // from the connected wallet (and warn if that wallet is linked but unreachable). Bilingual inline to
 // avoid widening the I18N table for a Phase-1 status strip.
 function walletBanner() {
-  if (!S.wallet.connected) return "";
   const zh = (document.documentElement.lang || "zh").toLowerCase().indexOf("en") !== 0;
+  if (!S.wallet.connected) {
+    // In non-custodial mode the backend refuses browser chain-writes, so prompt to connect the wallet.
+    if (S.nonCustodial) {
+      return `<div class="banner banner--warn" role="status">${icon("wallet", 20)}
+        <div class="banner__text"><b>${esc(zh ? "非托管模式 " : "Non-custodial mode ")}</b>${esc(
+          zh ? "连接你的 AgentPay 钱包(:7777)来管理这个预算 —— 链上写操作都经钱包批准,后端不再代签。"
+             : "Connect your AgentPay wallet (:7777) to manage this budget — on-chain writes go through the wallet; the backend no longer co-signs.",
+        )}</div></div>`;
+    }
+    return "";
+  }
   if (S.wallet.error) {
     return `<div class="banner banner--danger" role="alert">${icon("alert", 20)}
       <div class="banner__text"><b>${esc(zh ? "钱包未连上 " : "Wallet unreachable ")}</b>${esc(
@@ -3311,22 +3323,36 @@ function overlayWalletBudget(base, w) {
   // treasury meter's denominator; the exact lifetime totals are a Phase-3 wallet read.
   const vault = wb.vault != null ? String(wb.vault) : null;
   const treasury = vault != null ? vault : prev.treasury;
-  const funded = vault != null ? String((Number(vault) || 0) + (Number(spent) || 0)) : prev.funded;
+  // Phase 3: the wallet now serves funded/withdrawn + the pay ledger + the session set from its OWN
+  // journal (the indexer can't rebuild a budget's history from chain). Use those when present; fall back
+  // to the vault+spent approximation / the backend shell only if an older wallet omits them.
+  const funded = wb.funded != null ? String(wb.funded)
+    : (vault != null ? String((Number(vault) || 0) + (Number(spent) || 0)) : prev.funded);
+  const withdrawn = wb.withdrawn != null ? String(wb.withdrawn) : prev.withdrawn;
   const names = {};
   (out.merchants || []).forEach((m) => { if (m && m.address) names[m.address] = m.name; });
+  const walletLedger = Array.isArray(wb.ledger)
+    ? wb.ledger.map((row) => ({ ...row, merchantName: row.merchantName || names[row.merchant] || null }))
+    : null;
   out.budget = {
     ...prev,
     component: wb.address,
-    perTxCap, dailyCap, spent, treasury, funded,
+    perTxCap, dailyCap, spent, treasury, funded, withdrawn,
     dailyRemaining: String(Math.max(0, (Number(dailyCap) || 0) - (Number(spent) || 0))),
     whitelist: (wb.whitelist || []).map((address) => ({ address, name: names[address] || null })),
+    sessions: Array.isArray(wb.sessions) ? wb.sessions : prev.sessions,
+    ledger: walletLedger != null ? walletLedger : prev.ledger,
     // The wallet read doesn't carry the window-RESET timing (epoch length, reset countdown), so drop the
     // live window object and let the card fall back to the window spent/remaining computed from the caps.
     window: null,
     source: {
       ...(prev.source || {}),
       treasury: vault != null ? "wallet" : (prev.source && prev.source.treasury) || "unavailable",
-      spent: "wallet", caps: "wallet", whitelist: "wallet", chainRead: true, backedBy: "wallet",
+      spent: "wallet", caps: "wallet", whitelist: "wallet",
+      sessions: Array.isArray(wb.sessions) ? "wallet" : (prev.source && prev.source.sessions) || "backend",
+      ledger: walletLedger != null ? "wallet" : (prev.source && prev.source.ledger) || "backend",
+      fundedWithdrawn: wb.funded != null ? "wallet" : "estimate",
+      chainRead: true, backedBy: "wallet",
     },
   };
   return out;
@@ -4008,6 +4034,7 @@ async function boot() {
     S.authRequired = Boolean(sess.authRequired);
     S.authed = Boolean(sess.authed);
     S.stepUpRequired = Boolean(sess.stepUpRequired);
+    S.nonCustodial = Boolean(sess.nonCustodial);
     S.csrf = sess.csrfToken || null;
   } catch {
     S.authRequired = false;
