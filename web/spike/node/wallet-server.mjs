@@ -23,7 +23,7 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 import { Network } from "@tari-project/ootle";
 import { decodeExecuteResult, decodeSubstateValue } from "@tari-project/ootle-wasm-bor";
 import { L2Wallet } from "../src/l2-wallet.mjs";
-import { openBudgetTx, payTx, transferTx, setLimitsTx, addMerchantTx, removeMerchantTx, templateEvents, parseBudgetSubstate, XTR } from "../src/agentpay-tx.js";
+import { openBudgetTx, payTx, transferTx, setLimitsTx, addMerchantTx, removeMerchantTx, topUpTx, withdrawTx, issueBadgeTx, revokeSessionTx, revokeTx, templateEvents, parseBudgetSubstate, XTR } from "../src/agentpay-tx.js";
 import { connectIndexer, accountVaults } from "../src/chain.js";
 import { createDappBridge } from "../src/dapp-bridge.mjs";
 
@@ -200,7 +200,14 @@ async function ownerOpCommon() {
   const parsed = await parseBudgetSubstate(await w.request("tari_getSubstate", { substate_id: state.budget }));
   return {
     network: Network.LocalNet, maxEpoch: await w.maxEpoch(), owner: ACCOUNT,
-    ownerVaults: await accountVaults(provider, ACCOUNT), budget: state.budget, ownerBadge: parsed.ownerBadge, maxFee: 200_000,
+    ownerVaults: await accountVaults(provider, ACCOUNT), budget: state.budget,
+    // budgetVault + agentBadge power the lifecycle ops (top-up/withdraw touch the vault; issue mints the
+    // agent-badge resource into the session account); harmless extra fields for the governance ops.
+    // agentVaults are the session account's CURRENT vault ids — issue's deposit lands in its agent-badge
+    // vault, which must be declared as an input (the bare indexer can't auto-detect it).
+    budgetVault: parsed.vault, ownerBadge: parsed.ownerBadge, agentBadge: parsed.agentBadge,
+    agent: PAY_AGENT, agentVaults: await accountVaults(provider, PAY_AGENT),
+    maxFee: 200_000,
   };
 }
 async function doSetLimits({ perTxCap, dailyCap }) {
@@ -213,6 +220,28 @@ async function doAddMerchant({ merchant }) {
 }
 async function doRemoveMerchant({ merchant }) {
   commit(await sign(removeMerchantTx({ ...(await ownerOpCommon()), merchant })), "remove_merchant");
+  return { committed: true, ...(await budgetState()) };
+}
+// Lifecycle ops (Phase 2b). top_up is open (owner funds from their own account, no owner proof); the
+// rest are owner-badge gated. All owner-signed + owner-paid. Each returns the fresh budget state.
+async function doTopUp({ amount }) {
+  commit(await sign(topUpTx({ ...(await ownerOpCommon()), amount })), "top_up");
+  return { committed: true, ...(await budgetState()) };
+}
+async function doWithdraw({ amount }) {
+  commit(await sign(withdrawTx({ ...(await ownerOpCommon()), amount })), "withdraw");
+  return { committed: true, ...(await budgetState()) };
+}
+async function doIssueSession({ session }) {
+  commit(await sign(issueBadgeTx({ ...(await ownerOpCommon()), session })), "issue_agent_badge");
+  return { committed: true, ...(await budgetState()) };
+}
+async function doRevokeSession({ session }) {
+  commit(await sign(revokeSessionTx({ ...(await ownerOpCommon()), session })), "revoke_session");
+  return { committed: true, ...(await budgetState()) };
+}
+async function doRevoke() {
+  commit(await sign(revokeTx(await ownerOpCommon())), "revoke");
   return { committed: true, ...(await budgetState()) };
 }
 
@@ -261,6 +290,18 @@ const server = http.createServer(async (req, res) => {
       if (!merchant.startsWith("component_")) return send(res, 400, { error: "merchant must be a component_ address" });
       return send(res, 200, url.pathname.endsWith("/add") ? await doAddMerchant({ merchant }) : await doRemoveMerchant({ merchant }));
     }
+    // Lifecycle (Phase 2b): fund / withdraw the vault, issue + revoke session badges, global kill switch.
+    if (req.method === "POST" && (url.pathname === "/api/top-up" || url.pathname === "/api/withdraw")) {
+      const p = await body(req); const amount = String(p.amount ?? "");
+      if (!/^\d+$/.test(amount) || BigInt(amount) <= 0n) return send(res, 400, { error: "amount must be a positive integer" });
+      return send(res, 200, url.pathname.endsWith("/top-up") ? await doTopUp({ amount }) : await doWithdraw({ amount }));
+    }
+    if (req.method === "POST" && (url.pathname === "/api/sessions" || url.pathname === "/api/sessions/revoke")) {
+      const p = await body(req); const session = String(p.session || "").trim();
+      if (!session) return send(res, 400, { error: "session label required" });
+      return send(res, 200, url.pathname.endsWith("/revoke") ? await doRevokeSession({ session }) : await doIssueSession({ session }));
+    }
+    if (req.method === "POST" && url.pathname === "/api/revoke") return send(res, 200, await doRevoke());
 
     // --- relay: the dApp enqueues (CORS-allowed), the wallet drains + answers (same origin) ---
     // The queue/poll/resolve/linkedOrigin state machine + CORS live in src/dapp-bridge.mjs; handle()

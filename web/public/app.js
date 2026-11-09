@@ -3415,6 +3415,17 @@ async function handleAction(action, btn) {
     return;
   }
   if (action === "revoke") {
+    // Non-custodial: the wallet flips the on-chain kill switch under its owner-badge approval.
+    if (S.wallet.connected && walletProvider()) {
+      await withPending(btn, t("p_revoking"), async () => {
+        try {
+          const wr = await walletOwnerOp({ revoke: {} });
+          if (wr.ok) { render(); toast("success", t("t_agent_revoked"), t("t_agent_revoked_msg")); }
+          else toast("error", t("t_revoke_failed"), wr.reason);
+        } catch (e) { toast("error", t("t_revoke_failed"), e.message); }
+      });
+      return;
+    }
     const res = await confirmDialog({
       tone: "danger",
       icon: "ban",
@@ -3462,6 +3473,17 @@ async function handleAction(action, btn) {
 }
 
 async function revokeSession(session, btn) {
+  // Non-custodial: the wallet blocks just this session badge under its owner-badge approval.
+  if (S.wallet.connected && walletProvider()) {
+    await withPending(btn, t("p_revoking"), async () => {
+      try {
+        const wr = await walletOwnerOp({ revokeSession: { session } });
+        if (wr.ok) { render(); toast("success", t("t_session_revoked"), t("t_session_revoked_msg", { session })); }
+        else toast("error", t("t_revoke_failed"), wr.reason);
+      } catch (e) { toast("error", t("t_revoke_failed"), e.message); }
+    });
+    return;
+  }
   const res = await confirmDialog({
     tone: "danger",
     icon: "ban",
@@ -3875,6 +3897,18 @@ function wireManage() {
       const ok = amount !== null && amtBig(amount) > 0n;
       setErr("g-topup", !ok);
       if (!ok) return;
+      // Non-custodial: fund the vault through the wallet's own approval (top_up is open on chain, but
+      // the funds leave the wallet owner's account, so the wallet still signs + approves).
+      if (S.wallet.connected && walletProvider()) {
+        await withPending(el("g-topup-btn"), t("p_topping"), async () => {
+          try {
+            const wr = await walletOwnerOp({ topUp: { amount } });
+            if (wr.ok) { render(); toast("success", t("t_topped_up"), t("t_topped_up_msg", { amount: fmt(amount), unit: UNIT })); }
+            else toast("error", t("t_topup_failed"), wr.reason);
+          } catch (err) { toast("error", t("t_topup_failed"), err.message); }
+        });
+        return;
+      }
       await withPending(el("g-topup-btn"), t("p_topping"), async () => {
         try {
           const r = await idemPost("/api/top-up", { amount }, "topUp", String(amount));
@@ -3896,6 +3930,17 @@ function wireManage() {
       const session = el("g-session").value.trim();
       setErr("g-session", !session);
       if (!session) return;
+      // Non-custodial: the wallet mints the session badge under its owner-badge approval.
+      if (S.wallet.connected && walletProvider()) {
+        await withPending(el("g-session-add"), t("p_issuing"), async () => {
+          try {
+            const wr = await walletOwnerOp({ issueSession: { session } });
+            if (wr.ok) { render(); toast("success", t("t_badge_issued"), t("t_badge_issued_msg", { session: esc(session) })); }
+            else toast("error", t("t_badge_failed"), wr.reason);
+          } catch (err) { toast("error", t("t_badge_failed"), err.message); }
+        });
+        return;
+      }
       const gate = await stepUpToken("issueSession", { session });
       if (!gate) return;
       await withPending(el("g-session-add"), t("p_issuing"), async () => {
@@ -3918,6 +3963,17 @@ function wireManage() {
     const valid = amount !== null && amtBig(amount) > 0n && amtBig(amount) <= amtBig(max);
     setErr("g-amount", !valid);
     if (!valid) return;
+    // Non-custodial: the wallet pulls the vault back to the owner under its owner-badge approval.
+    if (S.wallet.connected && walletProvider()) {
+      await withPending(el("g-withdraw"), t("p_withdrawing"), async () => {
+        try {
+          const wr = await walletOwnerOp({ withdraw: { amount } });
+          if (wr.ok) { render(); toast("success", t("t_withdrawn"), t("t_withdrawn_msg", { amount: fmt(amount), unit: UNIT })); }
+          else toast("error", t("t_withdraw_failed"), wr.reason);
+        } catch (err) { toast("error", t("t_withdraw_failed"), err.message); }
+      });
+      return;
+    }
     const res = await confirmDialog({
       tone: "warn",
       icon: "up",

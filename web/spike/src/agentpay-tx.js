@@ -228,6 +228,100 @@ export function removeMerchantTx(p) {
   return ownerOpTx(p, "remove_merchant", [componentAddressLiteral(p.merchant)], [asInput(p.merchant, false)]);
 }
 
+// --- lifecycle ops: fund / withdraw / session badges / kill switch --------------------------------
+// Mirror the proven manifests in clients/ts/src/budget.ts. `top_up` is OPEN on the template (anyone may
+// fund), so it carries NO owner-badge proof — the owner just withdraws from their own account into a
+// bucket and the budget deposits it. `withdraw` / `issue_agent_badge` / `revoke_session` / `revoke` ARE
+// owner-badge gated (same auth-zone pattern as the governance ops above). For withdraw + issue the gated
+// call RETURNS a Bucket; per the manifests both the call AND the deposit of its bucket live inside the
+// proof scope (`ownerProofOpen … ownerProofClose`), so the deposit goes in the withAuthorizedProof body.
+
+/** `top_up`: fund the budget vault — `owner.withdraw(resource, amount)` into a bucket, then
+ *  `budget.top_up(bucket)`. Not owner-gated. `budgetVault` is the budget's vault (declared write). */
+export function topUpTx(p) {
+  const resource = p.resource ?? XTR;
+  return TransactionBuilder.new(p.network, p.maxEpoch)
+    .withInputs([
+      asInput(p.owner),
+      ...p.ownerVaults.map((v) => asInput(v)),
+      asInput(p.budget),
+      asInput(p.budgetVault),
+      asInput(resource, false),
+      ...(resource !== XTR ? [asInput(XTR, false)] : []),
+    ])
+    .feeTransactionPayFromComponent(p.owner, BigInt(p.maxFee ?? 200_000))
+    .callMethod({ componentAddress: p.owner, methodName: "withdraw" }, [
+      resourceAddressLiteral(resource),
+      amountLiteral(BigInt(p.amount)),
+    ])
+    .saveVar("funds")
+    .callMethod({ componentAddress: p.budget, methodName: "top_up" }, [{ Workspace: "funds" }])
+    .buildUnsignedTransaction();
+}
+
+/** `withdraw`: owner pulls `amount` from the budget vault back into the OWNER account. Owner-gated;
+ *  the withdraw bucket is captured and deposited inside the auth-proof scope (per the manifest). */
+export function withdrawTx(p) {
+  return TransactionBuilder.new(p.network, p.maxEpoch)
+    .withInputs([
+      asInput(p.owner),
+      ...p.ownerVaults.map((v) => asInput(v)),
+      asInput(p.budget),
+      asInput(p.budgetVault),
+      asInput(p.ownerBadge, false),
+      asInput(XTR, false),
+    ])
+    .feeTransactionPayFromComponent(p.owner, BigInt(p.maxFee ?? 200_000))
+    .createProof(p.owner, p.ownerBadge)
+    .saveVar("ownerProof")
+    .withAuthorizedProof("ownerProof", (b) =>
+      b
+        .callMethod({ componentAddress: p.budget, methodName: "withdraw" }, [amountLiteral(BigInt(p.amount))])
+        .saveVar("funds")
+        .callMethod({ componentAddress: p.owner, methodName: "deposit" }, [{ Workspace: "funds" }]))
+    .dropAllProofsInWorkspace()
+    .buildUnsignedTransaction();
+}
+
+/** `issue_agent_badge`: owner mints a session badge labelled `p.session` and deposits it into the agent/
+ *  session account (`p.agent`), which can then `pay` within the same caps. Owner-gated. `agentBadge`
+ *  (the minted resource), `agent` (the receiver) and `p.agentVaults` (the agent account's CURRENT vault
+ *  ids — the bare indexer can't auto-detect inputs, so the agent-badge vault the deposit lands in MUST be
+ *  declared, or instruction #N `agent.deposit` aborts with "vault … not found") are declared write. */
+export function issueBadgeTx(p) {
+  return TransactionBuilder.new(p.network, p.maxEpoch)
+    .withInputs([
+      asInput(p.owner),
+      ...p.ownerVaults.map((v) => asInput(v)),
+      asInput(p.budget),
+      asInput(p.agent),
+      ...(p.agentVaults ?? []).map((v) => asInput(v)),
+      asInput(p.agentBadge),
+      asInput(p.ownerBadge, false),
+      asInput(XTR, false),
+    ])
+    .feeTransactionPayFromComponent(p.owner, BigInt(p.maxFee ?? 200_000))
+    .createProof(p.owner, p.ownerBadge)
+    .saveVar("ownerProof")
+    .withAuthorizedProof("ownerProof", (b) =>
+      b
+        .callMethod({ componentAddress: p.budget, methodName: "issue_agent_badge" }, [stringLiteral(p.session)])
+        .saveVar("badge")
+        .callMethod({ componentAddress: p.agent, methodName: "deposit" }, [{ Workspace: "badge" }]))
+    .dropAllProofsInWorkspace()
+    .buildUnsignedTransaction();
+}
+
+/** `revoke_session`: owner blocks the single session badge `p.session` on chain; others unaffected. */
+export function revokeSessionTx(p) {
+  return ownerOpTx(p, "revoke_session", [stringLiteral(p.session)]);
+}
+
+/** `revoke`: owner flips the global kill switch — every further `pay` is rejected on chain. */
+export function revokeTx(p) {
+  return ownerOpTx(p, "revoke", []);
+}
+
 // --- receipt / substate readers ----------------------------------------------------------------
 /**
  * The `finalize` object (result + events + up_substates) of a committed receipt. On 0.50 the

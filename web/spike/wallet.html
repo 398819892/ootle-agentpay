@@ -410,6 +410,34 @@
       log("sys",t("signing"));
       try{const r=await api(adding?"/api/merchant/add":"/api/merchant/remove","POST",{merchant:m});log("res",adding?(L==="zh"?"已加入白名单":"merchant added"):(L==="zh"?"已移出白名单":"merchant removed"));addActivity({kind:"owner",sub:t("viaDapp",origin),status:"ok"});await refresh();return resolveReq(q.id,r);}catch(err){log("rej",err.message);addActivity({kind:"owner",sub:t("viaDapp",origin),status:"failed"});return resolveReq(q.id,null,err.message);}
     }
+    if(q.method==="tari_signAndSubmitTransaction"&&q.params&&(q.params.topUp||q.params.withdraw)){
+      const topping=!!q.params.topUp; const amount=((q.params.topUp||q.params.withdraw)||{}).amount;
+      log("req",topping?(L==="zh"?"请求充值":"top-up request"):(L==="zh"?"请求提现":"withdraw request"));
+      if(!ST||!ST.budget){log("rej","no budget");return resolveReq(q.id,null,"wallet has no budget open");}
+      if(!(Number(amount)>0)){return resolveReq(q.id,null,"amount must be a positive integer");}
+      const ok=await approveOwnerOp(topping?(L==="zh"?"充值预算":"Top up budget"):(L==="zh"?"提现到所有者":"Withdraw to owner"),[{lab:L==="zh"?"金额":"Amount",val:fmt(amount)+" XTR"}],origin);
+      if(!ok){log("rej",t("userRej"));return resolveReq(q.id,null,"user rejected (4001)");}
+      log("sys",t("signing"));
+      try{const r=await api(topping?"/api/top-up":"/api/withdraw","POST",{amount});log("res",topping?(L==="zh"?"已充值":"topped up"):(L==="zh"?"已提现":"withdrawn"));addActivity({kind:"owner",sub:t("viaDapp",origin),status:"ok"});await refresh();return resolveReq(q.id,r);}catch(err){log("rej",err.message);addActivity({kind:"owner",sub:t("viaDapp",origin),status:"failed"});return resolveReq(q.id,null,err.message);}
+    }
+    if(q.method==="tari_signAndSubmitTransaction"&&q.params&&(q.params.issueSession||q.params.revokeSession)){
+      const issuing=!!q.params.issueSession; const session=((q.params.issueSession||q.params.revokeSession)||{}).session;
+      log("req",issuing?(L==="zh"?"请求签发会话徽章":"issue-session request"):(L==="zh"?"请求停用会话":"revoke-session request"));
+      if(!ST||!ST.budget){log("rej","no budget");return resolveReq(q.id,null,"wallet has no budget open");}
+      if(!session){return resolveReq(q.id,null,"session label required");}
+      const ok=await approveOwnerOp(issuing?(L==="zh"?"签发会话徽章":"Issue session badge"):(L==="zh"?"停用会话":"Revoke session"),[{lab:L==="zh"?"会话":"Session",val:String(session)}],origin);
+      if(!ok){log("rej",t("userRej"));return resolveReq(q.id,null,"user rejected (4001)");}
+      log("sys",t("signing"));
+      try{const r=await api(issuing?"/api/sessions":"/api/sessions/revoke","POST",{session});log("res",issuing?(L==="zh"?"已签发":"issued"):(L==="zh"?"已停用":"revoked"));addActivity({kind:"owner",sub:t("viaDapp",origin),status:"ok"});await refresh();return resolveReq(q.id,r);}catch(err){log("rej",err.message);addActivity({kind:"owner",sub:t("viaDapp",origin),status:"failed"});return resolveReq(q.id,null,err.message);}
+    }
+    if(q.method==="tari_signAndSubmitTransaction"&&q.params&&q.params.revoke){
+      log("req",L==="zh"?"请求停用代理(全局)":"revoke-agent request");
+      if(!ST||!ST.budget){log("rej","no budget");return resolveReq(q.id,null,"wallet has no budget open");}
+      const ok=await approveOwnerOp(L==="zh"?"停用代理(全局)":"Revoke agent (global)",[{lab:L==="zh"?"操作":"Action",val:L==="zh"?"冻结所有支付":"Freeze all payments"}],origin);
+      if(!ok){log("rej",t("userRej"));return resolveReq(q.id,null,"user rejected (4001)");}
+      log("sys",t("signing"));
+      try{const r=await api("/api/revoke","POST",{});log("res",L==="zh"?"代理已停用":"agent revoked");addActivity({kind:"owner",sub:t("viaDapp",origin),status:"ok"});await refresh();return resolveReq(q.id,r);}catch(err){log("rej",err.message);addActivity({kind:"owner",sub:t("viaDapp",origin),status:"failed"});return resolveReq(q.id,null,err.message);}
+    }
     if(q.method==="tari_getBudget"||q.method==="tari_getState"){
       // READ over the relay: no signing, no approval modal — just hand a LINKED dApp the budget it
       // displays, so a non-custodial dashboard shows (and pays against) THIS wallet's on-chain budget.

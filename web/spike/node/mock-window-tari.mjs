@@ -28,7 +28,7 @@ globalThis.window = {
 
 const { TariWindowWallet, coreInstructions, describeTariError, normaliseNetwork } =
   await import("../src/tari-window.js");
-const { openBudgetTx, payTx, setLimitsTx, addMerchantTx, removeMerchantTx, findNewComponent, templateEvents, parseBudgetSubstate } =
+const { openBudgetTx, payTx, setLimitsTx, addMerchantTx, removeMerchantTx, topUpTx, withdrawTx, issueBadgeTx, revokeSessionTx, revokeTx, findNewComponent, templateEvents, parseBudgetSubstate } =
   await import("../src/agentpay-tx.js");
 
 // --- test fixtures (structurally valid 64-hex ids; owner is the real walletd account from this session)
@@ -215,6 +215,53 @@ console.log("== 6. owner ops: set_limits / add_merchant / remove_merchant builde
   ok(rmBody.includes("remove_merchant"), "remove_merchant body calls remove_merchant");
   ok(rmBody.includes(h("11")), "remove_merchant body references the merchant address");
   ok(rmBody.includes(OBADGE), "remove_merchant body references the owner badge (proof)");
+}
+
+console.log("== 7. lifecycle ops: top_up / withdraw / issue_agent_badge / revoke_session / revoke builders ==");
+{
+  const AGENT = "component_" + h("77");
+  const AVAULT = h("88");
+  const common = {
+    network: NETWORK_ID, maxEpoch: 0, owner: OWNER, ownerVaults: ["vault_" + VAULT], budget: NEWBUDGET,
+    budgetVault: "vault_" + VAULT, ownerBadge: "resource_" + OBADGE, agentBadge: "resource_" + ABADGE,
+    agent: AGENT, agentVaults: ["vault_" + AVAULT], maxFee: 200_000,
+  };
+
+  // top_up is OPEN on chain: owner funds from their own account (owner.withdraw -> budget.top_up); no proof.
+  const tu = topUpTx({ ...common, amount: 5000 });
+  const tuBody = JSON.stringify(coreInstructions(tu));
+  ok(tuBody.includes("top_up"), "top_up body calls top_up");
+  ok(tuBody.includes("withdraw"), "top_up body withdraws the funding bucket from the owner");
+  ok(!tuBody.includes(OBADGE), "top_up body carries NO owner-badge proof (open method)");
+  ok(Array.isArray(tu.fee_instructions) && tu.fee_instructions.length >= 1, "top_up keeps the fee in fee_instructions");
+  ok(!tuBody.includes("pay_fee"), "top_up body excludes the pay_fee call");
+
+  // withdraw is owner-gated: proof in the auth zone, budget.withdraw -> owner.deposit, both inside the scope.
+  const wd = withdrawTx({ ...common, amount: 1000 });
+  const wdBody = JSON.stringify(coreInstructions(wd));
+  ok(wdBody.includes("withdraw"), "withdraw body calls budget.withdraw");
+  ok(wdBody.includes("deposit"), "withdraw body deposits the coins back to the owner");
+  ok(wdBody.includes(OBADGE), "withdraw body references the owner badge (proof in the auth zone)");
+  ok(JSON.stringify(wd.inputs ?? wd).includes(VAULT), "withdraw declares the budget vault as an input");
+
+  // issue_agent_badge is owner-gated: mint under the proof, deposit the badge into the session account.
+  const ib = issueBadgeTx({ ...common, session: "s1" });
+  const ibBody = JSON.stringify(coreInstructions(ib));
+  ok(ibBody.includes("issue_agent_badge"), "issue body calls issue_agent_badge");
+  ok(ibBody.includes("deposit"), "issue body deposits the minted badge into an account");
+  ok(ibBody.includes(h("77")), "issue body references the session account that receives the badge");
+  ok(ibBody.includes(OBADGE), "issue body references the owner badge (proof)");
+  ok(JSON.stringify(ib.inputs ?? ib).includes(h("88")), "issue declares the session account's vault as an input (deposit target)");
+
+  const rs = revokeSessionTx({ ...common, session: "s1" });
+  const rsBody = JSON.stringify(coreInstructions(rs));
+  ok(rsBody.includes("revoke_session"), "revoke_session body calls revoke_session");
+  ok(rsBody.includes(OBADGE), "revoke_session body references the owner badge (proof)");
+
+  const rv = revokeTx({ ...common });
+  const rvBody = JSON.stringify(coreInstructions(rv));
+  ok(rvBody.includes("revoke") && !rvBody.includes("revoke_session"), "revoke body calls the global revoke");
+  ok(rvBody.includes(OBADGE), "revoke body references the owner badge (proof)");
 }
 
 console.log(`\n==== ${fail === 0 ? "ALL PASS" : "FAILURES"} : ${pass} passed, ${fail} failed ====`);
