@@ -136,6 +136,15 @@
   .checks{display:flex;flex-direction:column;gap:7px;} .check{display:flex;align-items:center;gap:9px;font-size:12.5px;padding:9px 11px;border-radius:10px;border:1px solid var(--border-soft);background:var(--surface-2);} .check .ic{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;flex-shrink:0;color:#fff;} .check.ok .ic{background:var(--good);} .check.ok{border-color:#bfe4c8;background:var(--good-bg);} .check.no .ic{background:var(--bad);} .check.no{border-color:#f3c2c7;background:var(--bad-bg);} .check .lab2{flex:1;} .check .q{color:var(--muted);font-family:var(--mono);font-size:11px;}
   .acts{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px 18px 18px;}
   .note{font-size:11.5px;color:var(--muted);line-height:1.6;text-align:center;}
+
+  /* ---- receive: real scannable QR ---- */
+  .qr svg{width:100%;height:100%;display:block;}
+  .recv-acct{display:flex;flex-direction:column;align-items:center;gap:7px;}
+  .recv-net{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:#1c6b30;background:var(--good-bg);border:1px solid #bfe4c8;border-radius:999px;padding:3px 10px;}
+  .recv-net .d{width:7px;height:7px;border-radius:50%;background:var(--good);}
+  .recv-net.main{color:var(--warn);background:#fff6e6;border-color:#f0d49a;} .recv-net.main .d{background:var(--warn);}
+  .recv-warn{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;line-height:1.55;color:#8a5a00;background:#fff8ed;border:1px solid #f0dcae;border-radius:11px;padding:10px 12px;}
+  .recv-warn .wi{flex-shrink:0;font-size:13px;line-height:1.3;}
   [hidden]{display:none!important;}
 </style>
 </head>
@@ -217,6 +226,8 @@
   <div class="menu" id="acctMenu" hidden></div>
 </div>
 
+<!-- Vendored QR generator (Kazuhiko Arase, MIT) — real scannable receive QR, no external CDN. -->
+<script src="qrcode.js"></script>
 <script>
   // Original flat fox mascot (NOT MetaMask's logo).
   function foxSVG(px){return '<svg width="'+px+'" height="'+px+'" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
@@ -236,6 +247,8 @@
       sendTitle:"发送 XTR", receiveTitle:"接收", to:"收款方", amount:"金额", continue:"继续", sending:"签名并提交中…",
       sent:"已发送", failed:"失败", done:"完成", newSend:"再发一笔", merchantName:"Caravel 商户",
       receiveHint:"把下面的账户地址给付款方。这是你在 Ootle L2 上的地址。", copy:"复制地址", copied:"已复制 ✓",
+      yourAddr:"你的收款地址", scanHint:"让付款方扫码,或复制地址",
+      onlyOotle:"只向此地址转入 Ootle L2 上的 XTR。转错网络或转入其他资产将无法找回。",
       netMenuTitle:"网络", netLocal:"Ootle Localnet", netMain:"Ootle 主网(即将)", netTest:"Ootle 测试网(即将)",
       acctMenuTitle:"账户", copyAddr:"复制地址", sites:"已连接的网站", noSites:"无", disconnect:"点击断开连接", disconnected:"已断开", settings:"设置(演示)", lock:"锁定(演示)", explorer:"在浏览器中查看",
       connTitle:"连接请求", connMsg:"这个 dApp 想连接你的钱包,读取你的账户地址。它不会因此获得花钱的权限 —— 每笔支付仍需你单独批准。",
@@ -258,6 +271,8 @@
       sendTitle:"Send XTR", receiveTitle:"Receive", to:"To (payee)", amount:"Amount", continue:"Continue", sending:"Signing & submitting…",
       sent:"Sent", failed:"Failed", done:"Done", newSend:"Send another", merchantName:"Caravel merchant",
       receiveHint:"Share your account address with the payer. This is your address on the Ootle L2.", copy:"Copy address", copied:"Copied ✓",
+      yourAddr:"Your receiving address", scanHint:"Have the payer scan the code, or copy the address",
+      onlyOotle:"Only send Ootle L2 XTR to this address. Funds sent on the wrong network, or other assets, can't be recovered.",
       netMenuTitle:"Network", netLocal:"Ootle Localnet", netMain:"Ootle Mainnet (soon)", netTest:"Ootle Testnet (soon)",
       acctMenuTitle:"Account", copyAddr:"Copy address", sites:"Connected sites", noSites:"none", disconnect:"Tap to disconnect", disconnected:"Disconnected", settings:"Settings (demo)", lock:"Lock (demo)", explorer:"View in explorer",
       connTitle:"Connection request", connMsg:"This dApp wants to connect to your wallet and read your account address. That does not let it spend — every payment still needs your separate approval.",
@@ -484,9 +499,28 @@
   $("sendBtn").onclick=()=>{if($("sendBtn").disabled)return;renderSend();openSheet("sheetSend");};
 
   // ---- receive sheet ----
+  // Build a real, scannable QR of the address. Vendored generator (window.qrcode); encodes the raw
+  // account address (no non-standard URI), ECC level M with L as a fallback for very long inputs. If
+  // the library somehow failed to load, fall back to the mascot so the address + copy still work.
+  function qrSvgFor(addr){
+    if(!addr||typeof qrcode!=="function")return foxSVG(80);
+    for(const ecc of ["M","L"]){
+      try{const qr=qrcode(0,ecc);qr.addData(addr);qr.make();return qr.createSvgTag({cellSize:4,margin:2,scalable:true});}catch(e){}
+    }
+    return foxSVG(80);
+  }
   function renderReceive(){
-    const a=ST?ST.account:""; const body=$("receiveBody");
-    body.innerHTML='<div class="result" style="gap:14px"><div class="ava lg"></div><div class="acctname" style="font-weight:600">'+esc(t("acctName"))+'</div><div class="qr">'+foxSVG(80)+'</div><div class="bigaddr">'+esc(a)+'</div></div><button class="btn block" id="copyBtn">'+esc(t("copy"))+'</button><p class="note">'+esc(t("receiveHint"))+'</p>';
+    const a=ST?ST.account:""; const net=ST?ST.network:""; const mainnet=/main/i.test(net);
+    const body=$("receiveBody");
+    body.innerHTML=
+      '<div class="recv-acct"><span class="ava lg"></span>'
+        +'<div class="acctname" style="font-weight:600">'+esc(t("acctName"))+'</div>'
+        +'<span class="recv-net'+(mainnet?" main":"")+'"><span class="d"></span>'+esc(net||"—")+'</span></div>'
+      +'<div class="qr">'+qrSvgFor(a)+'</div>'
+      +'<div class="lab center" style="text-align:center">'+esc(t("scanHint"))+'</div>'
+      +'<div class="field"><div class="lab">'+esc(t("yourAddr"))+'</div><div class="bigaddr">'+esc(a)+'</div></div>'
+      +'<button class="btn block" id="copyBtn">'+esc(t("copy"))+'</button>'
+      +'<div class="recv-warn"><span class="wi">⚠</span><span>'+esc(t("onlyOotle"))+'</span></div>';
     $("copyBtn").onclick=async()=>{const ok=await copyText(a);$("copyBtn").textContent=ok?t("copied"):"⚠";setTimeout(()=>$("copyBtn").textContent=t("copy"),1400);};
   }
   $("receiveBtn").onclick=()=>{renderReceive();openSheet("sheetReceive");};

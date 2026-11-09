@@ -298,6 +298,12 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://x");
     // Root now serves the full MetaMask-style wallet; the old single-page demo stays at /live.
+    // Vendored QR generator (Kazuhiko Arase, MIT), served to the wallet for the real receive QR.
+    if (req.method === "GET" && url.pathname === "/qrcode.js") {
+      const f = new URL("../qrcode.js", import.meta.url);
+      res.writeHead(200, { "content-type": "application/javascript; charset=utf-8", "cache-control": "max-age=86400" });
+      return res.end(fs.readFileSync(f));
+    }
     const STATIC = { "/": "wallet.html", "/index.html": "wallet.html", "/wallet.html": "wallet.html", "/wallet": "wallet.html",
       "/live": "wallet-live.html", "/wallet-live.html": "wallet-live.html",
       "/linked": "linked.html", "/linked.html": "linked.html", "/dapp.html": "dapp.html" };
