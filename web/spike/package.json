@@ -11,7 +11,8 @@
     "flow:a:dry": "node --experimental-wasm-modules node/flow-a-browser-key.mjs --dry-run",
     "flow:b": "node --experimental-wasm-modules node/flow-b-walletd-approve.mjs",
     "smoke:esme": "node --experimental-wasm-modules node/smoke-esmeralda.mjs",
-    "mock:tari": "node --experimental-wasm-modules node/mock-window-tari.mjs"
+    "mock:tari": "node --experimental-wasm-modules node/mock-window-tari.mjs",
+    "test": "node --test node/*.test.mjs"
   },
   "dependencies": {
     "@tari-project/ootle": "0.14.0",

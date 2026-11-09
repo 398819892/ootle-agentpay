@@ -155,3 +155,13 @@ A/B 都要求用户**自己跑 walletd**。路径 C 走 **`window.tari` 注入�
 一句话：`chain.js` 迁移已结构完成且能加载；flow-A 的落链验证仍卡在“需要充值账户”，与升级前同一道闸。
 
 环境：Node 22 + 依赖装在 WSL ext4（`~/agentpay-spike`），不在网络盘上。
+
+## 桥接回归测试（2026-11-09）
+
+live 钱包（`node/wallet-server.mjs`，:7777）↔ dApp（仪表盘 :8787）之间的 **WalletConnect 式中继**（dApp 只能 `POST /bridge/req` 入队、轮询 `/bridge/res`；钱包同源 `/bridge/poll` 取件、批准签名后 `/bridge/resolve` 回填；`linkedOrigin` 持久化 + CORS 只对 dApp origin 开 `/bridge/*`）从 `wallet-server.mjs` 抽成了独立模块 **`src/dapp-bridge.mjs`**（零链 / 零引擎 / 零密钥依赖，`wallet-server.mjs` 委托它，行为逐字不变）。
+
+测试 **`node/dapp-bridge.test.mjs`**（`node --test`，零依赖，13 用例全绿）：
+- **状态机**（无 HTTP）：id 自增、poll 只取未认领且认领后不再出、resolve 后出队不重复投递、`linkedOrigin` 只由被批准的 `tari_requestAccounts` 置位（pay / 被拒的 connect 都不置）、`unlink` 清除、`corsHeadersFor` 只放行白名单 origin、`dappOrigins` 接受逗号串或数组。
+- **端到端 HTTP**：真起 http server 挂 `bridge.handle`，用**真实的 `tari-provider.js`**（`window.tari`，在 mock DOM 下加载）驱动,fetch 循环扮钱包：connect 回传账户、committed 付款原样透传、超单笔上限作为 `committed:false` 结果（而非异常）透传、钱包 error 让 dApp 的 Promise reject、CORS 预检只给白名单 origin 发头。
+
+跑：`npm test`（= `node --test node/*.test.mjs`）。**WSL 看不到网络盘 `W:`**，所以把 `src/` + `node/` + `tari-provider.js` 拷到 WSL 能读的本地盘（如 `/mnt/c/…` 或 ext4）再跑；这套纯 JS 测试不需要 `npm install`（只用 node 内置 `node:test`/`node:http` + 全局 `fetch`，Node ≥18）。

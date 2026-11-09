@@ -25,6 +25,7 @@ import { decodeExecuteResult, decodeSubstateValue } from "@tari-project/ootle-wa
 import { L2Wallet } from "../src/l2-wallet.mjs";
 import { openBudgetTx, payTx, transferTx, templateEvents, parseBudgetSubstate, XTR } from "../src/agentpay-tx.js";
 import { connectIndexer, accountVaults } from "../src/chain.js";
+import { createDappBridge } from "../src/dapp-bridge.mjs";
 
 const PORT = parseInt(process.env.PORT) || 7777;
 const INDEXER_URL = process.env.INDEXER_URL || "http://127.0.0.1:12008";
@@ -73,20 +74,9 @@ const paySign = (unsignedTransaction) => (agentW || w).request("tari_signAndSubm
 // sign. The wallet UI (same origin, holds the key) polls /bridge/poll, shows its own approval, signs
 // via /api/pay, and posts the answer to /bridge/resolve. CORS is granted to the dApp origin for the
 // /bridge/* queue ONLY — /api/pay gets NO CORS, so a cross-origin dApp physically cannot call it.
-const DAPP_ORIGINS = (process.env.DAPP_ORIGINS || "http://127.0.0.1:8787,http://localhost:8787").split(",");
-// `linkedOrigin` is the connected dApp site, kept HERE (not just in the wallet page) so the link
-// survives a wallet reload — like a real wallet's "connected sites". `meta` lets /bridge/resolve
-// tell a connect apart from a pay by the original request's method.
-const bridge = { q: [], res: {}, seq: 0, meta: {}, linkedOrigin: null };
-function corsFor(req, res) {
-  const o = req.headers.origin;
-  if (o && DAPP_ORIGINS.includes(o)) {
-    res.setHeader("access-control-allow-origin", o);
-    res.setHeader("vary", "origin");
-    res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
-    res.setHeader("access-control-allow-headers", "content-type");
-  }
-}
+// The dApp <-> wallet relay (enqueue / poll / resolve / linkedOrigin + CORS) lives in its own module
+// so it can be regression-tested with no chain, engine or key — see src/dapp-bridge.mjs and its tests.
+const bridge = createDappBridge({ dappOrigins: process.env.DAPP_ORIGINS });
 const collect = (x, pfx, out = new Set()) => {
   if (!x) return out;
   if (typeof x === "string") { if (x.startsWith(pfx)) out.add(x); return out; }
@@ -231,43 +221,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- relay: the dApp enqueues (CORS-allowed), the wallet drains + answers (same origin) ---
-    if (url.pathname.startsWith("/bridge/")) {
-      corsFor(req, res);
-      if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
-      if (req.method === "POST" && url.pathname === "/bridge/req") {        // dApp -> enqueue
-        const p = await body(req);
-        if (!p.method) return send(res, 400, { error: "method required" });
-        const id = ++bridge.seq;
-        const origin = req.headers.origin || "(unknown)";
-        bridge.q.push({ id, method: p.method, params: p.params, origin, claimed: false });
-        bridge.meta[id] = { origin, method: p.method };
-        return send(res, 200, { id });
-      }
-      if (req.method === "GET" && url.pathname === "/bridge/res") {         // dApp -> poll for answer
-        const id = Number(url.searchParams.get("id"));
-        const r = bridge.res[id];
-        return send(res, 200, r ? { done: true, result: r.result, error: r.error } : { done: false });
-      }
-      if (req.method === "GET" && url.pathname === "/bridge/poll") {        // wallet -> drain new requests
-        const out = bridge.q.filter((e) => !e.claimed);
-        out.forEach((e) => { e.claimed = true; });
-        return send(res, 200, { reqs: out.map((e) => ({ id: e.id, method: e.method, params: e.params, origin: e.origin })) });
-      }
-      if (req.method === "POST" && url.pathname === "/bridge/resolve") {    // wallet -> post the answer
-        const p = await body(req);
-        bridge.res[p.id] = { result: p.result, error: p.error };
-        bridge.q = bridge.q.filter((e) => e.id !== p.id);
-        const m = bridge.meta[p.id];                                        // a connect that the user approved links the site
-        if (m && m.method === "tari_requestAccounts" && !p.error && p.result) bridge.linkedOrigin = m.origin;
-        delete bridge.meta[p.id];
-        return send(res, 200, { ok: true });
-      }
-      if (req.method === "POST" && url.pathname === "/bridge/unlink") {      // wallet -> revoke the connected site
-        bridge.linkedOrigin = null;
-        return send(res, 200, { ok: true });
-      }
-      return send(res, 404, { error: "unknown bridge route" });
-    }
+    // The queue/poll/resolve/linkedOrigin state machine + CORS live in src/dapp-bridge.mjs; handle()
+    // writes the response itself (with its own body reader), exactly as this block used to inline.
+    if (url.pathname.startsWith("/bridge/")) return void (await bridge.handle(req, res));
 
     send(res, 404, { error: "not found" });
   } catch (e) { send(res, 500, { error: String(e.message || e) }); }
