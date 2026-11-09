@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentPay 自持钱包</title>
+    <style>
+      :root { --bg:#f7f7f5; --fg:#1a1a1a; --mut:#666; --box:#fff; --line:#ddd; --ok:#1b7f3b; --bad:#b3261e; --acc:#4b3ad6; --warnbg:#fff4e5; --warnln:#e0a34d; }
+      @media (prefers-color-scheme: dark) { :root { --bg:#15161a; --fg:#ececec; --mut:#9a9aa3; --box:#1f2127; --line:#33363f; --warnbg:#2a2210; --warnln:#5a4a1e; } }
+      * { box-sizing: border-box; }
+      body { margin:0; padding:24px 16px; font:14px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--fg); display:flex; justify-content:center; }
+      .card { width:100%; max-width:460px; }
+      .brand { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
+      .logo { width:30px; height:30px; border-radius:8px; background:linear-gradient(135deg,var(--acc),#7d6bf0); display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; }
+      h1 { font-size:19px; margin:0; } h2 { font-size:15px; margin:0 0 6px; }
+      p.sub { color:var(--mut); margin:2px 0 18px; font-size:13px; }
+      section { background:var(--box); border:1px solid var(--line); border-radius:12px; padding:18px; margin-top:14px; }
+      label { display:block; color:var(--mut); font-size:12px; margin:10px 0 4px; }
+      input { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--fg); font-size:14px; }
+      input.mono { font-family:ui-monospace,monospace; font-size:12px; }
+      textarea { width:100%; min-height:92px; padding:10px; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--fg); font-family:ui-monospace,monospace; font-size:13px; resize:vertical; }
+      button { margin:10px 8px 0 0; padding:9px 14px; border:1px solid var(--acc); background:var(--acc); color:#fff; border-radius:8px; cursor:pointer; font-size:14px; }
+      button.ghost { background:transparent; color:var(--acc); } button.wide { width:100%; margin-right:0; } button:disabled { opacity:.5; cursor:default; }
+      .row { display:flex; gap:8px; } .row > button { flex:1; }
+      .mut { color:var(--mut); } .ok { color:var(--ok); } .bad { color:var(--bad); font-size:13px; min-height:18px; }
+      .addr { font-family:ui-monospace,monospace; font-size:12px; word-break:break-all; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:9px; margin-top:6px; }
+      .warn { background:var(--warnbg); border:1px solid var(--warnln); border-radius:8px; padding:10px 12px; font-size:13px; margin-top:12px; }
+      .words { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:12px; }
+      .w { font-family:ui-monospace,monospace; font-size:12px; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+      .w b { color:var(--mut); font-weight:400; margin-right:6px; user-select:none; }
+      .pill { display:inline-block; padding:1px 8px; border-radius:10px; border:1px solid var(--line); color:var(--mut); font-size:11px; margin-left:6px; }
+      [hidden] { display:none !important; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="brand"><div class="logo">A</div><h1>AgentPay 自持钱包</h1></div>
+      <p class="sub">私钥在你的浏览器里生成与保管,助记词由你备份,后端无从接触。<span class="pill" id="netPill">localnet</span></p>
+
+      <!-- 1. 无钱包:入口 -->
+      <section id="pOnboard" hidden>
+        <h2>开始</h2>
+        <p class="mut" style="font-size:13px">创建一个新钱包,或用 48 词助记词恢复已有钱包。</p>
+        <button id="btnCreate" class="wide">创建新钱包</button>
+        <button id="btnRestoreStart" class="ghost wide">用助记词恢复</button>
+      </section>
+
+      <!-- 2. 创建:展示助记词 + 地址 -->
+      <section id="pCreate" hidden>
+        <h2>备份你的恢复短语</h2>
+        <div class="warn">这 48 个词是恢复钱包的唯一凭证。请按顺序抄写在纸上离线保存。<b>任何人拿到它就能动用你的资产;丢失则无法找回。</b>切勿截图或粘贴到联网处。</div>
+        <div class="words" id="wordGrid"></div>
+        <label>此钱包地址(由密钥派生,离线生成)</label>
+        <div class="addr" id="createAddr">…</div>
+        <button id="btnReveal" class="ghost">▣ 已确认,下一步</button>
+      </section>
+
+      <!-- 3. 恢复:输入助记词 -->
+      <section id="pRestore" hidden>
+        <h2>输入恢复短语</h2>
+        <label>48 个词,用空格分隔</label>
+        <textarea id="restoreWords" placeholder="word1 word2 … word48"></textarea>
+        <div class="bad" id="restoreErr"></div>
+        <div class="row">
+          <button id="btnRestoreVerify">验证并继续</button>
+          <button id="btnRestoreBack" class="ghost">返回</button>
+        </div>
+      </section>
+
+      <!-- 4. 设口令(创建/恢复共用) -->
+      <section id="pSetPass" hidden>
+        <h2>设置解锁口令</h2>
+        <p class="mut" style="font-size:13px">口令用于在本机加密保管你的私钥(AES-256-GCM)。它不会离开此设备,也无法用于找回助记词。</p>
+        <label>口令(至少 8 位)</label>
+        <input id="pass1" type="password" autocomplete="new-password" />
+        <label>再次输入</label>
+        <input id="pass2" type="password" autocomplete="new-password" />
+        <div class="bad" id="setPassErr"></div>
+        <button id="btnEncrypt" class="wide">加密并保存</button>
+      </section>
+
+      <!-- 5. 解锁(已有保险箱) -->
+      <section id="pUnlock" hidden>
+        <h2>解锁钱包</h2>
+        <label>口令</label>
+        <input id="unlockPass" type="password" autocomplete="current-password" />
+        <div class="bad" id="unlockErr"></div>
+        <button id="btnUnlock" class="wide">解锁</button>
+        <button id="btnForget" class="ghost wide">忘记此钱包(清除本机数据)</button>
+      </section>
+
+      <!-- 6. 已解锁 -->
+      <section id="pMain" hidden>
+        <h2>钱包 <span class="pill ok" style="color:var(--ok);border-color:var(--ok)">已解锁</span></h2>
+        <label>地址</label>
+        <div class="addr" id="mainAddr">…</div>
+        <div class="row">
+          <button id="btnCopy" class="ghost">复制地址</button>
+          <button id="btnLock" class="ghost">锁定</button>
+        </div>
+        <button id="btnShowPhrase" class="ghost wide">显示恢复短语(需口令)</button>
+        <div id="phraseReveal" hidden>
+          <label>输入口令以显示</label>
+          <input id="revealPass" type="password" autocomplete="current-password" />
+          <div class="bad" id="revealErr"></div>
+          <button id="btnRevealDo">显示</button>
+          <div class="words" id="revealGrid" hidden></div>
+          <button id="btnHidePhrase" class="ghost" hidden>隐藏</button>
+        </div>
+        <p class="mut" style="font-size:12px;margin-top:14px">余额、收款与付款需要链上账户(首次充值时在链上创建)。这一步将在后续增量接入。</p>
+      </section>
+    </div>
+    <script type="module" src="/src/wallet-sc.js"></script>
+  </body>
+</html>

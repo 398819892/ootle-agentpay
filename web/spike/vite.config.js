@@ -26,6 +26,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         tapplet: resolve(__dirname, "tapplet/index.html"),
+        walletSc: resolve(__dirname, "wallet-sc.html"),
       },
     },
   },
