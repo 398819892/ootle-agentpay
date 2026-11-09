@@ -43,6 +43,7 @@
         <p class="mut" style="font-size:13px">创建一个新钱包,或用 48 词助记词恢复已有钱包。</p>
         <button id="btnCreate" class="wide">创建新钱包</button>
         <button id="btnRestoreStart" class="ghost wide">用助记词恢复</button>
+        <button id="btnImportDev" class="ghost wide" hidden>导入现有账户(本地开发)</button>
       </section>
 
       <!-- 2. 创建:展示助记词 + 地址 -->
@@ -92,7 +93,11 @@
       <!-- 6. 已解锁 -->
       <section id="pMain" hidden>
         <h2>钱包 <span class="pill ok" style="color:var(--ok);border-color:var(--ok)">已解锁</span></h2>
-        <label>地址</label>
+        <div id="balBlock" hidden style="text-align:center;margin:6px 0 14px">
+          <div style="font-size:30px;font-weight:700;letter-spacing:-.5px"><span id="balNum">—</span> <span class="mut" style="font-size:15px">XTR</span></div>
+          <div class="mut" style="font-size:12px">账户余额(链上读取)</div>
+        </div>
+        <label id="addrLabel">地址</label>
         <div class="addr" id="mainAddr">…</div>
         <div class="row">
           <button id="btnCopy" class="ghost">复制地址</button>

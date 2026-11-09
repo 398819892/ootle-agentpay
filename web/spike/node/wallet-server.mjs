@@ -294,6 +294,20 @@ async function doRevoke() {
 const send = (res, code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
 const body = (req) => new Promise((r) => { let d = ""; req.on("data", (c) => d += c); req.on("end", () => { try { r(JSON.parse(d || "{}")); } catch { r({}); } }); });
 
+// The self-custody wallet is a Vite-built bundle (keys live in the browser) served from ../dist.
+const DIST = new URL("../dist/", import.meta.url);
+const MIME = { ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".mjs": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8", ".wasm": "application/wasm", ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml", ".ico": "image/x-icon", ".woff2": "font/woff2", ".map": "application/json; charset=utf-8" };
+function serveDist(res, rel) {
+  const f = new URL(rel.replace(/^\/+/, ""), DIST);
+  if (!fs.existsSync(f)) return false;
+  const ext = rel.slice(rel.lastIndexOf("."));
+  res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream", "cache-control": ext === ".html" ? "no-store" : "max-age=86400" });
+  res.end(fs.readFileSync(f));
+  return true;
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://x");
@@ -304,7 +318,17 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "application/javascript; charset=utf-8", "cache-control": "max-age=86400" });
       return res.end(fs.readFileSync(f));
     }
-    const STATIC = { "/": "wallet.html", "/index.html": "wallet.html", "/wallet.html": "wallet.html", "/wallet": "wallet.html",
+    // Root = the self-custody wallet (Vite build in ../dist). Built assets live under /assets.
+    // The classic backend-custodial wallet stays reachable at /classic.
+    if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
+      if (serveDist(res, "wallet-sc.html")) return;
+      // no build present -> fall back to the classic wallet below
+    }
+    if (req.method === "GET" && url.pathname.startsWith("/assets/")) {
+      if (serveDist(res, url.pathname)) return;
+      return send(res, 404, { error: "asset not found" });
+    }
+    const STATIC = { "/": "wallet.html", "/classic": "wallet.html", "/classic.html": "wallet.html", "/wallet.html": "wallet.html", "/wallet": "wallet.html",
       "/live": "wallet-live.html", "/wallet-live.html": "wallet-live.html",
       "/linked": "linked.html", "/linked.html": "linked.html", "/dapp.html": "dapp.html" };
     if (req.method === "GET" && STATIC[url.pathname]) {
@@ -318,6 +342,12 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/account") {
       return send(res, 200, { account: ACCOUNT, resource: "XTR", balance: (await ownerBalance()).toString() });
+    }
+    // localnet dev continuity: let the in-browser self-custody wallet IMPORT this funded dev account by
+    // taking its key into the browser. This server is localnet-only (status.network === "localnet");
+    // never expose this on a real network.
+    if (req.method === "GET" && url.pathname === "/api/dev-key") {
+      return send(res, 200, { owner: key.owner, view: key.view, account: ACCOUNT });
     }
     if (req.method === "POST" && url.pathname === "/api/send") {
       const p = await body(req); const amt = parseInt(p.amount);

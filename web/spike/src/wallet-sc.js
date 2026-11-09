@@ -54,6 +54,26 @@ $("btnCreate").onclick = async () => {
 };
 $("btnReveal").onclick = () => { $("setPassErr").textContent = ""; $("pass1").value = $("pass2").value = ""; show("pSetPass"); };
 
+// --- import an existing account (localnet dev continuity) ---------------------------------------
+// Pulls the dev account's key from the wallet backend (localnet only) INTO the browser, so the
+// existing funded account keeps showing but the key is now browser-held and encrypted here.
+$("btnImportDev").onclick = async () => {
+  let k;
+  try {
+    const r = await fetch("/api/dev-key");
+    if (!r.ok) throw new Error("backend returned " + r.status);
+    k = await r.json();
+    if (!k.owner || !k.view) throw new Error("no key in response");
+  } catch (e) {
+    alert("无法导入现有账户: " + (e?.message || e) + "(需从 :7777 钱包后端打开)");
+    return;
+  }
+  pending = { owner: fromHex(k.owner), view: fromHex(k.view), account: k.account || null };
+  $("pass1").value = $("pass2").value = "";
+  $("setPassErr").textContent = "";
+  show("pSetPass");
+};
+
 // --- restore -----------------------------------------------------------------------------------
 $("btnRestoreStart").onclick = () => { $("restoreErr").textContent = ""; $("restoreWords").value = ""; show("pRestore"); };
 $("btnRestoreBack").onclick = routeStart;
@@ -77,6 +97,7 @@ $("btnEncrypt").onclick = async () => {
   if (p1 !== p2) return void ($("setPassErr").textContent = "两次输入不一致");
   if (!pending) return void ($("setPassErr").textContent = "没有待保存的密钥,请重试");
   const secret = { owner: toHex(pending.owner), view: toHex(pending.view) };
+  if (pending.account) secret.account = pending.account;
   const blob = await encryptVault(secret, p1);
   try { localStorage.setItem(VAULT_KEY, JSON.stringify(blob)); }
   catch (e) { return void ($("setPassErr").textContent = "保存失败: " + (e?.message || e)); }
@@ -109,6 +130,8 @@ $("btnForget").onclick = () => {
 };
 
 // --- main (unlocked) ---------------------------------------------------------------------------
+const groupNum = (s) => String(s).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
 async function enterMain() {
   show("pMain");
   $("phraseReveal").hidden = true;
@@ -116,10 +139,25 @@ async function enterMain() {
   $("btnHidePhrase").hidden = true;
   $("revealPass").value = "";
   $("revealErr").textContent = "";
-  $("mainAddr").textContent = "派生中…";
-  try {
-    $("mainAddr").textContent = await addressOf(fromHex(unlocked.owner), fromHex(unlocked.view));
-  } catch (e) { $("mainAddr").textContent = "地址派生失败: " + (e?.message || e); }
+  if (unlocked.account) {
+    // an on-chain account (imported / funded): show the component address + live balance
+    $("addrLabel").textContent = "账户";
+    $("mainAddr").textContent = unlocked.account;
+    $("balBlock").hidden = false;
+    $("balNum").textContent = "…";
+    try {
+      const r = await fetch("/api/account");
+      const j = await r.json();
+      $("balNum").textContent = groupNum(j.balance ?? "0");
+    } catch { $("balNum").textContent = "读取失败"; }
+  } else {
+    // a fresh self-custody key with no on-chain account yet: show the derived key address
+    $("addrLabel").textContent = "密钥地址(未充值,链上尚无账户)";
+    $("balBlock").hidden = true;
+    $("mainAddr").textContent = "派生中…";
+    try { $("mainAddr").textContent = await addressOf(fromHex(unlocked.owner), fromHex(unlocked.view)); }
+    catch (e) { $("mainAddr").textContent = "地址派生失败: " + (e?.message || e); }
+  }
 }
 $("btnCopy").onclick = async () => {
   try { await navigator.clipboard.writeText($("mainAddr").textContent); $("btnCopy").textContent = "已复制"; setTimeout(() => ($("btnCopy").textContent = "复制地址"), 1200); } catch {}
@@ -145,4 +183,6 @@ $("btnHidePhrase").onclick = () => { $("revealGrid").hidden = true; $("btnHidePh
 
 // boot
 void TOTAL_WORDS; // 48 (owner 24 ‖ view 24)
+// offer "import existing account" only when served by the wallet backend (localnet dev)
+fetch("/api/status").then((r) => { if (r.ok) $("btnImportDev").hidden = false; }).catch(() => {});
 routeStart();

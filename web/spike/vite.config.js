@@ -1,7 +1,9 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 import wasm from "vite-plugin-wasm";
-import topLevelAwait from "vite-plugin-top-level-await";
+// Native top-level await (build target esnext) instead of vite-plugin-top-level-await: that plugin
+// crashes on newer @swc/core ("missing field `type`") at bundle time, and modern browsers run TLA
+// natively, so vite-plugin-wasm's await-instantiate needs no transform.
 
 // The 0.47 swarm walletd sends NO CORS headers (verified: a preflight gets 200 with no
 // access-control-allow-origin), so a browser cannot call it directly. Dev-only workaround: proxy
@@ -18,8 +20,9 @@ const FRAME_ANCESTORS =
 const tappletHeaders = { "Content-Security-Policy": FRAME_ANCESTORS };
 
 export default defineConfig({
-  plugins: [wasm(), topLevelAwait()],
+  plugins: [wasm()],
   build: {
+    target: "esnext",
     rollupOptions: {
       // Two entries: the combined A/B/C demo (index.html) and the standalone tapplet page
       // (tapplet/index.html), so `vite build` emits dist/tapplet/index.html for the dev/registry tapplet.
