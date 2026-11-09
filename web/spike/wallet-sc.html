@@ -99,6 +99,10 @@
         </div>
         <label id="addrLabel">地址</label>
         <div class="addr" id="mainAddr">…</div>
+        <div id="fundBlock" hidden style="margin-top:10px">
+          <button id="btnFund" class="wide">创建账户并领取测试币(localnet)</button>
+          <div class="bad" id="fundErr"></div>
+        </div>
         <div class="row">
           <button id="btnCopy" class="ghost">复制地址</button>
           <button id="btnLock" class="ghost">锁定</button>
@@ -112,7 +116,7 @@
           <div class="words" id="revealGrid" hidden></div>
           <button id="btnHidePhrase" class="ghost" hidden>隐藏</button>
         </div>
-        <p class="mut" style="font-size:12px;margin-top:14px">余额、收款与付款需要链上账户(首次充值时在链上创建)。这一步将在后续增量接入。</p>
+        <p class="mut" style="font-size:12px;margin-top:14px">收款:把上面的账户地址发给对方即可。付款(send)将在下一增量接入。</p>
       </section>
     </div>
     <script type="module" src="/src/wallet-sc.js"></script>

@@ -10,10 +10,24 @@ import {
 } from "./self-custody.mjs";
 import { Network } from "@tari-project/ootle";
 import { SecretKeyWallet } from "@tari-project/ootle-secret-key-wallet";
+import { connect as scConnect, fundViaFaucet, balanceOf, ownerPublicHex } from "./sc-chain.mjs";
 
 const $ = (id) => document.getElementById(id);
 const VAULT_KEY = "ap-sc-vault";
+const ACCOUNT_KEY = "ap-sc-account"; // the on-chain account component (public; stored in the clear)
 const NETWORK = Network.LocalNet; // identity address is net-scoped; localnet for now (prefix otl_loc_)
+
+let INDEXER = null; // indexer URL, learned from the backend's /api/status; enables on-chain ops
+let _provider = null;
+async function ensureIndexer() {
+  if (INDEXER) return INDEXER;
+  try { const r = await fetch("/api/status"); if (r.ok) { const s = await r.json(); INDEXER = s.indexer || "http://127.0.0.1:12008"; } } catch { /* standalone, no backend */ }
+  return INDEXER;
+}
+async function indexer() { return (_provider ??= await scConnect(INDEXER)); }
+// the live on-chain account: imported (in the vault) or one we funded (public, in localStorage)
+const currentAccount = () => (unlocked && unlocked.account) || localStorage.getItem(ACCOUNT_KEY) || null;
+const walletOf = () => SecretKeyWallet.fromSecretKey(fromHex(unlocked.owner), NETWORK, fromHex(unlocked.view));
 
 const PANELS = ["pOnboard", "pCreate", "pRestore", "pSetPass", "pUnlock", "pMain"];
 function show(panel) {
@@ -125,6 +139,7 @@ $("btnUnlock").onclick = async () => {
 $("btnForget").onclick = () => {
   if (!confirm("清除本机的钱包数据?若没有助记词备份将无法找回。")) return;
   localStorage.removeItem(VAULT_KEY);
+  localStorage.removeItem(ACCOUNT_KEY);
   unlocked = pending = null;
   routeStart();
 };
@@ -139,26 +154,60 @@ async function enterMain() {
   $("btnHidePhrase").hidden = true;
   $("revealPass").value = "";
   $("revealErr").textContent = "";
-  if (unlocked.account) {
+  $("fundErr").textContent = "";
+  await ensureIndexer();
+  const account = currentAccount();
+  if (account) {
     // an on-chain account (imported / funded): show the component address + live balance
     $("addrLabel").textContent = "账户";
-    $("mainAddr").textContent = unlocked.account;
+    $("mainAddr").textContent = account;
+    $("fundBlock").hidden = true;
     $("balBlock").hidden = false;
-    $("balNum").textContent = "…";
-    try {
-      const r = await fetch("/api/account");
-      const j = await r.json();
-      $("balNum").textContent = groupNum(j.balance ?? "0");
-    } catch { $("balNum").textContent = "读取失败"; }
+    await refreshBalance(account);
   } else {
-    // a fresh self-custody key with no on-chain account yet: show the derived key address
+    // a fresh self-custody key with no on-chain account yet: show the derived key address, offer funding
     $("addrLabel").textContent = "密钥地址(未充值,链上尚无账户)";
     $("balBlock").hidden = true;
     $("mainAddr").textContent = "派生中…";
     try { $("mainAddr").textContent = await addressOf(fromHex(unlocked.owner), fromHex(unlocked.view)); }
     catch (e) { $("mainAddr").textContent = "地址派生失败: " + (e?.message || e); }
+    $("btnFund").disabled = false;
+    $("btnFund").textContent = "创建账户并领取测试币(localnet)";
+    $("fundBlock").hidden = !INDEXER; // funding needs the localnet indexer/faucet
   }
 }
+
+async function refreshBalance(account) {
+  $("balNum").textContent = "…";
+  await ensureIndexer();
+  if (!INDEXER) { $("balNum").textContent = "—"; return; }
+  try {
+    const bal = await balanceOf(await indexer(), account);
+    $("balNum").textContent = groupNum(bal.toString());
+  } catch (e) { $("balNum").textContent = "读取失败"; console.warn("balance read:", e); }
+}
+
+// create + fund the account on localnet, signed in the browser by the user's own key
+$("btnFund").onclick = async () => {
+  $("fundErr").textContent = "";
+  $("btnFund").disabled = true;
+  const prev = $("btnFund").textContent;
+  $("btnFund").textContent = "创建中…(约 10–30 秒)";
+  try {
+    await ensureIndexer();
+    if (!INDEXER) throw new Error("无法连接本地索引器");
+    const provider = await indexer();
+    const ownerPub = ownerPublicHex(fromHex(unlocked.owner));
+    const { account } = await fundViaFaucet(provider, walletOf(), ownerPub);
+    if (!account) throw new Error("交易已提交但未找到新账户");
+    localStorage.setItem(ACCOUNT_KEY, account);
+    await enterMain();
+  } catch (e) {
+    $("fundErr").textContent = "创建失败: " + (e?.reason || e?.message || e);
+    $("btnFund").disabled = false;
+    $("btnFund").textContent = prev;
+  }
+};
 $("btnCopy").onclick = async () => {
   try { await navigator.clipboard.writeText($("mainAddr").textContent); $("btnCopy").textContent = "已复制"; setTimeout(() => ($("btnCopy").textContent = "复制地址"), 1200); } catch {}
 };
@@ -183,6 +232,10 @@ $("btnHidePhrase").onclick = () => { $("revealGrid").hidden = true; $("btnHidePh
 
 // boot
 void TOTAL_WORDS; // 48 (owner 24 ‖ view 24)
-// offer "import existing account" only when served by the wallet backend (localnet dev)
-fetch("/api/status").then((r) => { if (r.ok) $("btnImportDev").hidden = false; }).catch(() => {});
+// learn the indexer + offer "import existing account" when served by the wallet backend (localnet dev)
+fetch("/api/status").then((r) => r.ok ? r.json() : null).then((s) => {
+  if (!s) return;
+  $("btnImportDev").hidden = false;
+  INDEXER = s.indexer || "http://127.0.0.1:12008";
+}).catch(() => {});
 routeStart();
