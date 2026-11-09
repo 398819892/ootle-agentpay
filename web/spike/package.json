@@ -15,6 +15,7 @@
     "test": "node --test node/*.test.mjs"
   },
   "dependencies": {
+    "@scure/bip39": "1.3.0",
     "@tari-project/ootle": "0.14.0",
     "@tari-project/ootle-indexer": "0.14.0",
     "@tari-project/ootle-secret-key-wallet": "0.14.0",
