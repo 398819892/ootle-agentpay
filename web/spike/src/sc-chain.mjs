@@ -14,7 +14,7 @@ import {
 } from "@tari-project/ootle";
 import { publicKeyFromSecretKey } from "@tari-project/ootle-wasm";
 import { decodeSubstateValue, decodeEvent, decodeExecuteResult } from "@tari-project/ootle-wasm-bor";
-import { findNewComponent, transferTx, openBudgetTx, payTx, parseBudgetSubstate, XTR } from "./agentpay-tx.js";
+import { findNewComponent, transferTx, openBudgetTx, payTx, setLimitsTx, addMerchantTx, removeMerchantTx, parseBudgetSubstate, XTR } from "./agentpay-tx.js";
 import { connectIndexer, accountVaults, maxEpoch, signSealSubmit } from "./chain.js";
 
 const XTR_HEX = XTR.replace(/^resource_/, "");
@@ -286,4 +286,41 @@ export async function payBudget(provider, wallet, { account, budget, state, merc
   try { after = BigInt((await readBudget(provider, budget)).spent); } catch { /* keep before */ }
   if (before == null || after > before) return { committed: true, txid };
   return { committed: false, txid, reason: "链上拒绝:超出额度或商户不在白名单" };
+}
+
+// --- owner governance ops (owner-badge gated), signed in the browser -------------------------------
+// set_limits / add_merchant / remove_merchant put an OWNER-BADGE proof in the auth zone (see
+// agentpay-tx.js). Like pay, a rule rejection can commit only the fee (receipt reads Commit, no throw),
+// so each op VERIFIES its effect by re-reading the budget and reports committed:false if it didn't take.
+async function ownerOpCommon(provider, owner, budget, ownerBadge) {
+  return {
+    network: Network.LocalNet,
+    maxEpoch: await maxEpoch(provider),
+    owner,
+    ownerVaults: await accountVaults(provider, owner), // hold the owner badge the proof needs + the fee XTR
+    budget,
+    ownerBadge,
+    maxFee: 200_000,
+  };
+}
+
+/** owner: update the per-tx + daily caps. Verifies by re-reading the caps. */
+export async function setLimits(provider, wallet, { owner, budget, ownerBadge, perTxCap, dailyCap }) {
+  const tx = setLimitsTx({ ...(await ownerOpCommon(provider, owner, budget, ownerBadge)), perTxCap: BigInt(perTxCap), dailyCap: BigInt(dailyCap) });
+  let txid = null;
+  try { txid = (await signSealSubmit(provider, [wallet], tx)).txId; }
+  catch (e) { return { committed: false, reason: e?.reason || e?.message || String(e) }; }
+  try { const b = await readBudget(provider, budget); if (b.perTx === String(perTxCap) && b.daily === String(dailyCap)) return { committed: true, txid }; } catch { /* fall through */ }
+  return { committed: false, txid, reason: "链上未生效(可能被合约规则拒绝)" };
+}
+
+/** owner: add or remove `merchant` from the whitelist (`add` true = add). Verifies by re-reading it. */
+export async function setMerchant(provider, wallet, { owner, budget, ownerBadge, merchant, add }) {
+  const common = await ownerOpCommon(provider, owner, budget, ownerBadge);
+  const tx = add ? addMerchantTx({ ...common, merchant }) : removeMerchantTx({ ...common, merchant });
+  let txid = null;
+  try { txid = (await signSealSubmit(provider, [wallet], tx)).txId; }
+  catch (e) { return { committed: false, reason: e?.reason || e?.message || String(e) }; }
+  try { const b = await readBudget(provider, budget); const has = b.whitelist.includes(merchant); if (add ? has : !has) return { committed: true, txid }; } catch { /* fall through */ }
+  return { committed: false, txid, reason: add ? "链上未加入白名单" : "链上未移出白名单" };
 }

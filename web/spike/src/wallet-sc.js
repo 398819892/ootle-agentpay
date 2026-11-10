@@ -17,7 +17,7 @@ import {
 } from "./self-custody.mjs";
 import { Network } from "@tari-project/ootle";
 import { SecretKeyWallet } from "@tari-project/ootle-secret-key-wallet";
-import { connect as scConnect, fundViaFaucet, balanceOf, sendXtr, ownerPublicHex, accountHistory, openBudget, readBudget, payBudget } from "./sc-chain.mjs";
+import { connect as scConnect, fundViaFaucet, balanceOf, sendXtr, ownerPublicHex, accountHistory, openBudget, readBudget, payBudget, setLimits, setMerchant } from "./sc-chain.mjs";
 
 const $ = (id) => document.getElementById(id);
 const VAULT_KEY = "ap-sc-vault";       // encrypted: { keys:[{id,owner,view}] }
@@ -763,6 +763,41 @@ async function handleReq(q) {
         const r = await payBudget(await indexer(), walletOf(), { account, budget: b.component, state, merchant: b.merchant, amount, memo });
         if (r.committed && currentAccount() === account) renderBudget();
         return resolveReq(q.id, { committed: !!r.committed, txid: r.txid || null, amount: amount.toString(), reason: r.reason || "" });
+      } catch (e) { return resolveReq(q.id, null, e?.reason || e?.message || String(e)); }
+    }
+    // WRITE (owner-gated): change caps / whitelist — owner-badge proof, browser-signed, approved here.
+    if (q.method === "tari_signAndSubmitTransaction" && q.params && (q.params.setLimits || q.params.addMerchant || q.params.removeMerchant)) {
+      if (!isLinked(origin)) return resolveReq(q.id, null, "请先连接钱包 (4100)");
+      const account = currentAccount();
+      const b = activeBudget();
+      if (!account) return resolveReq(q.id, null, "钱包尚无链上账户");
+      if (!b) return resolveReq(q.id, null, "钱包尚未开通预算(请先在钱包里开预算)");
+      let title, lines, op;
+      if (q.params.setLimits) {
+        const { perTxCap, dailyCap } = q.params.setLimits;
+        if (!/^\d+$/.test(String(perTxCap)) || !/^\d+$/.test(String(dailyCap))) return resolveReq(q.id, null, "额度必须是整数");
+        title = "修改额度";
+        lines = [`单笔上限 <b>${groupNum(String(perTxCap))} XTR</b>`, `每日上限 <b>${groupNum(String(dailyCap))} XTR</b>`, `<span class="mut" style="font-size:12px">预算 ${esc(shortAddr(b.component))}</span>`];
+        op = { kind: "limits", perTxCap: String(perTxCap), dailyCap: String(dailyCap) };
+      } else {
+        const add = !!q.params.addMerchant;
+        const merchant = ((q.params.addMerchant || q.params.removeMerchant) || {}).merchant;
+        if (!/^component_[0-9a-f]{64}$/.test(merchant || "")) return resolveReq(q.id, null, "商户地址应为 component_ 开头的 64 位十六进制");
+        title = add ? "加入白名单" : "移出白名单";
+        lines = [`商户 <b class="mono">${esc(shortAddr(merchant))}</b>`, `<span class="mut" style="font-size:12px">预算 ${esc(shortAddr(b.component))}</span>`];
+        op = { kind: "merchant", merchant, add };
+      }
+      const ok = await dappApprove({ title, origin, approveLabel: "确认", lines });
+      if (!ok) return resolveReq(q.id, null, "用户拒绝 (4001)");
+      try {
+        await ensureIndexer();
+        const p = await indexer();
+        const common = { owner: account, budget: b.component, ownerBadge: b.ownerBadge };
+        const r = op.kind === "limits"
+          ? await setLimits(p, walletOf(), { ...common, perTxCap: op.perTxCap, dailyCap: op.dailyCap })
+          : await setMerchant(p, walletOf(), { ...common, merchant: op.merchant, add: op.add });
+        if (r.committed && currentAccount() === account) renderBudget();
+        return resolveReq(q.id, { committed: !!r.committed, txid: r.txid || null, reason: r.reason || "" });
       } catch (e) { return resolveReq(q.id, null, e?.reason || e?.message || String(e)); }
     }
     if (q.method === "tari_sendTransaction" || (q.method === "tari_signAndSubmitTransaction" && q.params && q.params.transfer)) {
