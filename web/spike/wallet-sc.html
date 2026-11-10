@@ -94,13 +94,62 @@
       .qr svg { width:100%; height:auto; display:block; }
 
       /* activity */
+      .acthead { display:flex; align-items:center; justify-content:space-between; }
+      .refresh { width:28px; height:28px; border-radius:50%; border:1px solid var(--border); background:var(--surface); color:var(--muted); font-size:14px; line-height:1; display:grid; place-items:center; }
+      .refresh:hover:not(:disabled) { background:var(--surface-3); color:var(--fg); }
+      .refresh:disabled { opacity:.6; cursor:default; } .refresh.spin { animation:spin .8s linear infinite; }
+      @keyframes spin { to { transform:rotate(360deg); } }
       .arow { display:flex; align-items:center; gap:11px; padding:10px 11px; border:1px solid var(--border-soft); border-radius:12px; background:var(--surface); }
-      .aic { width:34px; height:34px; border-radius:50%; display:grid; place-items:center; font-size:15px; flex-shrink:0; }
+      .agrow { min-width:0; } /* let the mono sub-line ellipsize instead of shoving the amount off-row */
+      .aic { width:34px; height:34px; border-radius:50%; display:grid; place-items:center; font-size:15px; flex-shrink:0; font-weight:700; }
       .aic.out { background:var(--blue-bg); color:var(--blue); } .aic.in { background:var(--good-bg); color:var(--good); }
+      .aic.fund { background:var(--warn-bg); color:var(--brand); }
+      .aic.op { background:var(--surface-3); color:var(--muted); font-size:13px; }
       .atitle { font-size:13px; font-weight:600; } .asub { font-size:11px; color:var(--muted); font-family:var(--mono); word-break:break-all; }
+      .afail { color:var(--bad); font-weight:600; }
       .aamt { margin-left:auto; text-align:right; font-family:var(--mono); font-size:13px; font-weight:600; white-space:nowrap; }
+      .aamt.pos { color:var(--good); } .aamt.neg { color:var(--fg); }
       .empty { font-size:12px; color:var(--faint); text-align:center; padding:18px 10px; }
       .sectitle { font-size:12.5px; font-weight:700; color:var(--fg); }
+
+      /* account switcher (hero) */
+      .acctswitch { display:inline-flex; align-items:center; gap:4px; border:1px solid var(--border-soft); background:var(--surface-2); color:var(--fg); font-weight:600; font-size:13px; border-radius:999px; padding:5px 12px; }
+      .acctswitch:hover { background:var(--surface-3); } .acctswitch .caret { color:var(--muted); font-size:14px; line-height:1; }
+
+      /* overlay sheets (accounts / settings) */
+      .sheet { position:absolute; inset:0; z-index:40; background:var(--surface); display:flex; flex-direction:column; }
+      .sheethead { display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid var(--border-soft); position:sticky; top:0; background:var(--surface); }
+      .sheethead h3 { font-size:15px; font-weight:700; } .sheethead .iconbtn { color:var(--muted); }
+      .sheetbody { padding:14px; overflow:auto; display:flex; flex-direction:column; }
+
+      /* accounts list */
+      .aclist { display:flex; flex-direction:column; gap:8px; }
+      .acrow { display:flex; align-items:center; gap:11px; padding:10px 11px; border:1px solid var(--border-soft); border-radius:12px; background:var(--surface); cursor:pointer; }
+      .acrow:hover { background:var(--surface-2); } .acrow.on { border-color:var(--blue); background:var(--blue-bg); }
+      .acrow.edit { cursor:default; }
+      .ava.sm { width:34px; height:34px; flex-shrink:0; }
+      .acinfo { min-width:0; flex:1; } .acname { font-size:13.5px; font-weight:600; }
+      .acnow { font-size:10px; font-weight:600; color:var(--blue); border:1px solid var(--blue); border-radius:999px; padding:0 6px; margin-left:4px; }
+      .acaddr { font-size:11px; color:var(--muted); font-family:var(--mono); }
+      .minibtn { width:28px; height:28px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--muted); font-size:13px; line-height:1; display:grid; place-items:center; flex-shrink:0; }
+      .minibtn:hover { background:var(--surface-3); color:var(--fg); }
+      .renameIn { flex:1; padding:8px 10px; font-size:13px; }
+
+      /* settings */
+      .setgrp { border:1px solid var(--border-soft); border-radius:14px; background:var(--surface-2); padding:13px 14px; margin-bottom:12px; }
+      .setlab { font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:.05em; font-weight:600; margin-bottom:2px; }
+      .sel { width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:11px; background:var(--surface); color:var(--fg); font:inherit; font-size:14px; margin-top:6px; }
+      .kv { display:flex; justify-content:space-between; gap:10px; align-items:baseline; font-size:13px; padding:4px 0; } .kv span { color:var(--muted); }
+      .keyout { font-family:var(--mono); font-size:11px; white-space:pre-wrap; word-break:break-all; background:var(--surface); border:1px solid var(--border-soft); border-radius:10px; padding:10px; margin:0; color:var(--fg); }
+      .dappmodal { position:fixed; inset:0; z-index:80; background:rgba(8,10,14,.62); backdrop-filter:blur(3px); display:flex; align-items:center; justify-content:center; padding:20px; }
+      .dmcard { width:100%; max-width:340px; background:var(--surface); border:1px solid var(--border); border-radius:20px; padding:22px 20px; box-shadow:0 24px 60px rgba(0,0,0,.45); text-align:center; }
+      .dmicon { font-size:26px; margin-bottom:6px; }
+      .dmtitle { font-size:17px; font-weight:700; color:var(--fg); }
+      .dmorigin { font-family:var(--mono); font-size:12px; color:var(--blue); margin-top:3px; word-break:break-all; }
+      .dmbody { margin:14px 0 4px; text-align:left; display:flex; flex-direction:column; gap:7px; }
+      .dmline { font-size:13px; color:var(--fg); background:var(--surface-2); border:1px solid var(--border-soft); border-radius:10px; padding:9px 11px; word-break:break-all; }
+      .dmnote { font-size:11px; color:var(--faint); margin:12px 0 16px; line-height:1.5; }
+      .dmbtns { display:flex; gap:10px; } .dmbtns .btn { flex:1; }
     </style>
     <script src="/qrcode.js"></script>
   </head>
@@ -109,6 +158,7 @@
       <header>
         <div class="brand"><div class="logo">A</div><span class="nm">自持钱包</span></div>
         <button class="chipbtn spacer" id="netPill"><span class="dot"></span>Ootle Localnet</button>
+        <button class="iconbtn" id="btnSettings" title="设置" hidden>⚙</button>
         <button class="iconbtn" id="btnLock" title="锁定" hidden>🔒</button>
       </header>
 
@@ -175,6 +225,7 @@
       <!-- 6. 已解锁 -->
       <section id="pMain" hidden>
         <div class="hero">
+          <button class="acctswitch" id="acctSwitch"><span id="acctLabel">账户</span><span class="caret">⌄</span></button>
           <div class="ava lg"></div>
           <div class="addrchip" id="addrChip"><span id="addrShort">…</span><span class="ci">⧉</span></div>
           <div class="bal" id="balBlock" hidden><span class="n num" id="balNum">—</span><span class="unit">XTR</span></div>
@@ -219,24 +270,116 @@
 
           <!-- activity -->
           <div id="actBlock" hidden style="display:flex;flex-direction:column;gap:8px">
-            <div class="sectitle">活动</div>
-            <p class="mut" style="font-size:11px;margin:0">本机记录的本钱包操作(充值/发送);他人向你的转账不在此列。</p>
+            <div class="acthead">
+              <div class="sectitle">活动</div>
+              <button id="btnActRefresh" class="refresh" title="从链上刷新">↻</button>
+            </div>
+            <p class="mut" style="font-size:11px;margin:0">读自链上的收付记录(含他人向你的转账)。仅覆盖索引器保留窗口内、当前账户金库的 XTR 转账。</p>
             <div id="actList" style="display:flex;flex-direction:column;gap:8px"></div>
           </div>
 
-          <!-- show recovery phrase -->
-          <button id="btnShowPhrase" class="btn sec block">显示恢复短语(需口令)</button>
-          <div id="phraseReveal" class="card2" hidden style="display:flex;flex-direction:column;gap:2px">
-            <label style="margin-top:0">输入口令以显示</label>
-            <input id="revealPass" type="password" autocomplete="current-password" />
-            <div class="bad" id="revealErr"></div>
-            <button id="btnRevealDo" class="btn" style="margin-top:6px">显示</button>
-            <div class="words" id="revealGrid" hidden style="margin-top:10px"></div>
-            <button id="btnHidePhrase" class="btn sec" hidden style="margin-top:8px">隐藏</button>
-          </div>
+          <!-- backup / export lives in settings -->
+          <button id="btnShowPhrase" class="btn sec block">备份与导出 · 设置</button>
         </div>
       </section>
       </main>
+
+      <!-- ===== accounts sheet (overlay) ===== -->
+      <section id="sheetAccounts" class="sheet" hidden>
+        <div class="sheethead">
+          <h3>账户</h3>
+          <button class="iconbtn" id="btnCloseAccounts" title="关闭">✕</button>
+        </div>
+        <div class="sheetbody">
+          <div id="acctList" class="aclist"></div>
+          <div class="row" style="margin-top:14px">
+            <button id="btnAddCreate" class="btn">＋ 新建账户</button>
+            <button id="btnAddImport" class="btn sec">导入助记词</button>
+          </div>
+          <p class="mut" style="font-size:11px;margin:10px 0 0">每个账户是一对独立的密钥(各自的 48 词助记词),都由同一个口令在本机加密保管。切换/重命名无需联网。</p>
+        </div>
+      </section>
+
+      <!-- ===== settings sheet (overlay) ===== -->
+      <section id="sheetSettings" class="sheet" hidden>
+        <div class="sheethead">
+          <h3>设置</h3>
+          <button class="iconbtn" id="btnCloseSettings" title="关闭">✕</button>
+        </div>
+        <div class="sheetbody">
+          <div class="setgrp">
+            <div class="setlab">安全</div>
+            <label style="margin-top:0">闲置自动锁定</label>
+            <select id="setAutoLock" class="sel">
+              <option value="0">关闭</option>
+              <option value="1">1 分钟</option>
+              <option value="5">5 分钟</option>
+              <option value="15">15 分钟</option>
+              <option value="30">30 分钟</option>
+            </select>
+          </div>
+
+          <div class="setgrp">
+            <div class="setlab">修改口令</div>
+            <label style="margin-top:0">当前口令</label>
+            <input id="cpOld" type="password" autocomplete="current-password" />
+            <label>新口令(至少 8 位)</label>
+            <input id="cpNew" type="password" autocomplete="new-password" />
+            <label>再次输入新口令</label>
+            <input id="cpNew2" type="password" autocomplete="new-password" />
+            <div class="bad" id="cpErr"></div>
+            <div class="ok" id="cpOk"></div>
+            <button id="btnChangePass" class="btn block" style="margin-top:8px">更新口令</button>
+          </div>
+
+          <div class="setgrp">
+            <div class="setlab">导出当前账户</div>
+            <div class="warn" style="margin-bottom:8px">助记词与私钥等于你的全部资产。仅在离线、安全的环境查看,切勿截图或粘贴到联网处。</div>
+            <label style="margin-top:0">输入口令以显示</label>
+            <input id="exPass" type="password" autocomplete="current-password" />
+            <div class="bad" id="exErr"></div>
+            <button id="btnExport" class="btn block" style="margin-top:8px">显示助记词与私钥</button>
+            <div id="exOut" hidden style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+              <div class="words" id="exGrid"></div>
+              <div class="setlab">私钥(owner / view,十六进制)</div>
+              <pre class="keyout" id="exKeys"></pre>
+              <button id="btnExportHide" class="btn sec">隐藏</button>
+            </div>
+          </div>
+
+          <div class="setgrp">
+            <div class="setlab">已连接的网站</div>
+            <div id="linkedSite" style="margin-top:4px"></div>
+            <p class="mut" style="font-size:11px;margin:8px 0 0">已连接的 dApp 只能把请求排队到钱包;每次付款都需你在此批准、并由浏览器用你的私钥签名。</p>
+          </div>
+
+          <div class="setgrp">
+            <div class="setlab">网络与节点</div>
+            <div class="kv"><span>网络</span><b>Ootle Localnet</b></div>
+            <div class="kv"><span>当前索引器</span><b class="mono" id="setIndexerCur" style="font-size:11px;word-break:break-all">—</b></div>
+            <label>自定义索引器 URL(留空用默认)</label>
+            <input id="setIndexer" class="mono" placeholder="http://127.0.0.1:12008" autocomplete="off" spellcheck="false" />
+            <button id="btnSaveIndexer" class="btn sec block" style="margin-top:8px">保存索引器</button>
+          </div>
+
+          <div class="ok" id="setMsg" style="text-align:center"></div>
+        </div>
+      </section>
+
+      <!-- dApp 审批弹窗:外部网站(仪表盘)把请求排队到钱包,这里人工批准、浏览器签名 -->
+      <div id="dappModal" class="dappmodal" hidden>
+        <div class="dmcard">
+          <div class="dmicon">🔗</div>
+          <div class="dmtitle" id="dmTitle">请求批准</div>
+          <div class="dmorigin" id="dmOrigin">(未知来源)</div>
+          <div class="dmbody" id="dmBody"></div>
+          <div class="dmnote">仅你本人能批准;批准后由本浏览器用你的私钥签名并提交到链上。</div>
+          <div class="dmbtns">
+            <button class="btn sec" id="dmReject">拒绝</button>
+            <button class="btn" id="dmApprove">批准</button>
+          </div>
+        </div>
+      </div>
     </div>
     <script type="module" src="/src/wallet-sc.js"></script>
   </body>
