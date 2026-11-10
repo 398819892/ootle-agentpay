@@ -53,10 +53,41 @@ export async function dryRun(provider, signers, unsignedTx) {
 }
 
 /**
+ * A chain-side execution rejection that the top-level outcome masks. On 0.49, a transaction whose fee is
+ * charged but whose body is rejected by a template (e.g. `pay` over the per-tx/daily cap, or a merchant
+ * not whitelisted) finalizes with `final_decision: "Commit"` and an inner
+ * `execution_result.finalize.result` of `AcceptFeeRejectRest` — so `classifyOutcome`, which reads only the
+ * top level, reports `{outcome:"Commit"}` and NO funds moved. Decode the inner result and return the
+ * reject reason (or null if the body was accepted), so a rejected payment is never reported as success.
+ * Verified live: an over-cap `pay` yields AcceptFeeRejectRest with spent_in_window unchanged.
+ */
+export function executionReject(receipt) {
+  try {
+    const enc = receipt?.result?.Finalized?.execution_result;
+    if (!enc) return null;
+    const r = decodeExecResult(enc)?.finalize?.result;
+    if (r && typeof r === "object") {
+      if ("AcceptFeeRejectRest" in r) {
+        const why = r.AcceptFeeRejectRest?.[1];
+        return typeof why === "string" ? why : JSON.stringify(why ?? "execution rejected (fee charged)");
+      }
+      if ("Reject" in r) {
+        const why = r.Reject;
+        return typeof why === "string" ? why : JSON.stringify(why);
+      }
+    }
+  } catch {
+    /* best-effort decode — fall back to the top-level classifyOutcome below */
+  }
+  return null;
+}
+
+/**
  * 0.13 lifecycle: resolve input versions → sign (the user's key) → seal (throwaway seal key, WASM) →
  * submit → watch. The built-in watchTransaction now polls and does NOT throw on the early 404 or on a
  * Reject / FeeIntentCommit (0.11 did, which is why the old code had a custom waitFinalized loop).
- * Returns { txId, receipt }. Throws with the chain's reason on a non-Commit outcome.
+ * Returns { txId, receipt }. Throws with the chain's reason on a non-Commit outcome OR on an inner
+ * execution rejection (AcceptFeeRejectRest) that the top-level "Commit" hides — see executionReject.
  */
 export async function signSealSubmit(provider, signers, unsignedTx, opts = {}) {
   const resolved = await resolveTransaction(provider, unsignedTx);
@@ -65,13 +96,16 @@ export async function signSealSubmit(provider, signers, unsignedTx, opts = {}) {
   const txId = await submitTransaction(provider, envelope);
   const receipt = await watchTransaction(provider, txId, { timeoutMs: opts.timeoutMs ?? 90_000 });
   const c = classifyOutcome(receipt.result);
-  // classifyOutcome (0.13) returns one of Commit / FeeIntentCommit / Reject — so a plain inequality
-  // catches "fee charged but execution rejected" too, which 0.11 had to detect by hand.
-  if (c && c.outcome && c.outcome !== "Commit") {
-    const err = new Error(`transaction ${txId} ${c.outcome}: ${c.reason ?? ""}`);
+  // classifyOutcome reads only the top-level final_decision, so it reports a fee-charged-but-body-rejected
+  // tx as "Commit". Check the inner execution result too, and fail on EITHER signal.
+  const innerReject = executionReject(receipt);
+  if (innerReject || (c && c.outcome && c.outcome !== "Commit")) {
+    const outcome = innerReject ? "ExecutionRejected" : c.outcome;
+    const reason = innerReject ?? c.reason ?? "";
+    const err = new Error(`transaction ${txId} ${outcome}: ${reason}`);
     err.txId = txId;
-    err.outcome = c.outcome;
-    err.reason = c.reason;
+    err.outcome = outcome;
+    err.reason = reason;
     throw err;
   }
   return { txId, receipt };
