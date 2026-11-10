@@ -17,7 +17,7 @@ import {
 } from "./self-custody.mjs";
 import { Network } from "@tari-project/ootle";
 import { SecretKeyWallet } from "@tari-project/ootle-secret-key-wallet";
-import { connect as scConnect, fundViaFaucet, balanceOf, sendXtr, ownerPublicHex, accountHistory } from "./sc-chain.mjs";
+import { connect as scConnect, fundViaFaucet, balanceOf, sendXtr, ownerPublicHex, accountHistory, openBudget, readBudget, payBudget } from "./sc-chain.mjs";
 
 const $ = (id) => document.getElementById(id);
 const VAULT_KEY = "ap-sc-vault";       // encrypted: { keys:[{id,owner,view}] }
@@ -25,10 +25,13 @@ const META_KEY = "ap-sc-meta";         // plaintext: { list:[{id,label,account}]
 const SETTINGS_KEY = "ap-sc-settings"; // plaintext: { autoLockMin, indexer }
 const LEGACY_ACCOUNT_KEY = "ap-sc-account"; // pre-multi-account single component (migrated away)
 const ACTIVITY_KEY = "ap-sc-activity"; // this wallet's own send actions, for recipient enrichment
+const BUDGET_KEY = "ap-sc-budget";     // plaintext, per account id: { component, ownerBadge, agentBadge, vaultId, merchant, template } — all public
 const NETWORK = Network.LocalNet;      // identity address is net-scoped; localnet for now (prefix otl_loc_)
 const DEFAULT_INDEXER = "http://127.0.0.1:12008";
 
 let INDEXER = null; // indexer URL: user setting > /api/status > default; enables on-chain ops
+let TEMPLATE = null; // AgentBudget template address (from /api/status) — needed to open a budget
+let DEFAULT_MERCHANT = null; // a sample merchant from /api/status, prefilled in the open-budget form
 let _provider = null;
 let _providerUrl = null;
 async function ensureIndexer() {
@@ -54,6 +57,12 @@ function loadSettings() {
   try { return { autoLockMin: 0, indexer: "", ...(JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {}) }; } catch { return { autoLockMin: 0, indexer: "" }; }
 }
 function saveSettings(s) { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* blocked */ } }
+// budget store (plaintext, keyed by account id — the budget component + badge resources are all public)
+function loadBudgets() { try { return JSON.parse(localStorage.getItem(BUDGET_KEY)) || {}; } catch { return {}; } }
+function budgetFor(accountId) { const b = loadBudgets()[accountId]; return b && b.component ? b : null; }
+function saveBudgetFor(accountId, b) { const all = loadBudgets(); all[accountId] = b; try { localStorage.setItem(BUDGET_KEY, JSON.stringify(all)); } catch { /* blocked */ } }
+function clearBudgetFor(accountId) { const all = loadBudgets(); delete all[accountId]; try { localStorage.setItem(BUDGET_KEY, JSON.stringify(all)); } catch { /* blocked */ } }
+const activeBudget = () => budgetFor(activeId());
 
 // --- in-memory, cleared on lock ----------------------------------------------------------------
 let pending = null;  // { owner, view, account?, mode:"first"|"add" } awaiting a passphrase or append
@@ -245,7 +254,9 @@ async function enterMain() {
     $("btnSendOpen").disabled = !INDEXER;
     $("btnFund").hidden = true;
     $("actBlock").hidden = false;
+    $("budgetBlock").hidden = false;
     renderActivity(account);
+    renderBudget();
     await refreshBalance(account);
   } else {
     $("addrLabel").textContent = "未充值 · 链上尚无账户";
@@ -255,6 +266,7 @@ async function enterMain() {
     $("btnSendOpen").hidden = true;
     $("btnFund").hidden = !INDEXER;
     $("actBlock").hidden = true;
+    $("budgetBlock").hidden = true;
     setAddress("派生中…");
     try { const k = activeKey(); setAddress(await addressOf(fromHex(k.owner), fromHex(k.view))); }
     catch (e) { setAddress("地址派生失败: " + (e?.message || e)); }
@@ -407,6 +419,84 @@ $("btnSendDo").onclick = async () => {
     $("sendErr").textContent = "发送失败: " + (e?.reason || e?.message || e);
   } finally {
     $("btnSendDo").disabled = false; $("btnSendCancel").disabled = false; $("btnSendDo").textContent = prev;
+  }
+};
+
+// --- AgentBudget: the chain-enforced budget a dApp (the dashboard) drives over window.tari ----------
+// The active account can OPEN one budget (owner-signed), which the dashboard then reads (tari_getBudget)
+// and pays against (params.pay). Single-account: this key is both owner (governs) and agent (pays).
+let _budToken = 0;
+async function renderBudget() {
+  const account = currentAccount();
+  const b = activeBudget();
+  const has = !!b;
+  $("budHas").hidden = !has;
+  $("budNone").hidden = has;
+  $("budgetForm").hidden = true;
+  $("budErr").textContent = "";
+  if (!has) {
+    // no budget yet: offer to open one (disabled until we know the template + indexer)
+    $("btnBudgetOpen").disabled = !(INDEXER && TEMPLATE && account);
+    $("budNoneHint").textContent = !account ? "先充值/创建账户后即可开预算。"
+      : !INDEXER ? "未连接索引器,暂不能开预算。"
+      : !TEMPLATE ? "未取得预算模板地址(需后端 /api/status)。"
+      : "开一个链上预算,仪表盘连接后即可按额度付款。";
+    return;
+  }
+  $("budComp").textContent = shortAddr(b.component);
+  $("budMerchant").textContent = shortAddr(b.merchant);
+  $("budCaps").textContent = "读取中…"; $("budSpent").textContent = "…"; $("budVault").textContent = "…";
+  const token = ++_budToken;
+  try {
+    await ensureIndexer();
+    const wb = await readBudget(await indexer(), b.component);
+    if (token !== _budToken) return;
+    $("budCaps").textContent = `${groupNum(wb.perTx)} / ${groupNum(wb.daily)} XTR`;
+    $("budSpent").textContent = `${groupNum(wb.spent)} XTR`;
+    $("budVault").textContent = `${groupNum(wb.vault)} XTR`;
+  } catch (e) {
+    if (token !== _budToken) return;
+    $("budCaps").textContent = "读取失败"; $("budSpent").textContent = "—"; $("budVault").textContent = "—";
+    console.warn("budget read:", e);
+  }
+}
+$("btnBudgetOpen").onclick = () => {
+  $("budErr").textContent = "";
+  $("budFund").value = $("budFund").value || "1000000";
+  $("budPerTx").value = $("budPerTx").value || "100000";
+  $("budDaily").value = $("budDaily").value || "500000";
+  $("budMerchantIn").value = $("budMerchantIn").value || DEFAULT_MERCHANT || "";
+  $("budTemplate").textContent = TEMPLATE ? shortAddr(TEMPLATE) : "(未知)";
+  $("budgetForm").hidden = false;
+  $("budNone").hidden = true;
+};
+$("btnBudgetCancel").onclick = () => { $("budgetForm").hidden = true; $("budNone").hidden = !!activeBudget(); renderBudget(); };
+$("btnBudgetDo").onclick = async () => {
+  $("budErr").textContent = "";
+  const account = currentAccount();
+  const merchant = $("budMerchantIn").value.trim();
+  const fund = $("budFund").value.trim(), perTx = $("budPerTx").value.trim(), daily = $("budDaily").value.trim();
+  if (!account) return void ($("budErr").textContent = "无账户");
+  if (!TEMPLATE) return void ($("budErr").textContent = "缺少预算模板地址");
+  if (!/^component_[0-9a-f]{64}$/.test(merchant)) return void ($("budErr").textContent = "商户地址应为 component_ 开头的 64 位十六进制");
+  for (const [v, n] of [[fund, "初始注资"], [perTx, "单笔上限"], [daily, "每日上限"]]) {
+    if (!/^\d+$/.test(v) || BigInt(v) <= 0n) return void ($("budErr").textContent = `${n}必须是正整数`);
+  }
+  $("btnBudgetDo").disabled = true; $("btnBudgetCancel").disabled = true;
+  const prev = $("btnBudgetDo").textContent; $("btnBudgetDo").textContent = "开预算中…(约 10–30 秒)";
+  try {
+    await ensureIndexer();
+    if (!INDEXER) throw new Error("无法连接本地索引器");
+    const { budget, state } = await openBudget(await indexer(), walletOf(), {
+      owner: account, template: TEMPLATE, merchant, fund, perTxCap: perTx, dailyCap: daily, epochsPerWindow: 10,
+    });
+    saveBudgetFor(activeId(), { component: budget, ownerBadge: state.ownerBadge, agentBadge: state.agentBadge, vaultId: state.vault, merchant, template: TEMPLATE });
+    $("budgetForm").hidden = true;
+    renderBudget();
+  } catch (e) {
+    $("budErr").textContent = "开预算失败: " + (e?.reason || e?.message || e);
+  } finally {
+    $("btnBudgetDo").disabled = false; $("btnBudgetCancel").disabled = false; $("btnBudgetDo").textContent = prev;
   }
 };
 
@@ -635,6 +725,46 @@ async function handleReq(q) {
       try { balance = (await balanceOf(await indexer(), account)).toString(); } catch { /* leave null */ }
       return resolveReq(q.id, { account, network: "localnet", balance });
     }
+    // READ: hand a linked dApp (the dashboard) this account's budget so it shows + pays against THIS
+    // wallet's chain-enforced budget. No signing, no approval modal. budget:null when none is open yet.
+    if (q.method === "tari_getBudget" || q.method === "tari_getState") {
+      if (!isLinked(origin)) return resolveReq(q.id, null, "请先连接钱包 (4100)");
+      const account = currentAccount();
+      const b = activeBudget();
+      if (!b) return resolveReq(q.id, { account, network: "localnet", merchant: null, template: TEMPLATE, agentAccount: account, twoAccount: false, linkedOrigin, budget: null });
+      try {
+        await ensureIndexer();
+        const wb = await readBudget(await indexer(), b.component);
+        return resolveReq(q.id, {
+          account, network: "localnet", merchant: b.merchant, template: b.template || TEMPLATE,
+          agentAccount: account, twoAccount: false, linkedOrigin,
+          budget: { address: wb.address, perTx: wb.perTx, daily: wb.daily, spent: wb.spent, vault: wb.vault, whitelist: wb.whitelist, funded: null, withdrawn: null, sessions: [], ledger: [] },
+        });
+      } catch (e) { return resolveReq(q.id, null, e?.message || String(e)); }
+    }
+    // WRITE: a budget payment the dashboard requested — the owner approves here, the browser signs with
+    // the agent badge, and the chain enforces the per-tx/daily caps + whitelist.
+    if (q.method === "tari_signAndSubmitTransaction" && q.params && q.params.pay) {
+      if (!isLinked(origin)) return resolveReq(q.id, null, "请先连接钱包 (4100)");
+      const account = currentAccount();
+      const b = activeBudget();
+      if (!account) return resolveReq(q.id, null, "钱包尚无链上账户");
+      if (!b) return resolveReq(q.id, null, "钱包尚未开通预算(请先在钱包里开预算)");
+      let amount;
+      try { amount = BigInt(Math.trunc(Number(q.params.pay.amount))); } catch { return resolveReq(q.id, null, "金额无效"); }
+      if (amount <= 0n) return resolveReq(q.id, null, "金额必须大于 0");
+      const memo = q.params.pay.memo || "";
+      const ok = await dappApprove({ title: "预算付款请求", origin, approveLabel: "确认付款",
+        lines: [`从预算 <b class="mono">${esc(shortAddr(b.component))}</b>`, `向商户 <b class="mono">${esc(shortAddr(b.merchant))}</b>`, `支付 <b>${groupNum(amount.toString())} XTR</b>`, `<span class="mut" style="font-size:12px">链上强制额度;超限或非白名单将被拒。</span>`] });
+      if (!ok) return resolveReq(q.id, null, "用户拒绝 (4001)");
+      try {
+        await ensureIndexer();
+        const state = await readBudget(await indexer(), b.component); // fresh vault + badge ids
+        const r = await payBudget(await indexer(), walletOf(), { account, budget: b.component, state, merchant: b.merchant, amount, memo });
+        if (r.committed && currentAccount() === account) renderBudget();
+        return resolveReq(q.id, { committed: !!r.committed, txid: r.txid || null, amount: amount.toString(), reason: r.reason || "" });
+      } catch (e) { return resolveReq(q.id, null, e?.reason || e?.message || String(e)); }
+    }
     if (q.method === "tari_sendTransaction" || (q.method === "tari_signAndSubmitTransaction" && q.params && q.params.transfer)) {
       if (!isLinked(origin)) return resolveReq(q.id, null, "请先连接钱包 (4100)");
       const p = (q.params && q.params.transfer) || q.params || {};
@@ -699,6 +829,8 @@ fetch("/api/status").then((r) => r.ok ? r.json() : null).then((s) => {
   HAS_BACKEND = true; // the bridge + dev-key import are available
   $("btnImportDev").hidden = false;
   if (!loadSettings().indexer) INDEXER = s.indexer || DEFAULT_INDEXER;
-  if (unlocked) startBridge(); // already unlocked (e.g. just created) before this probe returned
+  TEMPLATE = s.template || TEMPLATE;          // AgentBudget template, for opening a budget
+  DEFAULT_MERCHANT = s.merchant || DEFAULT_MERCHANT; // a sample merchant to prefill
+  if (unlocked) { startBridge(); if ($("pMain") && !$("pMain").hidden) renderBudget(); }
 }).catch(() => {});
 routeStart();

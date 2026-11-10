@@ -278,6 +278,45 @@
             <div id="actList" style="display:flex;flex-direction:column;gap:8px"></div>
           </div>
 
+          <!-- AgentBudget: the chain-enforced budget a dApp (the :8787 dashboard) drives over window.tari -->
+          <div id="budgetBlock" hidden class="card2" style="display:flex;flex-direction:column;gap:9px">
+            <div class="acthead">
+              <div class="sectitle">预算(供 dApp 驱动)</div>
+              <span class="mut" style="font-size:11px">链上强制额度</span>
+            </div>
+
+            <div id="budNone" style="display:flex;flex-direction:column;gap:8px">
+              <p class="mut" id="budNoneHint" style="font-size:12px;margin:0">开一个链上预算,仪表盘连接后即可按额度付款。</p>
+              <button id="btnBudgetOpen" class="btn sec block">开预算</button>
+            </div>
+
+            <div id="budgetForm" hidden style="display:flex;flex-direction:column;gap:2px">
+              <label style="margin-top:0">初始注资(XTR,基础单位)</label>
+              <input id="budFund" inputmode="numeric" placeholder="例如 1000000" autocomplete="off" />
+              <label>单笔上限</label>
+              <input id="budPerTx" inputmode="numeric" placeholder="例如 100000" autocomplete="off" />
+              <label>每日上限</label>
+              <input id="budDaily" inputmode="numeric" placeholder="例如 500000" autocomplete="off" />
+              <label>商户(白名单,component_…)</label>
+              <input id="budMerchantIn" class="mono" placeholder="component_…" autocomplete="off" spellcheck="false" />
+              <p class="mut" style="font-size:11px;margin:4px 0 0">模板 <span class="mono" id="budTemplate">—</span> · 单账户(你同时是所有者与代理,每笔由你批准)</p>
+              <div class="bad" id="budErr"></div>
+              <div class="row" style="margin-top:4px">
+                <button id="btnBudgetDo" class="btn">开预算</button>
+                <button id="btnBudgetCancel" class="btn sec">取消</button>
+              </div>
+            </div>
+
+            <div id="budHas" hidden style="display:flex;flex-direction:column;gap:5px">
+              <div class="kv"><span>预算组件</span><b class="mono" id="budComp">—</b></div>
+              <div class="kv"><span>商户</span><b class="mono" id="budMerchant">—</b></div>
+              <div class="kv"><span>额度(单笔/每日)</span><b id="budCaps">—</b></div>
+              <div class="kv"><span>本窗口已花</span><b id="budSpent">—</b></div>
+              <div class="kv"><span>预算余额</span><b id="budVault">—</b></div>
+              <p class="mut" style="font-size:11px;margin:2px 0 0">在仪表盘(:8787)连接本钱包后,其付款从此预算支出、由你在此批准、链上强制额度。</p>
+            </div>
+          </div>
+
           <!-- backup / export lives in settings -->
           <button id="btnShowPhrase" class="btn sec block">备份与导出 · 设置</button>
         </div>

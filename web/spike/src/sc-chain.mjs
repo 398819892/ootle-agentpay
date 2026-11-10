@@ -14,7 +14,7 @@ import {
 } from "@tari-project/ootle";
 import { publicKeyFromSecretKey } from "@tari-project/ootle-wasm";
 import { decodeSubstateValue, decodeEvent, decodeExecuteResult } from "@tari-project/ootle-wasm-bor";
-import { findNewComponent, transferTx, XTR } from "./agentpay-tx.js";
+import { findNewComponent, transferTx, openBudgetTx, payTx, parseBudgetSubstate, XTR } from "./agentpay-tx.js";
 import { connectIndexer, accountVaults, maxEpoch, signSealSubmit } from "./chain.js";
 
 const XTR_HEX = XTR.replace(/^resource_/, "");
@@ -187,4 +187,103 @@ export async function accountHistory(provider, account, { limit = 25, perVault =
   }));
   top.sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
   return top.slice(0, limit);
+}
+
+// --- AgentBudget (the chain-enforced budget the self-custody wallet owns & a dApp drives) -----------
+// The owner (this browser key) can open a real on-chain AgentBudget, read it, and pay a whitelisted
+// merchant FROM it — all browser-signed. Single-account model (owner == agent), per the proven Flow-A
+// driver in src/main.js: `new` mints an owner badge + an agent badge, both deposited into the owner
+// account, so the same key both governs the budget (owner badge) and pays within caps (agent badge,
+// proven by non-fungible id "default"). The chain enforces per-tx / daily caps + the whitelist.
+
+/**
+ * Open + fund a new AgentBudget, owner-signed in the browser. Returns { budget, state } where `state`
+ * is the parsed substate (vault id, owner/agent badge resources, caps, whitelist). `fund`/caps are XTR
+ * base-unit numbers; `epochsPerWindow` sizes the daily-cap window; `whitelist` is the initial merchants.
+ */
+export async function openBudget(provider, wallet, { owner, template, merchant, fund, perTxCap, dailyCap, epochsPerWindow = 10 }) {
+  const unsigned = openBudgetTx({
+    network: Network.LocalNet,
+    maxEpoch: await maxEpoch(provider),
+    template,
+    owner,
+    ownerVaults: await accountVaults(provider, owner),
+    fund: BigInt(fund),
+    perTxCap: BigInt(perTxCap),
+    dailyCap: BigInt(dailyCap),
+    epochsPerWindow: BigInt(epochsPerWindow),
+    whitelist: [merchant],
+    maxFee: 200_000,
+  });
+  const { txId, receipt } = await signSealSubmit(provider, [wallet], unsigned);
+  const budget = findNewComponent(receipt, [owner, merchant]);
+  if (!budget) throw new Error("开预算成功提交,但未能在回执中找到新预算组件");
+  const state = parseBudgetSubstate(await provider.getSubstate(budget));
+  return { txId, budget, state };
+}
+
+/**
+ * Read a budget's live on-chain state in the shape the dashboard's overlay expects:
+ *   { address, perTx, daily, spent, vault, whitelist, ownerBadge, agentBadge, vaultId, revoked }
+ * `vault` is the budget vault's REAL balance (treasury), read like balanceOf; `vaultId` is the vault
+ * substate id kept for pay/owner ops. All amounts are base-unit decimal strings.
+ */
+export async function readBudget(provider, budget) {
+  const s = parseBudgetSubstate(await provider.getSubstate(budget));
+  const treasury = await vaultXtr(provider, s.vault); // the budget vault's XTR balance
+  return {
+    address: budget,
+    perTx: String(s.perTxCap),
+    daily: String(s.dailyCap),
+    spent: String(s.spentInWindow),
+    vault: (treasury ?? 0n).toString(),
+    whitelist: s.whitelist,
+    ownerBadge: s.ownerBadge,
+    agentBadge: s.agentBadge,
+    vaultId: s.vault,
+    revoked: s.revoked,
+  };
+}
+
+/**
+ * Pay `amount` (base units) to `merchant` FROM the budget, agent-signed in the browser (single-account:
+ * the owner IS the agent). The agent's vaults are re-fetched NOW (they hold the agent-badge vault minted
+ * at open — a stale list would silently no-op the pay). Returns { committed, txid?, reason? }: the chain
+ * enforces the caps + whitelist, so an over-cap / non-whitelisted pay commits only the fee and surfaces
+ * here as committed:false (signSealSubmit throws FeeIntentCommit), not an exception to the caller.
+ */
+export async function payBudget(provider, wallet, { account, budget, state, merchant, amount, memo }) {
+  // Snapshot spent BEFORE: an over-cap / non-whitelisted / revoked pay commits ONLY the fee
+  // (AcceptFeeRejectRest) — the receipt still reads final_decision=Commit and signSealSubmit does NOT
+  // throw, yet budget.pay never ran and spent_in_window is unchanged. So "committed" is decided by
+  // whether spent actually moved, not by the absence of an exception (the silent-no-op trap).
+  const before = (() => { try { return BigInt(state.spent); } catch { return null; } })();
+  const unsigned = payTx({
+    network: Network.LocalNet,
+    maxEpoch: await maxEpoch(provider),
+    agent: account,
+    agentVaults: await accountVaults(provider, account), // re-fetched: must include the agent-badge vault
+    budget,
+    budgetVault: state.vaultId ?? state.vault,
+    agentBadge: state.agentBadge,
+    session: "default",
+    merchant,
+    merchantVaults: await accountVaults(provider, merchant).catch(() => []),
+    amount: BigInt(amount),
+    memo: memo ?? "",
+    maxFee: 200_000,
+  });
+  let txid = null;
+  try {
+    const r = await signSealSubmit(provider, [wallet], unsigned);
+    txid = r.txId;
+  } catch (e) {
+    // A hard reject (not even the fee committed) throws here.
+    return { committed: false, reason: e?.reason || e?.message || String(e), outcome: e?.outcome || "Reject" };
+  }
+  // Fee committed — now confirm the pay itself landed by re-reading spent_in_window.
+  let after = before;
+  try { after = BigInt((await readBudget(provider, budget)).spent); } catch { /* keep before */ }
+  if (before == null || after > before) return { committed: true, txid };
+  return { committed: false, txid, reason: "链上拒绝:超出额度或商户不在白名单" };
 }
