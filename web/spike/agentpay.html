@@ -25,6 +25,19 @@
       }
       #apw2-mount #apw2 .x { display: none; }                      /* no close button in the embedded view */
       #apw2-mount #apw2 .hd { position: static; border-radius: 14px 14px 0 0; }
+      /* ===== outermost gate — until the browser-held key is created or unlocked, the wallet screen IS the
+         whole page. Pure self-custody: the key is the entrance; no dashboard, nav, or custodial surface shows
+         until unlocked. Driven by <body data-ap-gate> from dapp-main.js (route() = locked, enterMain() = open). */
+      body[data-ap-gate="locked"] #app { display: none !important; }
+      body[data-ap-gate="locked"]::before { content: ""; position: fixed; inset: 0; background: #eef1f4; z-index: 49; }
+      body[data-ap-gate="locked"] #apw2 {
+        display: block !important; position: fixed; top: 0; left: 50%; right: auto; bottom: auto; transform: translateX(-50%);
+        width: 100%; max-width: 480px; height: auto; max-height: 100vh; overflow: auto; margin: 0;
+        background: #fff; border: 1px solid #e7eaed; border-top: 0; border-radius: 0 0 16px 16px;
+        box-shadow: 0 16px 48px rgba(18, 22, 30, .16); z-index: 50;
+      }
+      body[data-ap-gate="locked"] #apw2 .x { display: none; }
+      body[data-ap-gate="locked"] #apw2 .hd { position: static; border-radius: 0; }
       .apw2 .hd { display: flex; align-items: center; gap: 10px; padding: 13px 15px; border-bottom: 1px solid #e7eaed; position: sticky; top: 0; background: #f7f8fa; }
       .apw2 .mark { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, #ef8e3b, #d9772e); display: grid; place-items: center; color: #fff; font-weight: 700; }
       .apw2 .hd h4 { margin: 0; font-size: 13px; font-weight: 700; } .apw2 .hd .s { font-size: 11px; color: #6a737d; }

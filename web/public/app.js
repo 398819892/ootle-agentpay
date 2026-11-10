@@ -139,13 +139,13 @@ const I18N = {
     wallet_view_sub: "Your browser-held key — create or unlock it here, then connect it to the dashboard.",
     start_sub: "First steps for a new user — from signing in to your agent's first payment.",
     start_custodial_note: "This is a hosted (custodial) console: the wallet is held and signed server-side by walletd, and the dashboard is already connected to the chain. You do not connect a wallet in the browser.",
-    /* non-custodial single-mode (S.nonCustodial) — the owner connects their :7777 AgentPay wallet */
-    start_sub_nc: "First steps — connect your AgentPay wallet, set your limits and whitelist, then make a payment. Every change is approved in your wallet.",
-    nco_note: "Non-custodial: your AgentPay wallet (:7777) holds the keys. The dashboard reads this budget from the wallet and routes every change — payments, limits, merchants, lifecycle — through the wallet for your approval; the chain enforces the caps. The backend never signs for you.",
-    nco_s1_t: "1 · Connect your AgentPay wallet",
-    nco_s1_b: "Open your AgentPay wallet (:7777) and connect it here. The dashboard then reads this budget from the wallet, and every owner action is approved there — the browser never drives a custodial signer.",
+    /* non-custodial single-mode (S.nonCustodial) — the owner unlocks the browser-held wallet on this same page */
+    start_sub_nc: "First steps — unlock your AgentPay wallet, set your limits and whitelist, then make a payment. Every change is approved in your wallet.",
+    nco_note: "Non-custodial: your AgentPay wallet holds the keys in this browser. The dashboard reads this budget from the wallet and routes every change — payments, limits, merchants, lifecycle — through the wallet for your approval; the chain enforces the caps. The backend never signs for you.",
+    nco_s1_t: "1 · Unlock your AgentPay wallet",
+    nco_s1_b: "Unlock your AgentPay wallet in the “Wallet” view on this page and connect it here. The dashboard then reads this budget from the wallet, and every owner action is approved there — the browser never drives a custodial signer.",
     nco_connect_cta: "Connect wallet",
-    nco_connect_hint: "Keep your wallet (:7777) open — the connect request waits there for your approval.",
+    nco_connect_hint: "Approve the connect request in the “Wallet” view — it waits there for your approval.",
     nco_connected: "Wallet connected · {acct}",
     nco_not_connected: "Wallet not connected",
     nco_s2_t: "2 · Your budget",
@@ -733,16 +733,16 @@ const I18N = {
     nav_overview: "总览",
     nav_start: "开始使用",
     nav_wallet: "钱包",
-    wallet_view_sub: "你的浏览器持钥 —— 在此创建或解锁,再连接到仪表盘。",
+    wallet_view_sub: "你的浏览器持钥 —— 在此创建或解锁,即可管理预算。",
     start_sub: "新手第一步 —— 从登录到你的 AI 完成第一笔付款。",
     start_custodial_note: "这是托管式控制台:钱包由服务端的 walletd 持有并签名,面板已经连接到链。你无需在浏览器里连接钱包。",
-    /* 非托管单模式(S.nonCustodial)—— 所有者连接自己的 :7777 AgentPay 钱包 */
-    start_sub_nc: "起步几步 —— 连接你的 AgentPay 钱包、设好额度与白名单,然后发起一笔支付。每次变更都在你的钱包里批准。",
-    nco_note: "非托管:密钥由你的 AgentPay 钱包(:7777)持有。仪表盘从钱包读取这个预算,并把每一次变更 —— 付款、额度、商户、生命周期 —— 都交给钱包弹窗批准;额度由链上强制。后端不再替你签名。",
-    nco_s1_t: "1 · 连接你的 AgentPay 钱包",
-    nco_s1_b: "打开你的 AgentPay 钱包(:7777)并在此连接。连接后仪表盘从钱包读取这个预算,所有者的每一步操作都在钱包里批准 —— 浏览器不再驱动托管签名器。",
+    /* 非托管单模式(S.nonCustodial)—— 所有者在本页解锁浏览器持钥钱包 */
+    start_sub_nc: "起步几步 —— 解锁你的 AgentPay 钱包、设好额度与白名单,然后发起一笔支付。每次变更都在你的钱包里批准。",
+    nco_note: "非托管:密钥由你的 AgentPay 钱包在本浏览器持有。仪表盘从钱包读取这个预算,并把每一次变更 —— 付款、额度、商户、生命周期 —— 都交给钱包弹窗批准;额度由链上强制。后端不再替你签名。",
+    nco_s1_t: "1 · 解锁你的 AgentPay 钱包",
+    nco_s1_b: "在本页『钱包』里解锁你的 AgentPay 钱包并在此连接。连接后仪表盘从钱包读取这个预算,所有者的每一步操作都在钱包里批准 —— 浏览器不再驱动托管签名器。",
     nco_connect_cta: "连接钱包",
-    nco_connect_hint: "请保持钱包(:7777)开着 —— 连接请求会在那里等你批准。",
+    nco_connect_hint: "在『钱包』里批准连接请求 —— 它会在那里等你批准。",
     nco_connected: "钱包已连接 · {acct}",
     nco_not_connected: "钱包未连接",
     nco_s2_t: "2 · 你的预算",
@@ -2792,8 +2792,8 @@ function walletBanner() {
     if (S.nonCustodial) {
       return `<div class="banner banner--warn" role="status">${icon("wallet", 20)}
         <div class="banner__text"><b>${esc(zh ? "非托管模式 " : "Non-custodial mode ")}</b>${esc(
-          zh ? "连接你的 AgentPay 钱包(:7777)来管理这个预算 —— 链上写操作都经钱包批准,后端不再代签。"
-             : "Connect your AgentPay wallet (:7777) to manage this budget — on-chain writes go through the wallet; the backend no longer co-signs.",
+          zh ? "在本页『钱包』里解锁并连接你的 AgentPay 钱包来管理这个预算 —— 链上写操作都经钱包批准,后端不再代签。"
+             : "Unlock and connect your AgentPay wallet in the “Wallet” view to manage this budget — on-chain writes go through the wallet; the backend no longer co-signs.",
         )}</div></div>`;
     }
     return "";
@@ -2801,8 +2801,8 @@ function walletBanner() {
   if (S.wallet.error) {
     return `<div class="banner banner--danger" role="alert">${icon("alert", 20)}
       <div class="banner__text"><b>${esc(zh ? "钱包未连上 " : "Wallet unreachable ")}</b>${esc(
-        zh ? "打开你的 AgentPay 钱包(:7777)并保持运行;此刻显示的是后端缓存视图。"
-           : "Open your AgentPay wallet (:7777) and keep it running; showing the backend view meanwhile.",
+        zh ? "在本页『钱包』里解锁你的 AgentPay 钱包并保持解锁;此刻显示的是后端缓存视图。"
+           : "Unlock your AgentPay wallet in the “Wallet” view and keep it unlocked; showing the backend view meanwhile.",
       )}</div></div>`;
   }
   const wb = S.data && S.data._walletBacked;

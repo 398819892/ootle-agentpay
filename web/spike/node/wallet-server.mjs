@@ -351,11 +351,16 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "application/javascript; charset=utf-8", "cache-control": "max-age=86400" });
       return res.end(fs.readFileSync(f));
     }
-    // Root = the self-custody wallet (Vite build in ../dist). Built assets live under /assets.
-    // The classic backend-custodial wallet stays reachable at /classic.
+    // Root = the merged one-page non-custodial dApp (dashboard + in-page self-custody wallet on one origin).
+    // This is the single site: the wallet create/unlock is the outermost gate, the dashboard unveils once the
+    // browser-held key is unlocked. The old standalone wallet stays reachable at /wallet-sc.html for reference.
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
-      if (serveDist(res, "wallet-sc.html")) return;
+      if (serveDist(res, "agentpay.html")) return;
       // no build present -> fall back to the classic wallet below
+    }
+    if (req.method === "GET" && url.pathname === "/wallet-sc.html") {
+      if (serveDist(res, "wallet-sc.html")) return;
+      return send(res, 404, { error: "wallet-sc.html not built — run vite build" });
     }
     // The merged one-page dApp (dashboard + this wallet on one origin). Its bundled assets live under
     // /assets (served below); its dashboard reads are proxied to :8787 by the /api fallback near the end.

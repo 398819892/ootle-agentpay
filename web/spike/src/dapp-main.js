@@ -57,7 +57,12 @@ const provider = installInPageTari(wallet.providerHost({ approve, onChange: () =
 // only drive which inner section (onboard/unlock/main) shows.
 const SECTIONS = ["w-onboard", "w-create", "w-restore", "w-unlock", "w-main"];
 function show(id) { for (const s of SECTIONS) $(s).hidden = s !== id; }
-function route() { show(wallet.hasVault() ? "w-unlock" : "w-onboard"); }
+// Outermost gate: whenever the wallet isn't unlocked (no vault → onboard, has vault → unlock), the wallet
+// screen is the whole page and the dashboard is hidden (see agentpay.html body[data-ap-gate]). enterMain()
+// flips it open once the key is unlocked. Every lock/forget/auto-lock path calls route(), so the gate closes
+// again whenever the key leaves memory.
+function gate(open) { if (typeof document !== "undefined") document.body.dataset.apGate = open ? "open" : "locked"; }
+function route() { gate(false); show(wallet.hasVault() ? "w-unlock" : "w-onboard"); }
 
 // --- onboard: create (generate → SHOW words → VERIFY a few back → encrypt & save) ----------------
 // Mainnet red line: the recovery phrase is the only way back, so we don't let the user leave the create
@@ -218,6 +223,7 @@ function initAutoLockUI() {
   sel.onchange = () => { wallet.saveSettings({ autoLockMin: Number(sel.value) || 0 }); kickIdle(); };
 }
 async function enterMain() {
+  gate(true);
   show("w-main");
   await loadStatus();
   initAutoLockUI();
