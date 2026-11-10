@@ -255,6 +255,17 @@ export function createInPageTari(host) {
       window.dispatchEvent(new CustomEvent("tari#connect", { detail: { account: host.getAccount() } }));
       return accts;
     },
+    // Same-origin merged page: once the user has unlocked the wallet on THIS page, linking the in-page
+    // dashboard to it is not a cross-site authorization — so connect silently, no approval modal. Every
+    // payment is still approved individually. Returns false (stays disconnected) until an account exists.
+    _autoConnect() {
+      if (connected) return true;
+      const account = host.getAccount();
+      if (!account) return false;
+      connected = true;
+      window.dispatchEvent(new CustomEvent("tari#connect", { detail: { account } }));
+      return true;
+    },
     request(args) { args = args || {}; return dispatch(args.method, args.params); },
     disconnect() { connected = false; window.dispatchEvent(new CustomEvent("tari#disconnect")); },
     openWallet() { try { return !!(host.openWallet && host.openWallet()); } catch { return false; } },

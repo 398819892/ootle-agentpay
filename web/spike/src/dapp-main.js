@@ -236,7 +236,14 @@ async function renderMain() {
   $("w-acct").textContent = account ? shortAddr(account) : "未充值 · 链上尚无账户";
   const funded = !!account;
   $("w-btnOpenBudget").disabled = !funded;
-  $("w-btnConnect").disabled = !funded;
+  // Auto-connect: the moment the wallet is unlocked and has an account, link the in-page dashboard to it
+  // silently (same origin, no approval modal) so there's no separate "connect" step — the unlocked key IS
+  // the session. Idempotent; stays manual only if there's no account yet (unfunded). Payments still approved.
+  if (funded) { try { provider._autoConnect(); } catch { /* fall back to the manual button */ } }
+  const linked = !!provider.connected;
+  $("w-btnConnect").disabled = !funded || linked;
+  $("w-btnConnect").textContent = linked ? "已连接到仪表盘" : "连接到仪表盘";
+  if (linked) $("w-connNote").textContent = "仪表盘已自动连接本钱包。付款从你的预算支出、由你在此批准、浏览器签名。";
   // balance (chain read; tolerate failure)
   if (funded) {
     const tok = ++_balToken;

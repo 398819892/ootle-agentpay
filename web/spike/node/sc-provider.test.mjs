@@ -92,6 +92,29 @@ test("connect is rejected when the user declines approval", async () => {
   assert.equal(p.connected, false);
 });
 
+test("_autoConnect links silently (no approval) when an account exists", async () => {
+  events.length = 0;
+  let approvals = 0;
+  const p = createInPageTari(makeHost({ approve: async () => { approvals++; return true; } }));
+  assert.equal(p.connected, false);
+  assert.equal(p._autoConnect(), true);
+  assert.equal(p.connected, true);
+  assert.equal(approvals, 0, "auto-connect must not pop an approval modal");
+  assert.ok(events.includes("tari#connect"));
+  // idempotent: a second call is a no-op that still reports connected
+  events.length = 0;
+  assert.equal(p._autoConnect(), true);
+  assert.equal(events.includes("tari#connect"), false);
+});
+
+test("_autoConnect stays disconnected when there is no account", async () => {
+  events.length = 0;
+  const p = createInPageTari(makeHost({ getAccount: () => null }));
+  assert.equal(p._autoConnect(), false);
+  assert.equal(p.connected, false);
+  assert.equal(events.includes("tari#connect"), false);
+});
+
 test("tari_getAccount returns balance from the chain", async () => {
   const { p } = await connected();
   const r = await p.request({ method: "tari_getAccount" });
