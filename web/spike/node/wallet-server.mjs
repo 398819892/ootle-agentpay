@@ -33,6 +33,15 @@ const PORT = parseInt(process.env.PORT) || 7777;
 // from the LAN. Set HOST=0.0.0.0 explicitly (and only behind a trusted proxy) if you truly need that.
 const HOST = process.env.HOST || "127.0.0.1";
 const INDEXER_URL = process.env.INDEXER_URL || "http://127.0.0.1:12008";
+// The merged one-page dApp (dist/agentpay.html) bundles the AgentPay dashboard, whose app.js boots by
+// reading the dashboard backend's /api/session + /api/state. This wallet server has its OWN /api (status,
+// pay, open, …) but not those dashboard reads, so any /api/* path THIS server does not handle is forwarded
+// to the dashboard backend. The forward is a fallback placed after every local /api handler and after the
+// POST-token gate, so it only ever sees GET reads the wallet itself doesn't own — it never shadows or
+// relays a wallet write. Until Phase 3 detaches the dashboard's reads, this is how :7777 serves the merged
+// page whole. Unset DASHBOARD_PROXY (or point DASHBOARD_ORIGIN elsewhere) to disable/retarget.
+const DASHBOARD_ORIGIN = process.env.DASHBOARD_ORIGIN || "http://127.0.0.1:8787";
+const DASHBOARD_PROXY = process.env.DASHBOARD_PROXY !== "0";
 const TEMPLATE = process.env.AGENT_TEMPLATE || "template_c4b58558181f19c17d6ccc75c93e0707e2c5b75d1ef4de96a70acd0fd2d40e47";
 const MERCHANT = process.env.MERCHANT || "component_c5c2db90a8f9f02981617244b835fd36d4830bdcb80eb7f5cb092932896924e3";
 // Agent session badge label proven on pay. "default" is the badge this wallet's own open() minted;
@@ -300,6 +309,19 @@ async function doRevoke() {
 const send = (res, code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
 const body = (req) => new Promise((r) => { let d = ""; req.on("data", (c) => d += c); req.on("end", () => { try { r(JSON.parse(d || "{}")); } catch { r({}); } }); });
 
+// Forward an /api/* path this server doesn't own to the dashboard backend (see DASHBOARD_ORIGIN above).
+// Only reached as a fallback, so req has not been consumed; pipe it through and stream the response back.
+function proxyToDashboard(req, res, url) {
+  const target = new URL(url.pathname + url.search, DASHBOARD_ORIGIN);
+  const headers = { ...req.headers, host: target.host };
+  const preq = http.request(target, { method: req.method, headers }, (pres) => {
+    res.writeHead(pres.statusCode || 502, pres.headers);
+    pres.pipe(res);
+  });
+  preq.on("error", (e) => { if (!res.headersSent) send(res, 502, { error: "dashboard proxy: " + e.message }); });
+  req.pipe(preq);
+}
+
 // The self-custody wallet is a Vite-built bundle (keys live in the browser) served from ../dist.
 const DIST = new URL("../dist/", import.meta.url);
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".mjs": "application/javascript; charset=utf-8",
@@ -329,6 +351,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
       if (serveDist(res, "wallet-sc.html")) return;
       // no build present -> fall back to the classic wallet below
+    }
+    // The merged one-page dApp (dashboard + this wallet on one origin). Its bundled assets live under
+    // /assets (served below); its dashboard reads are proxied to :8787 by the /api fallback near the end.
+    if (req.method === "GET" && url.pathname === "/agentpay.html") {
+      if (serveDist(res, "agentpay.html")) return;
+      return send(res, 404, { error: "agentpay.html not built — run vite build" });
     }
     if (req.method === "GET" && url.pathname.startsWith("/assets/")) {
       if (serveDist(res, url.pathname)) return;
@@ -400,6 +428,11 @@ const server = http.createServer(async (req, res) => {
     // The queue/poll/resolve/linkedOrigin state machine + CORS live in src/dapp-bridge.mjs; handle()
     // writes the response itself (with its own body reader), exactly as this block used to inline.
     if (url.pathname.startsWith("/bridge/")) return void (await bridge.handle(req, res));
+
+    // Fallback: an /api/* path none of the wallet's own handlers claimed — forward it to the dashboard
+    // backend so the merged page's app.js can read /api/session + /api/state. POST /api/* was already
+    // 401'd by the token gate above, so in practice only GET reads reach here.
+    if (DASHBOARD_PROXY && url.pathname.startsWith("/api/")) return void proxyToDashboard(req, res, url);
 
     send(res, 404, { error: "not found" });
   } catch (e) { send(res, 500, { error: String(e.message || e) }); }
