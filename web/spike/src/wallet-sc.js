@@ -869,7 +869,10 @@ fetch("/api/status").then((r) => r.ok ? r.json() : null).then(async (s) => {
   if (!s) return;
   HAS_BACKEND = true; // the bridge + dev-key import are available
   await fetchBridgeToken(); // pair with the relay before draining (wallet-only routes need the token)
-  $("btnImportDev").hidden = false;
+  // dev-key import is a localnet-only continuity crutch (it takes the server's custodial key into the
+  // browser) — the antithesis of self-custody. Only offer it on localnet; on any real network it stays
+  // hidden (and the server refuses /api/dev-key there too).
+  $("btnImportDev").hidden = s.network !== "localnet";
   if (!loadSettings().indexer) INDEXER = s.indexer || DEFAULT_INDEXER;
   TEMPLATE = s.template || TEMPLATE;          // AgentBudget template, for opening a budget
   DEFAULT_MERCHANT = s.merchant || DEFAULT_MERCHANT; // a sample merchant to prefill

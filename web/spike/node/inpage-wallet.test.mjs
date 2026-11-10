@@ -137,15 +137,19 @@ test("account component + budget persist and surface on the host", async () => {
   assert.equal(w.budget(), null);
 });
 
-test("forget wipes vault + meta + budgets", async () => {
+test("forget wipes vault + meta + budgets + journal", async () => {
   const w = mk();
   await w.createFirst({ material: w.generate().material, passphrase: "passw0rd" });
   w.recordAccountComponent(w.activeId(), "component_" + "c".repeat(64));
+  const comp = "component_" + "b".repeat(64);
+  w.providerHost().recordPay({ component: comp, merchant: "component_" + "d".repeat(64), amount: "700", txid: "tx1" });
+  assert.equal(w.journalFor(comp).ledger.length, 1);
   w.forget();
   assert.equal(w.hasVault(), false);
   assert.equal(w.isUnlocked(), false);
   assert.deepEqual(w.accounts(), []);
   assert.equal(w.account(), null);
+  assert.deepEqual(w.journalFor(comp).ledger, [], "journal history cleared on forget");
 });
 
 test("fund calls the faucet and records the on-chain account", async () => {
@@ -170,6 +174,55 @@ test("openBudget persists the budget state the host then exposes", async () => {
   assert.equal(b.ownerBadge, "ob");
   assert.equal(b.agentBadge, "ab");
   assert.equal(b.vaultId, "vid");
+});
+
+test("budget journal: openBudget records the opening deposit as funded", async () => {
+  const chain = chainStub();
+  const w = mk({ chain });
+  await w.createFirst({ material: w.generate().material, passphrase: "passw0rd" });
+  w.recordAccountComponent(w.activeId(), "component_" + "a".repeat(64));
+  await w.openBudget({ template: "template_x", merchant: "component_" + "d".repeat(64), fund: 50000, perTxCap: 1000, dailyCap: 1500, epochsPerWindow: 10 });
+  const comp = "component_" + "b".repeat(64);
+  const j = w.journalFor(comp);
+  assert.equal(j.funded, "50000");
+  assert.equal(j.withdrawn, "0");
+  assert.deepEqual(j.ledger, []);
+  assert.deepEqual(j.sessions, []);
+});
+
+test("budget journal: host.recordPay appends a ledger row the host then serves", async () => {
+  const w = mk();
+  const host = w.providerHost();
+  const comp = "component_" + "b".repeat(64);
+  host.recordPay({ component: comp, merchant: "component_" + "d".repeat(64), amount: "700", memo: "coffee", txid: "tx_pay1" });
+  host.recordPay({ component: comp, merchant: "component_" + "d".repeat(64), amount: "300", memo: "", txid: "tx_pay2" });
+  const j = host.getJournal(comp);
+  assert.equal(j.ledger.length, 2);
+  assert.equal(j.ledger[0].amount, "700");          // oldest first (append order)
+  assert.equal(j.ledger[0].memo, "coffee");
+  assert.equal(j.ledger[0].txid, "tx_pay1");
+  assert.ok(typeof j.ledger[0].ts === "number");
+  assert.equal(j.ledger[1].amount, "300");
+});
+
+test("budget journal: recordFunded/recordWithdrawn accumulate; a fresh controller on the same storage sees it", async () => {
+  const storage = memStorage();
+  const a = createInPageWallet({ storage, makeWallet, deriveAddress, chain: chainStub() });
+  const comp = "component_" + "b".repeat(64);
+  a.providerHost().recordFunded(comp, "50000");
+  a.providerHost().recordFunded(comp, "10000");
+  a.providerHost().recordWithdrawn(comp, "4000");
+  const b = createInPageWallet({ storage, makeWallet, deriveAddress, chain: chainStub() });
+  const j = b.journalFor(comp);
+  assert.equal(j.funded, "60000");
+  assert.equal(j.withdrawn, "4000");
+});
+
+test("budget journal: unknown component reads an empty skeleton, never throws", () => {
+  const w = mk();
+  const j = w.journalFor("component_" + "f".repeat(64));
+  assert.deepEqual(j, { funded: "0", withdrawn: "0", ledger: [], sessions: [] });
+  assert.deepEqual(w.journalFor(null), { funded: "0", withdrawn: "0", ledger: [], sessions: [] });
 });
 
 test("send is blocked before the account is on-chain, then calls sendXtr", async () => {

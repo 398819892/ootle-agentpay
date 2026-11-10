@@ -48,6 +48,11 @@ const MERCHANT = process.env.MERCHANT || "component_c5c2db90a8f9f02981617244b835
 // set SESSION to a label the owner issued into this account (issueAgentBadge) to pay a budget this
 // wallet did not open — e.g. a budget opened by the dashboard and shared with this agent.
 const SESSION = process.env.SESSION || "default";
+// The network this wallet serves. The custodial continuity crutches (dev-key export + the classic
+// server-signed /api writes) are a localnet-dev convenience and the antithesis of self-custody, so they
+// are gated to localnet: on any other AGENTPAY_NETWORK the dev-key export is refused. Defaults to localnet
+// (the live service sets nothing), so this is a no-op there and a safety net for any real-network reuse.
+const NETWORK = process.env.AGENTPAY_NETWORK || "localnet";
 
 // Load the custodial dev key. If a .spike-key.enc.json is present it is decrypted with the passphrase
 // from WALLET_KEY_PASSPHRASE[_FILE]; otherwise it falls back to the plaintext .spike-key.json (dev).
@@ -370,7 +375,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }); return res.end(fs.readFileSync(f));
     }
     if (url.pathname === "/api/status") {
-      return send(res, 200, { connected: true, account: ACCOUNT, network: "localnet", indexer: INDEXER_URL,
+      return send(res, 200, { connected: true, account: ACCOUNT, network: NETWORK, indexer: INDEXER_URL,
         template: TEMPLATE, merchant: MERCHANT, agentAccount: PAY_AGENT, twoAccount: !!two,
         linkedOrigin: bridge.linkedOrigin, budget: await budgetState() });
     }
@@ -383,9 +388,10 @@ const server = http.createServer(async (req, res) => {
       return send(res, 401, { error: "unauthorized (wallet token required)" });
     }
     // localnet dev continuity: let the in-browser self-custody wallet IMPORT this funded dev account by
-    // taking its key into the browser. This server is localnet-only (status.network === "localnet");
-    // never expose this on a real network.
+    // taking its key into the browser. This exports the custodial key, so it is gated to localnet and
+    // refused on any real network (AGENTPAY_NETWORK) — self-custody never hands the key to a page.
     if (req.method === "GET" && url.pathname === "/api/dev-key") {
+      if (NETWORK !== "localnet") return send(res, 404, { error: "dev-key import disabled off localnet (self-custody only)" });
       return send(res, 200, { owner: key.owner, view: key.view, account: ACCOUNT });
     }
     if (req.method === "POST" && url.pathname === "/api/send") {

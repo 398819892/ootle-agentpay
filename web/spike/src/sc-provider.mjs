@@ -67,9 +67,16 @@ export function createInPageTari(host) {
       const b = host.getBudget();
       if (!b) return { account, network, merchant: null, template: (b && b.template) || null, agentAccount: account, twoAccount: false, linkedOrigin: origin, budget: null };
       const wb = await chain.readBudget(await host.getIndexer(), b.component);
+      // caps / spent / treasury / whitelist are live chain facts (readBudget). The history the chain can't
+      // rebuild — lifetime funded/withdrawn, the pay feed, the issued-session set — comes from the wallet's
+      // own browser journal (host.getJournal), so the dashboard view is whole with NO backend.
+      const j = (host.getJournal && host.getJournal(b.component)) || { funded: null, withdrawn: null, ledger: [], sessions: [] };
       return {
         account, network, merchant: b.merchant, template: b.template || null, agentAccount: account, twoAccount: false, linkedOrigin: origin,
-        budget: { address: wb.address, perTx: wb.perTx, daily: wb.daily, spent: wb.spent, vault: wb.vault, whitelist: wb.whitelist, funded: null, withdrawn: null, sessions: [], ledger: [] },
+        budget: {
+          address: wb.address, perTx: wb.perTx, daily: wb.daily, spent: wb.spent, vault: wb.vault, whitelist: wb.whitelist,
+          funded: j.funded, withdrawn: j.withdrawn, sessions: j.sessions || [], ledger: j.ledger || [],
+        },
       };
     }
 
@@ -88,7 +95,11 @@ export function createInPageTari(host) {
       const provider = await host.getIndexer();
       const state = await chain.readBudget(provider, b.component); // fresh vault + badge ids
       const r = await chain.payBudget(provider, wallet, { account, budget: b.component, state, merchant: b.merchant, amount, memo });
-      if (r.committed) changed();
+      if (r.committed) {
+        // append the pay to this budget's browser journal — the chain keeps spend totals but not a per-pay feed
+        if (host.recordPay) host.recordPay({ component: b.component, merchant: b.merchant, amount: amount.toString(), memo, txid: r.txid || null });
+        changed();
+      }
       return { committed: !!r.committed, txid: r.txid || null, amount: amount.toString(), reason: r.reason || "" };
     }
 

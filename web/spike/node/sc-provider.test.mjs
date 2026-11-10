@@ -99,6 +99,31 @@ test("tari_getBudget returns budget:null when none is open", async () => {
   assert.equal(r.budget, null);
 });
 
+test("tari_getBudget merges the wallet's browser journal (funded/withdrawn/ledger/sessions)", async () => {
+  const journal = {
+    funded: "60000", withdrawn: "4000",
+    ledger: [{ merchant: MERCHANT, amount: "700", memo: "m", txid: "tx_pay", ts: 1 }],
+    sessions: [{ session: "s1", revoked: false }],
+  };
+  const { p } = await connected({ getJournal: () => journal });
+  const r = await p.request({ method: "tari_getBudget" });
+  // chain facts stay live; history comes from the journal
+  assert.equal(r.budget.spent, "700");
+  assert.equal(r.budget.funded, "60000");
+  assert.equal(r.budget.withdrawn, "4000");
+  assert.equal(r.budget.ledger.length, 1);
+  assert.equal(r.budget.ledger[0].txid, "tx_pay");
+  assert.deepEqual(r.budget.sessions, [{ session: "s1", revoked: false }]);
+});
+
+test("tari_getBudget without a journal host still returns the chain view (funded/ledger absent)", async () => {
+  const { p } = await connected(); // makeHost has no getJournal
+  const r = await p.request({ method: "tari_getBudget" });
+  assert.equal(r.budget.spent, "700");
+  assert.equal(r.budget.funded, null);
+  assert.deepEqual(r.budget.ledger, []);
+});
+
 test("pay happy path calls payBudget and reports committed", async () => {
   const { h, p } = await connected();
   const r = await p.request({ method: "tari_signAndSubmitTransaction", params: { pay: { amount: 700, memo: "m" } } });
@@ -110,6 +135,27 @@ test("pay happy path calls payBudget and reports committed", async () => {
   assert.equal(pay.args[2].amount, 700n);
   assert.equal(pay.args[2].merchant, MERCHANT);
   assert.ok(h._calls.some((c) => c.name === "onChange"), "onChange fired on commit");
+});
+
+test("pay records the committed pay to the wallet journal", async () => {
+  const recorded = [];
+  const { p } = await connected({ recordPay: (e) => recorded.push(e) });
+  await p.request({ method: "tari_signAndSubmitTransaction", params: { pay: { amount: 700, memo: "coffee" } } });
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].component, BUDGET);
+  assert.equal(recorded[0].merchant, MERCHANT);
+  assert.equal(recorded[0].amount, "700");
+  assert.equal(recorded[0].memo, "coffee");
+  assert.equal(recorded[0].txid, "tx_pay");
+});
+
+test("pay does NOT record to the journal when the chain rejects it", async () => {
+  const recorded = [];
+  const chain = { ...makeHost().chain, payBudget: () => ({ committed: false, reason: "over cap" }) };
+  const { p } = await connected({ recordPay: (e) => recorded.push(e), chain });
+  const r = await p.request({ method: "tari_signAndSubmitTransaction", params: { pay: { amount: 5000 } } });
+  assert.equal(r.committed, false);
+  assert.equal(recorded.length, 0, "rejected pays are never journaled");
 });
 
 test("pay is rejected when wallet is locked", async () => {

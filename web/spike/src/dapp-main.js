@@ -163,5 +163,8 @@ $("w-btnConnect").onclick = async () => {
 $("apw2-fab").hidden = false;
 route();
 setPanel(true); // open the drawer so first-run onboarding is visible
-// the dashboard is a classic app that boots on load; import it last so window.tari is already present
+// the dashboard is a classic app that boots on load; import it last so window.tari is already present.
+// __AP_WALLET_ONLY tells app.js there is no backend on this origin: skip every /api read and be driven
+// entirely by the in-page wallet + the chain (Phase 3 — this is what lets the :7777 /api proxy go away).
+window.__AP_WALLET_ONLY = true;
 import("../../public/app.js").catch((e) => console.error("[dapp] dashboard failed to load:", e));

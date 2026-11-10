@@ -120,6 +120,7 @@ const I18N = {
     brand_sub: "Agent budget console",
     conn_online: "Connected to chain",
     conn_offline: "Offline",
+    wallet_only_no_backend: "This page is self-custody — connect your wallet and approve on-chain actions there. There is no custodial backend here.",
     theme_group: "Theme",
     theme_light: "Light",
     theme_system: "System",
@@ -714,6 +715,7 @@ const I18N = {
     brand_sub: "代理预算控制台",
     conn_online: "已连接到链",
     conn_offline: "未连接",
+    wallet_only_no_backend: "此页为自托管模式:链上操作请连接并通过你的钱包完成、在钱包内批准。这里没有托管后端。",
     theme_group: "主题",
     theme_light: "浅色",
     theme_system: "跟随系统",
@@ -1396,6 +1398,15 @@ const S = {
 
 /* ---- API client ----------------------------------------------------------- */
 async function api(path, body) {
+  // Self-custody page (the merged one-page dApp): there is NO dashboard backend and NO custodial signer
+  // here — every chain write goes through the connected in-page wallet (window.tari), approved and signed
+  // in the browser. So the classic /api/* custodial path is retired: refuse it with a clear message rather
+  // than fire a dead request. On the hosted :8787 dashboard __AP_WALLET_ONLY is unset, so nothing changes.
+  if (typeof window !== "undefined" && window.__AP_WALLET_ONLY === true) {
+    const e = new Error(t("wallet_only_no_backend"));
+    e.status = 0; e.handled = true;
+    throw e;
+  }
   const headers = body ? { "Content-Type": "application/json" } : {};
   if (body && S.csrf) headers["X-CSRF-Token"] = S.csrf; // CSRF token on every state-changing call
   const res = await fetch(path, {
@@ -1743,7 +1754,7 @@ function sidebar() {
         </div>
       </div>
       ${
-        d
+        d && d.config && d.config.walletdUrl
           ? `<div class="meta"><b>walletd</b> ${esc(shorten(d.config.walletdUrl.replace(/^https?:\/\//, ""), 22, 8))}<br/>
              <b>${esc(t("meta_template"))}</b> ${esc(shorten(d.config.template.replace("template_", ""), 8, 6))}<br/>
              <b>${esc(t("meta_owner"))}</b> ${esc(d.config.ownerAccount)}</div>`
@@ -3469,9 +3480,31 @@ function overlayWalletBudget(base, w) {
   return out;
 }
 
+// The merged one-page self-custody dApp (agentpay.html) sets window.__AP_WALLET_ONLY before this script
+// boots: there is NO dashboard backend on that origin, so every /api read is skipped and the page is
+// driven entirely by the connected in-page wallet (window.tari) + the chain. On the hosted :8787 dashboard
+// the flag is unset, so nothing below changes. walletOnlyBase() is the minimal page shell the wallet
+// overlay (overlayWalletBudget) then fills with the budget's caps/spent/treasury/whitelist/etc.
+const WALLET_ONLY = typeof window !== "undefined" && window.__AP_WALLET_ONLY === true;
+function walletOnlyBase() {
+  // Mirror the backend /api/state "disconnected, no budget" shape so every existing render path finds
+  // its fields — the page is driven by the in-page wallet overlay (overlayWalletBudget), not a backend.
+  // The custodial-only surfaces (walletd URL, owner account, agent keys, tx journal) are empty: in
+  // self-custody there is no walletd and no server journal, and the sidebar hides the walletd meta when
+  // its URL is blank. tokenSymbol names the whole token; amounts stay in base units (UNIT = "µT").
+  return {
+    config: { walletdUrl: "", template: "", ownerAccount: "", tokenSymbol: "XTR", network: "" },
+    api: { enabled: false, agentKeys: [] },
+    connected: false, owner: null, merchants: [], frozen: false,
+    stepUpRequired: false, receiptLang: "both", payConfirmRequired: false, payPassphraseSet: false,
+    tx: { counts: { pending: 0, confirmed: 0, rejected: 0, unknown: 0 }, needsAttention: [] },
+    budget: null,
+  };
+}
+
 async function refreshState(silent) {
   try {
-    const base = await api("/api/state");
+    const base = WALLET_ONLY ? walletOnlyBase() : await api("/api/state");
     if (S.wallet.connected && walletProvider()) {
       try {
         const w = await walletReadBudget();
@@ -4139,6 +4172,19 @@ function wireManage() {
 async function boot() {
   initTheme();
   applyStaticI18n();
+  if (WALLET_ONLY) {
+    // self-custody merged page: no backend. Force the non-custodial shape and let the in-page wallet be
+    // the source of truth; the budget appears once the user connects (tari#connect -> refreshState).
+    S.authRequired = false; S.authed = true; S.nonCustodial = true;
+    applyStaticI18n();
+    const linked = S.wallet.connected && walletProvider();
+    let w = null;
+    if (linked) { try { w = await walletReadBudget(); S.wallet.account = (w && w.account) || S.wallet.account; } catch { /* not yet reachable */ } }
+    S.data = overlayWalletBudget(walletOnlyBase(), w);
+    S.connError = null; S.booting = false;
+    render();
+    return;
+  }
   // Is auth required, and are we already signed in?
   try {
     const sess = await api("/api/session");

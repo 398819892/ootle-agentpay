@@ -22,6 +22,7 @@ import {
 const VAULT_KEY = "ap-sc-vault";
 const META_KEY = "ap-sc-meta";
 const BUDGET_KEY = "ap-sc-budget";
+const JOURNAL_KEY = "ap-sc-journal";
 const SETTINGS_KEY = "ap-sc-settings";
 const LEGACY_ACCOUNT_KEY = "ap-sc-account";
 const DEFAULT_INDEXER = "http://127.0.0.1:12008";
@@ -75,6 +76,36 @@ export function createInPageWallet(opts = {}) {
   const loadBudgets = () => readJSON(BUDGET_KEY, {});
   function settings() { return { autoLockMin: 0, indexer: "", ...readJSON(SETTINGS_KEY, {}) }; }
   const saveSettings = (s) => writeJSON(SETTINGS_KEY, { ...settings(), ...s });
+
+  // --- budget journal ---------------------------------------------------------------------------
+  // The chain cannot rebuild a budget's HISTORY (lifetime funded/withdrawn totals, the per-pay feed, the
+  // issued-session set) — those are not chain facts. The hosted dashboard kept them in a server-side
+  // journal; the self-custody page keeps its own, here in the browser, keyed by budget component. Each op
+  // this wallet signs appends to it (funded on open/top-up, a row per committed pay, withdrawn on
+  // withdraw), so sc-provider's tari_getBudget can serve the full dashboard view with NO backend. The
+  // caps/spent/treasury/whitelist still come live from chain (readBudget) — only the un-derivable history
+  // lives here. A budget opened on another device/browser simply starts with an empty local history.
+  const JSKEL = () => ({ funded: "0", withdrawn: "0", ledger: [], sessions: [] });
+  const loadJournal = () => readJSON(JOURNAL_KEY, {});
+  const addBig = (a, b) => { try { return (BigInt(a || "0") + BigInt(b || "0")).toString(); } catch { return String(a || "0"); } };
+  function journalFor(component) {
+    if (!component) return JSKEL();
+    const j = loadJournal()[component];
+    return j && typeof j === "object" ? { ...JSKEL(), ...j } : JSKEL();
+  }
+  function journalMutate(component, fn) {
+    if (!component) return;
+    const all = loadJournal();
+    const cur = all[component] && typeof all[component] === "object" ? { ...JSKEL(), ...all[component] } : JSKEL();
+    fn(cur);
+    all[component] = cur;
+    writeJSON(JOURNAL_KEY, all);
+    return cur;
+  }
+  const journalFunded = (component, amount) => journalMutate(component, (j) => { j.funded = addBig(j.funded, amount); });
+  const journalWithdrawn = (component, amount) => journalMutate(component, (j) => { j.withdrawn = addBig(j.withdrawn, amount); });
+  // ledger stays oldest→newest (append); the UI slices the tail and reverses for "most recent first".
+  const journalPay = (component, entry) => journalMutate(component, (j) => { j.ledger.push({ ts: Date.now(), ...entry }); });
 
   // --- derived state ----------------------------------------------------------------------------
   const hasVault = () => !!storage.getItem(VAULT_KEY);
@@ -153,7 +184,7 @@ export function createInPageWallet(opts = {}) {
     return accounts();
   }
   function lock() { unlocked = null; _activeSigner = null; }
-  function forget() { for (const k of [VAULT_KEY, META_KEY, SETTINGS_KEY, BUDGET_KEY, LEGACY_ACCOUNT_KEY]) storage.removeItem(k); unlocked = null; _activeSigner = null; }
+  function forget() { for (const k of [VAULT_KEY, META_KEY, SETTINGS_KEY, BUDGET_KEY, JOURNAL_KEY, LEGACY_ACCOUNT_KEY]) storage.removeItem(k); unlocked = null; _activeSigner = null; }
 
   // --- account metadata mutations ---------------------------------------------------------------
   async function setActive(id) { const m = loadMeta(); if (m.list.find((a) => a.id === id)) { m.active = id; saveMeta(m); await refreshSigner(); } }
@@ -202,6 +233,8 @@ export function createInPageWallet(opts = {}) {
     const r = await c.openBudget(p, await walletFor(), { owner, template, merchant, fund: fundAmt, perTxCap, dailyCap, epochsPerWindow });
     const s = r.state || {};
     setBudget(activeId(), { component: r.budget, merchant, template, ownerBadge: s.ownerBadge, agentBadge: s.agentBadge, vaultId: s.vaultId });
+    // the opening deposit is the first funded entry in this budget's local history
+    journalFunded(r.budget, fundAmt);
     return r;
   }
   async function refreshBudget() { const b = budget(); if (!b) return null; return (await chain()).readBudget(await provider(), b.component); }
@@ -216,6 +249,11 @@ export function createInPageWallet(opts = {}) {
       getIndexer: () => provider(),
       approve: approve || (async () => true),
       onChange: onChange || (() => {}),
+      // the un-derivable budget history sc-provider serves to the dashboard (see the budget journal above)
+      getJournal: (component) => journalFor(component),
+      recordPay: (entry) => journalPay(entry && entry.component, entry),
+      recordFunded: (component, amount) => journalFunded(component, amount),
+      recordWithdrawn: (component, amount) => journalWithdrawn(component, amount),
     };
   }
 
@@ -230,6 +268,8 @@ export function createInPageWallet(opts = {}) {
     walletFor, addressFor, activeSigner,
     // chain
     ensureIndexer, provider, fund, balance, send, openBudget, refreshBudget,
+    // budget history (browser journal)
+    journalFor,
     // integration
     providerHost,
   };
