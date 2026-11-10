@@ -30,6 +30,10 @@ export default defineConfig({
         main: resolve(__dirname, "index.html"),
         tapplet: resolve(__dirname, "tapplet/index.html"),
         walletSc: resolve(__dirname, "wallet-sc.html"),
+        // The merged one-page dApp: the AgentPay dashboard (../public/app.js) + the in-page self-custody
+        // wallet, sharing one same-origin window.tari (src/sc-provider.mjs + src/inpage-wallet.mjs). It
+        // imports ../public across the vite root, so dev needs fs.allow to reach it (below).
+        agentpay: resolve(__dirname, "agentpay.html"),
       },
     },
   },
@@ -37,11 +41,21 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     headers: tappletHeaders,
+    // dapp.html's module imports ../public/{app.js,styles.css} — one level above the vite root — so the
+    // dev server must be allowed to serve the parent web/ dir.
+    fs: { allow: [resolve(__dirname, "..")] },
     proxy: {
       "/walletd": {
         target: process.env.WALLETD_ORIGIN ?? "http://127.0.0.1:12010",
         changeOrigin: true,
         rewrite: () => "/json_rpc",
+      },
+      // the merged dApp (dapp.html) serves the dashboard UI but its reads still come from the dashboard
+      // backend; proxy same-origin /api/* to it. Writes/signing go through the in-page window.tari, and
+      // the indexer (:12008, CORS *) is hit directly, so neither is proxied.
+      "/api": {
+        target: process.env.DASHBOARD_ORIGIN ?? "http://127.0.0.1:8787",
+        changeOrigin: true,
       },
     },
   },

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>AgentPay — 自托管 dApp</title>
+    <meta name="description" content="AgentPay — the dashboard and a browser self-custody wallet on one page, one origin. The key is generated, encrypted and held in your browser; every payment is approved and signed here." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- dapp-main.js imports ../public/styles.css (the dashboard's) + the dashboard app.js, then installs the
+         in-page window.tari and boots the dashboard. The wallet UI below is scoped under #apw2 so its styles
+         never touch the dashboard. -->
+    <style>
+      /* ===== in-page wallet drawer — all selectors scoped under #apw2 / .apw2 ===== */
+      #apw2-fab {
+        position: fixed; right: max(18px, env(safe-area-inset-right, 0)); bottom: max(18px, env(safe-area-inset-bottom, 0));
+        z-index: 2147483000; display: inline-flex; align-items: center; gap: 8px;
+        font: 600 13px/1 ui-sans-serif, system-ui, sans-serif; color: #fff;
+        background: #ef8e3b; border: 1px solid #d9772e; border-radius: 12px; padding: 11px 15px; cursor: pointer;
+        box-shadow: 0 16px 40px rgba(20, 20, 40, .3);
+      }
+      #apw2-fab .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff6; }
+      #apw2-fab.on .dot { background: #16a36a; box-shadow: 0 0 0 3px rgba(22, 163, 106, .3); }
+      #apw2 {
+        position: fixed; right: max(18px, env(safe-area-inset-right, 0)); bottom: calc(max(18px, env(safe-area-inset-bottom, 0)) + 54px);
+        z-index: 2147483000; width: min(380px, calc(100vw - 32px)); max-height: min(78vh, 720px); overflow: auto;
+        background: #fff; color: #1b1d21; border: 1px solid #d6d9dc; border-radius: 16px;
+        box-shadow: 0 24px 60px rgba(20, 20, 40, .35); font: 400 13px/1.5 ui-sans-serif, system-ui, sans-serif;
+      }
+      #apw2[hidden], #apw2 [hidden] { display: none !important; }
+      .apw2 .hd { display: flex; align-items: center; gap: 10px; padding: 13px 15px; border-bottom: 1px solid #e7eaed; position: sticky; top: 0; background: #f7f8fa; }
+      .apw2 .mark { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, #ef8e3b, #d9772e); display: grid; place-items: center; color: #fff; font-weight: 700; }
+      .apw2 .hd h4 { margin: 0; font-size: 13px; font-weight: 700; } .apw2 .hd .s { font-size: 11px; color: #6a737d; }
+      .apw2 .x { margin-left: auto; background: none; border: 0; color: #9099a2; font-size: 17px; cursor: pointer; line-height: 1; }
+      .apw2 .bd { padding: 15px; display: flex; flex-direction: column; gap: 11px; }
+      .apw2 .sectitle { font-size: 12.5px; font-weight: 700; } .apw2 .mut { color: #6a737d; } .apw2 .faint { color: #9099a2; }
+      .apw2 .note { font-size: 11px; color: #9099a2; line-height: 1.6; margin: 0; }
+      .apw2 label { display: block; color: #6a737d; font-size: 12px; margin: 8px 0 4px; }
+      .apw2 input, .apw2 textarea { width: 100%; box-sizing: border-box; padding: 11px 12px; border: 1px solid #d6d9dc; border-radius: 10px; background: #fff; color: #1b1d21; font: inherit; font-size: 14px; }
+      .apw2 textarea { min-height: 86px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; resize: vertical; }
+      .apw2 input.mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+      .apw2 .btn { font-weight: 600; font-size: 14px; color: #fff; background: #0376c9; border: 0; border-radius: 999px; padding: 11px 15px; cursor: pointer; }
+      .apw2 .btn:hover:not(:disabled) { background: #0260a4; } .apw2 .btn:disabled { opacity: .55; cursor: default; }
+      .apw2 .btn.sec { background: #fff; color: #0376c9; border: 1px solid #d6d9dc; } .apw2 .btn.sec:hover:not(:disabled) { background: #eef0f3; }
+      .apw2 .btn.block { width: 100%; } .apw2 .row { display: flex; gap: 9px; } .apw2 .row > .btn { flex: 1; }
+      .apw2 .bad { color: #d73a49; font-size: 12.5px; min-height: 16px; } .apw2 .ok { color: #1c8234; font-size: 12.5px; min-height: 16px; }
+      .apw2 .card { border: 1px solid #e7eaed; border-radius: 13px; background: #f7f8fa; padding: 13px; display: flex; flex-direction: column; gap: 9px; }
+      .apw2 .addr { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; word-break: break-all; background: #fff; border: 1px solid #e7eaed; border-radius: 9px; padding: 9px; color: #6a737d; }
+      .apw2 .warn { background: #fff4e5; border: 1px solid #f0c98a; border-radius: 10px; padding: 10px 12px; font-size: 12.5px; color: #7a4f00; }
+      .apw2 .words { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+      .apw2 .w { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; background: #fff; border: 1px solid #e7eaed; border-radius: 7px; padding: 6px 8px; }
+      .apw2 .w b { color: #9099a2; font-weight: 400; margin-right: 5px; user-select: none; }
+      .apw2 .kv { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; font-size: 12.5px; }
+      .apw2 .kv span { color: #6a737d; } .apw2 .kv b { font-family: ui-monospace, Menlo, monospace; word-break: break-all; text-align: right; }
+      .apw2 .bal { display: flex; align-items: baseline; gap: 6px; } .apw2 .bal .n { font-size: 26px; font-weight: 700; } .apw2 .bal .u { font-size: 13px; color: #6a737d; font-weight: 600; }
+      /* approval modal */
+      #apw2-modal { position: fixed; inset: 0; z-index: 2147483600; background: rgba(8, 10, 14, .62); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 20px; }
+      #apw2-modal[hidden] { display: none !important; }
+      .apw2-dm { width: 100%; max-width: 360px; background: #fff; border: 1px solid #d6d9dc; border-radius: 18px; padding: 22px 20px; box-shadow: 0 24px 60px rgba(0, 0, 0, .45); font: 400 13px/1.5 ui-sans-serif, system-ui, sans-serif; color: #1b1d21; }
+      .apw2-dm .ic { font-size: 24px; text-align: center; } .apw2-dm .ti { font-size: 17px; font-weight: 700; text-align: center; }
+      .apw2-dm .og { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #0376c9; text-align: center; margin-top: 3px; word-break: break-all; }
+      .apw2-dm .body { margin: 14px 0 4px; display: flex; flex-direction: column; gap: 7px; }
+      .apw2-dm .line { font-size: 12.5px; background: #f7f8fa; border: 1px solid #e7eaed; border-radius: 9px; padding: 9px 11px; word-break: break-all; }
+      .apw2-dm .line .mono { font-family: ui-monospace, Menlo, monospace; }
+      .apw2-dm .nt { font-size: 11px; color: #9099a2; margin: 12px 0 16px; line-height: 1.5; text-align: center; }
+      .apw2-dm .btns { display: flex; gap: 10px; } .apw2-dm .btns .btn { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <!-- the AgentPay dashboard mounts here (../public/app.js, imported by dapp-main.js) -->
+    <div id="app" class="app" aria-busy="true">
+      <div class="boot"><div class="boot__spinner" aria-hidden="true"></div><p>正在连接到链…</p></div>
+    </div>
+    <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+    <div id="modal-root"></div>
+
+    <!-- ===== in-page self-custody wallet (same origin, no relay) ===== -->
+    <button id="apw2-fab" type="button" hidden><span class="dot"></span><span id="apw2-fablab">钱包</span></button>
+    <aside id="apw2" class="apw2" hidden aria-label="自托管钱包">
+      <div class="hd"><div class="mark">A</div><div><h4>自托管钱包</h4><div class="s">浏览器持钥 · 同源 · Ootle Localnet</div></div><button class="x" id="apw2-close" title="关闭">✕</button></div>
+      <div class="bd">
+        <!-- onboard: no vault yet -->
+        <section id="w-onboard" hidden>
+          <p class="note" style="margin-bottom:9px">私钥在你的浏览器里生成与加密保管,助记词由你备份,页面与后端都接触不到。</p>
+          <div class="row" style="flex-direction:column">
+            <button id="w-btnCreate" class="btn block">创建新钱包</button>
+            <button id="w-btnRestore" class="btn sec block">用 48 词助记词恢复</button>
+          </div>
+        </section>
+
+        <!-- create: show mnemonic + derived address -->
+        <section id="w-create" hidden>
+          <div class="sectitle">备份你的恢复短语</div>
+          <div class="warn">这 48 个词是恢复钱包的唯一凭证,按顺序离线抄写。任何人拿到即可动用你的资产;丢失无法找回。切勿截图或粘贴到联网处。</div>
+          <div class="words" id="w-words" style="margin-top:9px"></div>
+          <label>此钱包地址(由密钥派生,离线生成)</label>
+          <div class="addr" id="w-createAddr">派生中…</div>
+          <label style="margin-top:10px">设置解锁口令(至少 8 位,AES-256-GCM 本机加密)</label>
+          <input id="w-newPass1" type="password" autocomplete="new-password" placeholder="口令" />
+          <input id="w-newPass2" type="password" autocomplete="new-password" placeholder="再次输入" style="margin-top:6px" />
+          <div class="bad" id="w-createErr"></div>
+          <button id="w-btnCreateDo" class="btn block">加密并保存</button>
+        </section>
+
+        <!-- restore: paste mnemonic -->
+        <section id="w-restore" hidden>
+          <div class="sectitle">输入恢复短语</div>
+          <label>48 个词,用空格分隔</label>
+          <textarea id="w-restoreWords" placeholder="word1 word2 … word48"></textarea>
+          <label>设置解锁口令(至少 8 位)</label>
+          <input id="w-rPass1" type="password" autocomplete="new-password" placeholder="口令" />
+          <input id="w-rPass2" type="password" autocomplete="new-password" placeholder="再次输入" style="margin-top:6px" />
+          <div class="bad" id="w-restoreErr"></div>
+          <div class="row"><button id="w-btnRestoreDo" class="btn">恢复</button><button id="w-btnRestoreBack" class="btn sec">返回</button></div>
+        </section>
+
+        <!-- unlock: vault exists -->
+        <section id="w-unlock" hidden>
+          <div class="sectitle">解锁钱包</div>
+          <label>口令</label>
+          <input id="w-unlockPass" type="password" autocomplete="current-password" />
+          <div class="bad" id="w-unlockErr"></div>
+          <button id="w-btnUnlock" class="btn block">解锁</button>
+          <button id="w-btnForget" class="btn sec block" style="margin-top:7px">忘记此钱包(清除本机数据)</button>
+        </section>
+
+        <!-- main: unlocked -->
+        <section id="w-main" hidden>
+          <div class="card">
+            <div class="kv"><span>账户</span><b id="w-acct">—</b></div>
+            <div class="bal"><span class="n" id="w-bal">—</span><span class="u">XTR</span></div>
+            <div class="row">
+              <button id="w-btnFund" class="btn sec">充值(faucet)</button>
+              <button id="w-btnRefresh" class="btn sec">刷新余额</button>
+            </div>
+            <div class="bad" id="w-mainErr"></div>
+          </div>
+
+          <!-- budget: open one so the dashboard has something to drive -->
+          <div class="card">
+            <div class="sectitle">预算(供仪表盘驱动)</div>
+            <section id="w-budNone">
+              <p class="note">开一个链上预算,连接仪表盘后即可按额度付款(链上强制)。</p>
+              <label style="margin-top:6px">初始注资 / 单笔上限 / 每日上限</label>
+              <div class="row"><input id="w-bFund" inputmode="numeric" placeholder="注资 50000" /><input id="w-bPerTx" inputmode="numeric" placeholder="单笔 1000" /><input id="w-bDaily" inputmode="numeric" placeholder="每日 1500" /></div>
+              <label>商户(白名单,component_…)</label>
+              <input id="w-bMerchant" class="mono" placeholder="component_…" spellcheck="false" />
+              <div class="bad" id="w-budErr"></div>
+              <button id="w-btnOpenBudget" class="btn block">开预算</button>
+            </section>
+            <section id="w-budHas" hidden>
+              <div class="kv"><span>预算组件</span><b id="w-bComp">—</b></div>
+              <div class="kv"><span>商户</span><b id="w-bMerch">—</b></div>
+              <div class="kv"><span>额度(单笔/每日)</span><b id="w-bCaps">—</b></div>
+              <div class="kv"><span>本窗口已花</span><b id="w-bSpent">—</b></div>
+            </section>
+          </div>
+
+          <!-- connect: expose this wallet to the dashboard over the in-page window.tari -->
+          <button id="w-btnConnect" class="btn block">连接到本页仪表盘</button>
+          <p class="note" id="w-connNote">连接后,仪表盘的付款将从此预算支出、由你在此批准、浏览器用你的私钥签名。</p>
+          <div class="row" style="margin-top:2px">
+            <button id="w-btnLock" class="btn sec">锁定</button>
+          </div>
+        </section>
+      </div>
+    </aside>
+
+    <!-- dApp approval modal: the dashboard (this page) queues a request; you approve here and the browser signs -->
+    <div id="apw2-modal" hidden>
+      <div class="apw2-dm">
+        <div class="ic">🔗</div>
+        <div class="ti" id="apw2-mtitle">请求批准</div>
+        <div class="og" id="apw2-morigin">(本页)</div>
+        <div class="body" id="apw2-mbody"></div>
+        <div class="nt">仅你本人能批准;批准后由本浏览器用你的私钥签名并提交到链上。</div>
+        <div class="btns"><button class="btn sec" id="apw2-mreject">拒绝</button><button class="btn" id="apw2-mapprove">批准</button></div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/dapp-main.js"></script>
+  </body>
+</html>
