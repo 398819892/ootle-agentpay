@@ -11,22 +11,20 @@
          never touch the dashboard. -->
     <style>
       /* ===== in-page wallet drawer — all selectors scoped under #apw2 / .apw2 ===== */
-      #apw2-fab {
-        position: fixed; right: max(18px, env(safe-area-inset-right, 0)); bottom: max(18px, env(safe-area-inset-bottom, 0));
-        z-index: 2147483000; display: inline-flex; align-items: center; gap: 8px;
-        font: 600 13px/1 ui-sans-serif, system-ui, sans-serif; color: #fff;
-        background: #ef8e3b; border: 1px solid #d9772e; border-radius: 12px; padding: 11px 15px; cursor: pointer;
-        box-shadow: 0 16px 40px rgba(20, 20, 40, .3);
-      }
-      #apw2-fab .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff6; }
-      #apw2-fab.on .dot { background: #16a36a; box-shadow: 0 0 0 3px rgba(22, 163, 106, .3); }
-      #apw2 {
-        position: fixed; right: max(18px, env(safe-area-inset-right, 0)); bottom: calc(max(18px, env(safe-area-inset-bottom, 0)) + 54px);
-        z-index: 2147483000; width: min(380px, calc(100vw - 32px)); max-height: min(78vh, 720px); overflow: auto;
-        background: #fff; color: #1b1d21; border: 1px solid #d6d9dc; border-radius: 16px;
-        box-shadow: 0 24px 60px rgba(20, 20, 40, .35); font: 400 13px/1.5 ui-sans-serif, system-ui, sans-serif;
-      }
+      /* The wallet is a first-class dashboard nav view ("钱包"), not a floating drawer: the FAB is gone, and
+         #apw2 is parked hidden on <body>, then MOVED into the view's #apw2-mount by app.js render() (so the
+         dashboard rebuilding its own innerHTML can't destroy the wallet DOM / its unlocked state). */
+      #apw2-fab { display: none !important; }
+      #apw2 { display: none; color: #1b1d21; font: 400 13px/1.5 ui-sans-serif, system-ui, sans-serif; }
       #apw2[hidden], #apw2 [hidden] { display: none !important; }
+      /* embedded in the content column: render as a normal in-flow card, matching the other views' format */
+      #apw2-mount { display: block; max-width: 560px; }
+      #apw2-mount #apw2 {
+        display: block; position: static; inset: auto; width: auto; height: auto; max-height: none; overflow: visible;
+        background: #fff; border: 1px solid #e7eaed; border-radius: 14px; box-shadow: none;
+      }
+      #apw2-mount #apw2 .x { display: none; }                      /* no close button in the embedded view */
+      #apw2-mount #apw2 .hd { position: static; border-radius: 14px 14px 0 0; }
       .apw2 .hd { display: flex; align-items: center; gap: 10px; padding: 13px 15px; border-bottom: 1px solid #e7eaed; position: sticky; top: 0; background: #f7f8fa; }
       .apw2 .mark { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, #ef8e3b, #d9772e); display: grid; place-items: center; color: #fff; font-weight: 700; }
       .apw2 .hd h4 { margin: 0; font-size: 13px; font-weight: 700; } .apw2 .hd .s { font-size: 11px; color: #6a737d; }
@@ -84,7 +82,7 @@
 
     <!-- ===== in-page self-custody wallet (same origin, no relay) ===== -->
     <button id="apw2-fab" type="button" hidden><span class="dot"></span><span id="apw2-fablab">钱包</span></button>
-    <aside id="apw2" class="apw2" hidden aria-label="自托管钱包">
+    <aside id="apw2" class="apw2" aria-label="自托管钱包">
       <div class="hd"><div class="mark">A</div><div><h4>自托管钱包</h4><div class="s" id="apw2-sub">浏览器持钥 · 同源 · Ootle Localnet</div></div><button class="x" id="apw2-close" title="关闭">✕</button></div>
       <div class="bd">
         <!-- onboard: no vault yet -->

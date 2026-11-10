@@ -51,15 +51,12 @@ $("apw2-mreject").onclick = () => settleApprove(false);
 // --- install the same-origin window.tari (connected=false until the user connects in the drawer) ---
 const provider = installInPageTari(wallet.providerHost({ approve, onChange: () => { renderMain(); } }));
 
-// --- panel open/close ---------------------------------------------------------------------------
-let panelOpen = false;
-function setPanel(open) { panelOpen = open; $("apw2").hidden = !open; $("apw2-fab").classList.toggle("on", wallet.isUnlocked()); }
-$("apw2-fab").onclick = () => setPanel(!panelOpen);
-$("apw2-close").onclick = () => setPanel(false);
-
 // --- view routing -------------------------------------------------------------------------------
+// The wallet is no longer a floating drawer — it's a first-class dashboard nav view ("钱包"). app.js owns the
+// sidebar entry and moves this #apw2 element into the view's mount on render (see app.js render()); here we
+// only drive which inner section (onboard/unlock/main) shows.
 const SECTIONS = ["w-onboard", "w-create", "w-restore", "w-unlock", "w-main"];
-function show(id) { for (const s of SECTIONS) $(s).hidden = s !== id; $("apw2-fab").classList.toggle("on", id === "w-main"); }
+function show(id) { for (const s of SECTIONS) $(s).hidden = s !== id; }
 function route() { show(wallet.hasVault() ? "w-unlock" : "w-onboard"); }
 
 // --- onboard: create (generate → SHOW words → VERIFY a few back → encrypt & save) ----------------
@@ -189,7 +186,7 @@ function kickIdle() {
     _idleTimer = setTimeout(() => {
       _idleTimer = null;
       wallet.lock(); provider._notifyLocked();
-      setPanel(true); route();
+      route();
       const e = $("w-unlockErr"); if (e) e.textContent = "已因闲置自动锁定,请重新解锁。";
     }, min * 60 * 1000);
   }
@@ -291,10 +288,10 @@ $("w-btnConnect").onclick = async () => {
   catch (e) { btn.disabled = false; btn.textContent = lab; $("w-connNote").textContent = "连接失败: " + (e?.message || e); }
 };
 
-// --- boot: show the wallet, then start the dashboard (provider already installed) ----------------
-$("apw2-fab").hidden = false;
+// --- boot: set the wallet's initial section, then start the dashboard (provider already installed) ----
+// No auto-popup: the page lands on the dashboard's default view; the wallet is reached via its "钱包" nav
+// entry. route() just picks onboard-vs-unlock so the section is correct whenever the user opens that view.
 route();
-setPanel(true); // open the drawer so first-run onboarding is visible
 // the dashboard is a classic app that boots on load; import it last so window.tari is already present.
 // __AP_WALLET_ONLY tells app.js there is no backend on this origin: skip every /api read and be driven
 // entirely by the in-page wallet + the chain (Phase 3 — this is what lets the :7777 /api proxy go away).

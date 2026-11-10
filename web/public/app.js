@@ -135,6 +135,8 @@ const I18N = {
     /* nav */
     nav_overview: "Overview",
     nav_start: "Get started",
+    nav_wallet: "Wallet",
+    wallet_view_sub: "Your browser-held key — create or unlock it here, then connect it to the dashboard.",
     start_sub: "First steps for a new user — from signing in to your agent's first payment.",
     start_custodial_note: "This is a hosted (custodial) console: the wallet is held and signed server-side by walletd, and the dashboard is already connected to the chain. You do not connect a wallet in the browser.",
     /* non-custodial single-mode (S.nonCustodial) — the owner connects their :7777 AgentPay wallet */
@@ -730,6 +732,8 @@ const I18N = {
     /* nav */
     nav_overview: "总览",
     nav_start: "开始使用",
+    nav_wallet: "钱包",
+    wallet_view_sub: "你的浏览器持钥 —— 在此创建或解锁,再连接到仪表盘。",
     start_sub: "新手第一步 —— 从登录到你的 AI 完成第一笔付款。",
     start_custodial_note: "这是托管式控制台:钱包由服务端的 walletd 持有并签名,面板已经连接到链。你无需在浏览器里连接钱包。",
     /* 非托管单模式(S.nonCustodial)—— 所有者连接自己的 :7777 AgentPay 钱包 */
@@ -1681,6 +1685,13 @@ const NAV = [
   { id: "subscription", key: "nav_subscription", icon: "wallet" },
   { id: "settings", key: "nav_settings", icon: "settings" },
 ];
+
+// On the merged self-custody page only (window.__AP_WALLET_ONLY, set by dapp-main before this module loads),
+// the in-page wallet is a first-class nav entry like the rest — same format — at the top of the sidebar.
+// Its view is just a mount point; dapp-main's wallet DOM (#apw2) is moved into it on render (see render()).
+if (typeof window !== "undefined" && window.__AP_WALLET_ONLY) {
+  NAV.unshift({ id: "wallet", key: "nav_wallet", icon: "lock" });
+}
 
 function go(view) {
   S.view = view;
@@ -2883,6 +2894,12 @@ function renderLogin() {
 function render() {
   const app = el("app");
   app.removeAttribute("aria-busy");
+  // The merged page's in-page wallet (#apw2) lives OUTSIDE #app so that rebuilding app.innerHTML below can
+  // never destroy it (and its bound handlers / unlocked state). Park it on <body> before the rebuild; if the
+  // active view is the wallet, it is moved into the view's mount point after wire() (below). On the hosted
+  // dashboard there is no #apw2, so this is a no-op.
+  const _apw = typeof document !== "undefined" ? document.getElementById("apw2") : null;
+  if (_apw && _apw.parentNode !== document.body) document.body.appendChild(_apw);
   // Amounts are base units (µT) regardless of the token's whole-unit ticker, so UNIT stays "µT"
   // (see its declaration). `config.tokenSymbol` names the whole token but must NOT relabel the
   // base-unit amounts — doing that was the 1e6 unit mismatch this fixes.
@@ -2931,11 +2948,19 @@ function render() {
     case "subscription":
       body = viewSubscription();
       break;
+    case "wallet":
+      // the in-page self-custody wallet UI (#apw2) is moved into this mount after wire()
+      body = `${pageHead(t("nav_wallet"), t("wallet_view_sub"))}<div id="apw2-mount" class="wallet-mount"></div>`;
+      break;
     default:
       body = viewOverview();
   }
   app.innerHTML = sidebar() + `<main class="main">${frozenBanner()}${walletBanner()}${body}</main>`;
   wire();
+  if (S.view === "wallet" && _apw) {
+    const m = document.getElementById("apw2-mount");
+    if (m) m.appendChild(_apw);
+  }
 }
 
 /* ---- views: GET STARTED --------------------------------------------------- */
