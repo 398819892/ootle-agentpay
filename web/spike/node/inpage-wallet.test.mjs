@@ -187,7 +187,26 @@ test("budget journal: openBudget records the opening deposit as funded", async (
   assert.equal(j.funded, "50000");
   assert.equal(j.withdrawn, "0");
   assert.deepEqual(j.ledger, []);
-  assert.deepEqual(j.sessions, []);
+  // openBudget seeds the "default" session badge minted at open
+  assert.equal(j.sessions.length, 1);
+  assert.equal(j.sessions[0].session, "default");
+  assert.equal(j.sessions[0].revoked, false);
+});
+
+test("budget journal: session issue/revoke tracked in the journal (chain doesn't list them)", async () => {
+  const w = mk();
+  const host = w.providerHost();
+  const comp = "component_" + "b".repeat(64);
+  host.recordSessionIssued(comp, "agent2");
+  host.recordSessionIssued(comp, "agent3");
+  host.recordSessionRevoked(comp, "agent2");
+  const j = host.getJournal(comp);
+  assert.equal(j.sessions.length, 2);
+  assert.deepEqual(j.sessions.find((s) => s.session === "agent2"), { session: "agent2", revoked: true, ts: j.sessions.find((s) => s.session === "agent2").ts });
+  assert.equal(j.sessions.find((s) => s.session === "agent3").revoked, false);
+  // re-issuing a revoked session un-revokes it
+  host.recordSessionIssued(comp, "agent2");
+  assert.equal(w.journalFor(comp).sessions.find((s) => s.session === "agent2").revoked, false);
 });
 
 test("budget journal: host.recordPay appends a ledger row the host then serves", async () => {

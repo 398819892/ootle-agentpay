@@ -14,7 +14,10 @@ import {
 } from "@tari-project/ootle";
 import { publicKeyFromSecretKey } from "@tari-project/ootle-wasm";
 import { decodeSubstateValue, decodeEvent, decodeExecuteResult } from "@tari-project/ootle-wasm-bor";
-import { findNewComponent, transferTx, openBudgetTx, payTx, setLimitsTx, addMerchantTx, removeMerchantTx, parseBudgetSubstate, XTR } from "./agentpay-tx.js";
+import {
+  findNewComponent, transferTx, openBudgetTx, payTx, setLimitsTx, addMerchantTx, removeMerchantTx,
+  topUpTx, withdrawTx, issueBadgeTx, revokeSessionTx, revokeTx, parseBudgetSubstate, XTR,
+} from "./agentpay-tx.js";
 import { connectIndexer, accountVaults, maxEpoch, signSealSubmit } from "./chain.js";
 
 const XTR_HEX = XTR.replace(/^resource_/, "");
@@ -323,4 +326,88 @@ export async function setMerchant(provider, wallet, { owner, budget, ownerBadge,
   catch (e) { return { committed: false, reason: e?.reason || e?.message || String(e) }; }
   try { const b = await readBudget(provider, budget); const has = b.whitelist.includes(merchant); if (add ? has : !has) return { committed: true, txid }; } catch { /* fall through */ }
   return { committed: false, txid, reason: add ? "链上未加入白名单" : "链上未移出白名单" };
+}
+
+// --- lifecycle ops (fund / withdraw / session badges / kill switch), signed in the browser ----------
+// Each reads the budget's live state NOW for the vault id + badge resources (a stale value silently
+// no-ops), builds the proven manifest tx (agentpay-tx.js), and submits it browser-signed. Where the
+// chain exposes the effect it is VERIFIED by re-reading (the AcceptFeeRejectRest fee-only-commit trap,
+// as in pay/setLimits); the per-session badge set is NOT in the positional substate, so issue/revoke of a
+// session report committed on a clean submit and the wallet journal is the source of truth for that set.
+const _reason = (e) => e?.reason || e?.message || String(e);
+
+/** top_up: fund the budget vault from the owner's account (not owner-gated). Verifies the vault grew. */
+export async function topUp(provider, wallet, { owner, budget, amount }) {
+  const state = await readBudget(provider, budget);
+  const before = (() => { try { return BigInt(state.vault); } catch { return null; } })();
+  const tx = topUpTx({
+    network: Network.LocalNet, maxEpoch: await maxEpoch(provider),
+    owner, ownerVaults: await accountVaults(provider, owner),
+    budget, budgetVault: state.vaultId, amount: BigInt(amount), maxFee: 200_000,
+  });
+  let txid = null;
+  try { txid = (await signSealSubmit(provider, [wallet], tx)).txId; }
+  catch (e) { return { committed: false, reason: _reason(e) }; }
+  let after = before;
+  try { after = BigInt((await readBudget(provider, budget)).vault); } catch { /* keep before */ }
+  if (before == null || after > before) return { committed: true, txid };
+  return { committed: false, txid, reason: "链上未增加预算余额(top_up 未生效)" };
+}
+
+/** withdraw: owner pulls `amount` from the budget vault back to their account (owner-gated). Verifies drop. */
+export async function withdraw(provider, wallet, { owner, budget, amount }) {
+  const state = await readBudget(provider, budget);
+  const before = (() => { try { return BigInt(state.vault); } catch { return null; } })();
+  const tx = withdrawTx({
+    network: Network.LocalNet, maxEpoch: await maxEpoch(provider),
+    owner, ownerVaults: await accountVaults(provider, owner),
+    budget, budgetVault: state.vaultId, ownerBadge: state.ownerBadge,
+    amount: BigInt(amount), maxFee: 200_000,
+  });
+  let txid = null;
+  try { txid = (await signSealSubmit(provider, [wallet], tx)).txId; }
+  catch (e) { return { committed: false, reason: _reason(e) }; }
+  let after = before;
+  try { after = BigInt((await readBudget(provider, budget)).vault); } catch { /* keep before */ }
+  if (before == null || after < before) return { committed: true, txid };
+  return { committed: false, txid, reason: "链上未从预算提款(withdraw 未生效)" };
+}
+
+/** issue_agent_badge: owner mints a session badge `session` into the agent account (owner-gated). The
+ *  positional substate doesn't list sessions, so a clean submit is reported committed. */
+export async function issueSession(provider, wallet, { owner, agent, budget, session }) {
+  const recv = agent || owner; // single-account model: owner is the agent/session account
+  const state = await readBudget(provider, budget);
+  const tx = issueBadgeTx({
+    network: Network.LocalNet, maxEpoch: await maxEpoch(provider),
+    owner, ownerVaults: await accountVaults(provider, owner),
+    budget, agent: recv, agentVaults: await accountVaults(provider, recv),
+    agentBadge: state.agentBadge, ownerBadge: state.ownerBadge, session, maxFee: 200_000,
+  });
+  let txid = null;
+  try { txid = (await signSealSubmit(provider, [wallet], tx)).txId; }
+  catch (e) { return { committed: false, reason: _reason(e) }; }
+  return { committed: true, txid };
+}
+
+/** revoke_session: owner blocks one session badge on chain (owner-gated). Not in the positional substate
+ *  to re-read, so a clean submit is reported committed. */
+export async function revokeSession(provider, wallet, { owner, budget, session }) {
+  const state = await readBudget(provider, budget);
+  const tx = revokeSessionTx({ ...(await ownerOpCommon(provider, owner, budget, state.ownerBadge)), session });
+  let txid = null;
+  try { txid = (await signSealSubmit(provider, [wallet], tx)).txId; }
+  catch (e) { return { committed: false, reason: _reason(e) }; }
+  return { committed: true, txid };
+}
+
+/** revoke: owner flips the global kill switch (owner-gated). Verifies the revoked flag on chain. */
+export async function revoke(provider, wallet, { owner, budget }) {
+  const state = await readBudget(provider, budget);
+  const tx = revokeTx(await ownerOpCommon(provider, owner, budget, state.ownerBadge));
+  let txid = null;
+  try { txid = (await signSealSubmit(provider, [wallet], tx)).txId; }
+  catch (e) { return { committed: false, reason: _reason(e) }; }
+  try { if ((await readBudget(provider, budget)).revoked) return { committed: true, txid }; } catch { /* fall through */ }
+  return { committed: false, txid, reason: "链上未进入停用状态(revoke 未生效)" };
 }

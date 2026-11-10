@@ -3459,6 +3459,7 @@ function overlayWalletBudget(base, w) {
   out.budget = {
     ...prev,
     component: wb.address,
+    revoked: wb.revoked != null ? wb.revoked : prev.revoked,
     perTxCap, dailyCap, spent, treasury, funded, withdrawn,
     dailyRemaining: String(Math.max(0, (Number(dailyCap) || 0) - (Number(spent) || 0))),
     whitelist: (wb.whitelist || []).map((address) => ({ address, name: names[address] || null })),

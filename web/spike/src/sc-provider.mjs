@@ -39,6 +39,7 @@ export function createInPageTari(host) {
   const requireAccount = () => host.getAccount() || err("钱包尚无链上账户,请先在钱包里创建/充值账户");
   const requireBudget = () => host.getBudget() || err("钱包尚未开通预算(请先在钱包里开预算)");
   const approveOrReject = async (spec) => { if (!(await approve(spec))) err("用户拒绝 (4001)"); };
+  const amtInt = (v) => { const s = String(v); if (!/^\d+$/.test(s) || BigInt(s) <= 0n) err("金额必须为正整数"); return s; };
 
   async function dispatch(method, params) {
     const origin = location.origin;
@@ -74,7 +75,8 @@ export function createInPageTari(host) {
       return {
         account, network, merchant: b.merchant, template: b.template || null, agentAccount: account, twoAccount: false, linkedOrigin: origin,
         budget: {
-          address: wb.address, perTx: wb.perTx, daily: wb.daily, spent: wb.spent, vault: wb.vault, whitelist: wb.whitelist,
+          address: wb.address, perTx: wb.perTx, daily: wb.daily, spent: wb.spent, vault: wb.vault,
+          whitelist: wb.whitelist, revoked: wb.revoked,
           funded: j.funded, withdrawn: j.withdrawn, sessions: j.sessions || [], ledger: j.ledger || [],
         },
       };
@@ -126,6 +128,60 @@ export function createInPageTari(host) {
       await approveOrReject({ title: add ? "加入白名单" : "移出白名单", origin, approveLabel: "确认",
         lines: [`商户 <b class="mono">${merchant}</b>`, `<span class="mut">预算 ${b.component}</span>`] });
       const r = await chain.setMerchant(provider, wallet, { ...common, merchant, add });
+      if (r.committed) changed();
+      return { committed: !!r.committed, txid: r.txid || null, reason: r.reason || "" };
+    }
+
+    // WRITE (owner-gated lifecycle) — fund / withdraw the vault, issue / revoke session badges, kill switch.
+    // Each is owner-badge proven, browser-signed, approved here. topUp funds / withdraw pulls the vault and
+    // the browser journal mirrors the lifetime totals; issue/revoke session update the journal's session set
+    // (the chain substate doesn't list it); revoke flips the on-chain global kill switch (read live from chain).
+    if (method === "tari_signAndSubmitTransaction" && (params.topUp || params.withdraw || params.issueSession || params.revokeSession || params.revoke)) {
+      requireConnected();
+      const wallet = requireUnlocked();
+      const account = requireAccount();
+      const b = requireBudget();
+      const provider = await host.getIndexer();
+      const owner = account;
+
+      if (params.topUp) {
+        const amount = amtInt(params.topUp.amount);
+        await approveOrReject({ title: "注资预算", origin, approveLabel: "确认注资",
+          lines: [`向预算 <b class="mono">${b.component}</b>`, `注入 <b>${amount} XTR</b>`, `<span class="mut">从你的账户余额支付(手续费另计)</span>`] });
+        const r = await chain.topUp(provider, wallet, { owner, budget: b.component, amount });
+        if (r.committed) { if (host.recordFunded) host.recordFunded(b.component, amount); changed(); }
+        return { committed: !!r.committed, txid: r.txid || null, reason: r.reason || "" };
+      }
+      if (params.withdraw) {
+        const amount = amtInt(params.withdraw.amount);
+        await approveOrReject({ title: "从预算提款", origin, approveLabel: "确认提款",
+          lines: [`从预算 <b class="mono">${b.component}</b>`, `提取 <b>${amount} XTR</b> 回你的账户`, `<span class="mut">owner 权限;浏览器签名</span>`] });
+        const r = await chain.withdraw(provider, wallet, { owner, budget: b.component, amount });
+        if (r.committed) { if (host.recordWithdrawn) host.recordWithdrawn(b.component, amount); changed(); }
+        return { committed: !!r.committed, txid: r.txid || null, reason: r.reason || "" };
+      }
+      if (params.issueSession) {
+        const session = String((params.issueSession.session || "")).trim();
+        if (!session) err("会话名称不能为空");
+        await approveOrReject({ title: "发放 Agent 会话", origin, approveLabel: "确认发放",
+          lines: [`为预算 <b class="mono">${b.component}</b>`, `发放会话徽章 <b>${session}</b>`, `<span class="mut">该会话可在同样的额度内付款</span>`] });
+        const r = await chain.issueSession(provider, wallet, { owner, agent: owner, budget: b.component, session });
+        if (r.committed) { if (host.recordSessionIssued) host.recordSessionIssued(b.component, session); changed(); }
+        return { committed: !!r.committed, txid: r.txid || null, reason: r.reason || "" };
+      }
+      if (params.revokeSession) {
+        const session = String((params.revokeSession.session || "")).trim();
+        if (!session) err("会话名称不能为空");
+        await approveOrReject({ title: "撤销 Agent 会话", origin, approveLabel: "确认撤销",
+          lines: [`从预算 <b class="mono">${b.component}</b>`, `撤销会话徽章 <b>${session}</b>`, `<span class="mut">该会话将无法再付款;其他会话不受影响</span>`] });
+        const r = await chain.revokeSession(provider, wallet, { owner, budget: b.component, session });
+        if (r.committed) { if (host.recordSessionRevoked) host.recordSessionRevoked(b.component, session); changed(); }
+        return { committed: !!r.committed, txid: r.txid || null, reason: r.reason || "" };
+      }
+      // params.revoke — the global kill switch (every further pay rejected on chain)
+      await approveOrReject({ title: "停用预算", origin, approveLabel: "确认停用",
+        lines: [`停用预算 <b class="mono">${b.component}</b>`, `<span class="mut">停用后这个预算的所有付款都会被链上拒绝。</span>`] });
+      const r = await chain.revoke(provider, wallet, { owner, budget: b.component });
       if (r.committed) changed();
       return { committed: !!r.committed, txid: r.txid || null, reason: r.reason || "" };
     }

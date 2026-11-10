@@ -106,6 +106,16 @@ export function createInPageWallet(opts = {}) {
   const journalWithdrawn = (component, amount) => journalMutate(component, (j) => { j.withdrawn = addBig(j.withdrawn, amount); });
   // ledger stays oldest→newest (append); the UI slices the tail and reverses for "most recent first".
   const journalPay = (component, entry) => journalMutate(component, (j) => { j.ledger.push({ ts: Date.now(), ...entry }); });
+  // The chain's positional budget substate does NOT expose the issued-session set (only the global revoked
+  // flag), so the journal is the source of truth for which session badges exist and which are revoked.
+  const journalSessionIssued = (component, session) => journalMutate(component, (j) => {
+    const s = j.sessions.find((x) => x.session === session);
+    if (s) s.revoked = false; else j.sessions.push({ session, revoked: false, ts: Date.now() });
+  });
+  const journalSessionRevoked = (component, session) => journalMutate(component, (j) => {
+    const s = j.sessions.find((x) => x.session === session);
+    if (s) s.revoked = true; else j.sessions.push({ session, revoked: true, ts: Date.now() });
+  });
 
   // --- derived state ----------------------------------------------------------------------------
   const hasVault = () => !!storage.getItem(VAULT_KEY);
@@ -233,8 +243,9 @@ export function createInPageWallet(opts = {}) {
     const r = await c.openBudget(p, await walletFor(), { owner, template, merchant, fund: fundAmt, perTxCap, dailyCap, epochsPerWindow });
     const s = r.state || {};
     setBudget(activeId(), { component: r.budget, merchant, template, ownerBadge: s.ownerBadge, agentBadge: s.agentBadge, vaultId: s.vaultId });
-    // the opening deposit is the first funded entry in this budget's local history
+    // seed this budget's local history: the opening deposit, and the "default" session badge minted at open
     journalFunded(r.budget, fundAmt);
+    journalSessionIssued(r.budget, "default");
     return r;
   }
   async function refreshBudget() { const b = budget(); if (!b) return null; return (await chain()).readBudget(await provider(), b.component); }
@@ -254,6 +265,8 @@ export function createInPageWallet(opts = {}) {
       recordPay: (entry) => journalPay(entry && entry.component, entry),
       recordFunded: (component, amount) => journalFunded(component, amount),
       recordWithdrawn: (component, amount) => journalWithdrawn(component, amount),
+      recordSessionIssued: (component, session) => journalSessionIssued(component, session),
+      recordSessionRevoked: (component, session) => journalSessionRevoked(component, session),
     };
   }
 

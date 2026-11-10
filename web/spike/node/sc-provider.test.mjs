@@ -42,6 +42,11 @@ function makeHost(over = {}) {
       setLimits: rec("setLimits", { committed: true, txid: "tx_limits" }),
       setMerchant: rec("setMerchant", { committed: true, txid: "tx_merchant" }),
       sendXtr: rec("sendXtr", { txId: "tx_send" }),
+      topUp: rec("topUp", { committed: true, txid: "tx_topup" }),
+      withdraw: rec("withdraw", { committed: true, txid: "tx_withdraw" }),
+      issueSession: rec("issueSession", { committed: true, txid: "tx_issue" }),
+      revokeSession: rec("revokeSession", { committed: true, txid: "tx_revsess" }),
+      revoke: rec("revoke", { committed: true, txid: "tx_revoke" }),
     },
     ...over,
   };
@@ -198,6 +203,75 @@ test("removeMerchant calls setMerchant(add=false)", async () => {
   const { h, p } = await connected();
   await p.request({ method: "tari_signAndSubmitTransaction", params: { removeMerchant: { merchant: MERCHANT } } });
   assert.equal(h._calls.find((c) => c.name === "setMerchant").args[2].add, false);
+});
+
+test("topUp routes to chain.topUp and journals the funded amount on commit", async () => {
+  const funded = [];
+  const { h, p } = await connected({ recordFunded: (c, a) => funded.push([c, a]) });
+  const r = await p.request({ method: "tari_signAndSubmitTransaction", params: { topUp: { amount: "5000" } } });
+  assert.equal(r.committed, true);
+  assert.equal(r.txid, "tx_topup");
+  const call = h._calls.find((c) => c.name === "topUp");
+  assert.equal(call.args[2].budget, BUDGET);
+  assert.equal(call.args[2].amount, "5000");
+  assert.deepEqual(funded, [[BUDGET, "5000"]]);
+});
+
+test("withdraw routes to chain.withdraw and journals the withdrawn amount on commit", async () => {
+  const withdrawn = [];
+  const { h, p } = await connected({ recordWithdrawn: (c, a) => withdrawn.push([c, a]) });
+  const r = await p.request({ method: "tari_signAndSubmitTransaction", params: { withdraw: { amount: "2000" } } });
+  assert.equal(r.committed, true);
+  assert.equal(r.txid, "tx_withdraw");
+  assert.equal(h._calls.find((c) => c.name === "withdraw").args[2].amount, "2000");
+  assert.deepEqual(withdrawn, [[BUDGET, "2000"]]);
+});
+
+test("issueSession routes to chain.issueSession and journals the session; empty name rejected", async () => {
+  const issued = [];
+  const { h, p } = await connected({ recordSessionIssued: (c, s) => issued.push([c, s]) });
+  await throws(() => p.request({ method: "tari_signAndSubmitTransaction", params: { issueSession: { session: "  " } } }), /会话名称/);
+  const r = await p.request({ method: "tari_signAndSubmitTransaction", params: { issueSession: { session: "agent2" } } });
+  assert.equal(r.committed, true);
+  assert.equal(r.txid, "tx_issue");
+  const call = h._calls.find((c) => c.name === "issueSession");
+  assert.equal(call.args[2].session, "agent2");
+  assert.equal(call.args[2].agent, ACCOUNT); // single-account: owner is the session account
+  assert.deepEqual(issued, [[BUDGET, "agent2"]]);
+});
+
+test("revokeSession routes to chain.revokeSession and journals the revocation", async () => {
+  const revoked = [];
+  const { h, p } = await connected({ recordSessionRevoked: (c, s) => revoked.push([c, s]) });
+  const r = await p.request({ method: "tari_signAndSubmitTransaction", params: { revokeSession: { session: "agent2" } } });
+  assert.equal(r.committed, true);
+  assert.equal(h._calls.find((c) => c.name === "revokeSession").args[2].session, "agent2");
+  assert.deepEqual(revoked, [[BUDGET, "agent2"]]);
+});
+
+test("revoke (global kill switch) routes to chain.revoke", async () => {
+  const { h, p } = await connected();
+  const r = await p.request({ method: "tari_signAndSubmitTransaction", params: { revoke: {} } });
+  assert.equal(r.committed, true);
+  assert.equal(r.txid, "tx_revoke");
+  assert.equal(h._calls.find((c) => c.name === "revoke").args[2].budget, BUDGET);
+});
+
+test("a rejected lifecycle op does NOT journal", async () => {
+  const funded = [];
+  const chain = { ...makeHost().chain, topUp: () => ({ committed: false, reason: "no funds" }) };
+  const { p } = await connected({ chain, recordFunded: (c, a) => funded.push([c, a]) });
+  const r = await p.request({ method: "tari_signAndSubmitTransaction", params: { topUp: { amount: "5000" } } });
+  assert.equal(r.committed, false);
+  assert.equal(funded.length, 0);
+});
+
+test("lifecycle ops reject a non-positive amount and require a connected, unlocked wallet", async () => {
+  const { p } = await connected();
+  await throws(() => p.request({ method: "tari_signAndSubmitTransaction", params: { topUp: { amount: "0" } } }), /正整数/);
+  const locked = createInPageTari(makeHost({ getWallet: () => null }));
+  await locked.connect();
+  await throws(() => locked.request({ method: "tari_signAndSubmitTransaction", params: { withdraw: { amount: "5" } } }), /锁定/);
 });
 
 test("transfer validates recipient, blocks self-send, calls sendXtr", async () => {

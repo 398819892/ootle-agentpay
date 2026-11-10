@@ -52,6 +52,19 @@ export function nonFungibleStringIdListLiteral(ids) {
 
 const asInput = (id, is_write = true) => ({ substate_id: id, version: null, is_write });
 
+/** A substate may be declared as an input only ONCE — duplicates fail to deserialize at submit. Dedupe by
+ *  substate_id, keeping is_write if ANY occurrence is writable. (Single-account budgets pass owner==agent,
+ *  so issue's owner/agent inputs collide; this makes that case well-formed.) */
+const dedupeInputs = (inputs) => {
+  const by = new Map();
+  for (const i of inputs) {
+    const prev = by.get(i.substate_id);
+    if (!prev) by.set(i.substate_id, { ...i });
+    else if (i.is_write) prev.is_write = true;
+  }
+  return [...by.values()];
+};
+
 /**
  * `open`: withdraw `fund` of `p.resource` (default native XTR; any L2 resource, e.g. a stablecoin) from
  * `owner`, instantiate AgentBudget, deposit both badges back into `owner`. The owner pays the fee (always
@@ -290,7 +303,7 @@ export function withdrawTx(p) {
  *  declared, or instruction #N `agent.deposit` aborts with "vault … not found") are declared write. */
 export function issueBadgeTx(p) {
   return TransactionBuilder.new(p.network, p.maxEpoch)
-    .withInputs([
+    .withInputs(dedupeInputs([
       asInput(p.owner),
       ...p.ownerVaults.map((v) => asInput(v)),
       asInput(p.budget),
@@ -299,7 +312,7 @@ export function issueBadgeTx(p) {
       asInput(p.agentBadge),
       asInput(p.ownerBadge, false),
       asInput(XTR, false),
-    ])
+    ]))
     .feeTransactionPayFromComponent(p.owner, BigInt(p.maxFee ?? 200_000))
     .createProof(p.owner, p.ownerBadge)
     .saveVar("ownerProof")
