@@ -109,15 +109,20 @@ export function createInPageTari(host) {
       try { amount = BigInt(Math.trunc(Number(params.pay.amount))); } catch { err("金额无效"); }
       if (amount <= 0n) err("金额必须大于 0");
       const memo = params.pay.memo || "";
+      // The payee is the whitelisted merchant the dApp picked (params.pay.merchant); budgets are no longer
+      // bound to a single merchant at open — the whitelist is managed separately, so a pay names its target.
+      // Fall back to the budget's legacy single merchant for older budgets opened with one baked in.
+      const merchant = (params.pay.merchant && String(params.pay.merchant).trim()) || b.merchant;
+      if (!RE_COMPONENT.test(merchant || "")) err("请选择一个有效的收款商户地址(component_ 开头的 64 位十六进制)");
       // Read the live budget BEFORE approval so the modal shows the DECODED intent — amount, merchant and
       // the on-chain caps — and a self-check of this payment against them, so the user never blind-signs.
       // The same fresh state is reused for the signed pay (one read, not two).
       const provider = await host.getIndexer();
       const state = await chain.readBudget(provider, b.component);
-      const check = payWithinCaps(amount, b.merchant, state);
+      const check = payWithinCaps(amount, merchant, state);
       const rows = [
         { label: "预算", value: b.component, mono: true },
-        { label: "商户", value: b.merchant, mono: true },
+        { label: "商户", value: merchant, mono: true },
         { label: "金额", value: `${amount.toString()} XTR` },
       ];
       if (memo) rows.push({ label: "备注", value: String(memo) });
@@ -126,10 +131,10 @@ export function createInPageTari(host) {
       rows.push({ label: "本窗口已花", value: `${state.spent} XTR` });
       await approveOrReject({ title: "预算付款请求", origin, approveLabel: "确认付款", rows, check,
         note: "链上强制额度;即便你批准,超限或非白名单仍会被链上拒绝。" });
-      const r = await chain.payBudget(provider, wallet, { account, budget: b.component, state, merchant: b.merchant, amount, memo });
+      const r = await chain.payBudget(provider, wallet, { account, budget: b.component, state, merchant, amount, memo });
       if (r.committed) {
         // append the pay to this budget's browser journal — the chain keeps spend totals but not a per-pay feed
-        if (host.recordPay) host.recordPay({ component: b.component, merchant: b.merchant, amount: amount.toString(), memo, txid: r.txid || null });
+        if (host.recordPay) host.recordPay({ component: b.component, merchant, amount: amount.toString(), memo, txid: r.txid || null });
         changed();
       }
       return { committed: !!r.committed, txid: r.txid || null, amount: amount.toString(), reason: r.reason || "" };

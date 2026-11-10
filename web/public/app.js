@@ -530,6 +530,7 @@ const I18N = {
     wl_merchants: "Whitelisted merchants",
     no_wl_merchants: "No merchants whitelisted — any merchant is allowed.",
     add_merchant_placeholder: "Add merchant by name",
+    add_merchant_addr_ph: "Merchant address component_… (64 hex)",
     gov_wl_hint: "Adds a merchant to the on-chain whitelist via the owner badge. ",
     gov_wl_hint_revoked: "<b>The agent is revoked, but the whitelist can still be edited.</b>",
     remove_merchant: "Remove from whitelist",
@@ -1123,6 +1124,7 @@ const I18N = {
     wl_merchants: "白名单商户",
     no_wl_merchants: "尚未设置白名单——任意商户都可收款。",
     add_merchant_placeholder: "按名称添加商户",
+    add_merchant_addr_ph: "商户地址 component_…(64 位十六进制)",
     gov_wl_hint: "通过所有者凭证把商户加入链上白名单。",
     gov_wl_hint_revoked: "<b>代理虽已停用,但白名单仍可编辑。</b>",
     remove_merchant: "移出白名单",
@@ -2651,12 +2653,11 @@ function viewManage() {
             <button type="submit" class="btn btn--primary btn--block" id="g-limits">${icon("zap", 16)} ${esc(t("update_limits"))}</button>
           </form>
           <div class="field__hint mt-12">${t("limits_hint")}</div>
-          <div class="row row--wrap mt-12" style="justify-content:space-between">
-            <span class="field__hint" style="margin:0">${esc(t("window_rule", { n: b.window ? b.window.epochsPerWindow : "—" }))}</span>
-            <button type="button" class="btn btn--ghost btn--sm" data-nav="merchants">${icon("store", 14)} ${esc(t("merchant_limits_link"))}</button>
-          </div>
+          <div class="field__hint mt-12">${esc(t("window_rule", { n: b.window ? b.window.epochsPerWindow : "—" }))}</div>
         </div>
       </div>
+      <div class="section-head"><h2>${esc(t("merchant_whitelist"))}</h2><p>${esc(t("merchants_sub"))}</p></div>
+      ${whitelistCard(b)}
       <div class="section-head"><h2>${esc(t("treasury"))}</h2><p>${esc(t("sec_treasury_sub"))}</p></div>
       <div class="card">
         <div class="card__head"><h3>${esc(t("treasury"))}</h3></div>
@@ -2725,11 +2726,15 @@ function viewManage() {
 }
 
 /* ---- views: MERCHANTS ----------------------------------------------------- */
-/* The on-chain payee whitelist, split out of governance into its own section. */
-function viewMerchants() {
-  const d = S.data;
-  const b = d.budget;
-  if (!b) return noBudget(t("nav_merchants"), t("merchants_nobudget_sub"));
+/* The on-chain merchant whitelist as a list + add/remove card. Shared by the 商户 view and the 管理 view
+   so the same owner-badge add/remove (setMerchant, browser-signed via walletOwnerOp) is reachable from
+   both. Only one view is mounted at a time, so the fixed ids (merch-form / g-merchant / g-add) never
+   collide; wireMerchants() wires whichever one is on screen. In the self-custody dApp a merchant is a
+   component address (the whitelist entries are component_… and the wallet's owner op validates the same),
+   so when a wallet is connected the add field asks for a component_ address rather than a name. */
+function whitelistCard(b) {
+  const nc = S.wallet.connected; // non-custodial: the add target must be a component_ address
+  const ph = nc ? t("add_merchant_addr_ph") : t("add_merchant_placeholder");
   const rows = b.whitelist.length
     ? b.whitelist
         .map(
@@ -2742,6 +2747,24 @@ function viewMerchants() {
         )
         .join("")
     : `<div class="merch-empty muted">${esc(t("no_wl_merchants"))}</div>`;
+  return `<div class="card">
+        <div class="card__head"><h3>${esc(t("wl_merchants"))}</h3><span class="sub">${fmt(b.whitelist.length)}</span></div>
+        <div class="card__body">
+          <form id="merch-form" class="addrow" novalidate>
+            <input class="input" id="g-merchant" placeholder="${esc(ph)}" autocomplete="off" spellcheck="false"/>
+            <button type="submit" class="btn btn--primary" id="g-add">${icon("plus", 16)} ${esc(t("add"))}</button>
+          </form>
+          <div class="field__hint mt-12">${esc(t("gov_wl_hint"))}${b.revoked ? t("gov_wl_hint_revoked") : ""}</div>
+          <div class="merch-list mt-16">${rows}</div>
+        </div>
+      </div>`;
+}
+
+/* The on-chain payee whitelist, split out of governance into its own section. */
+function viewMerchants() {
+  const d = S.data;
+  const b = d.budget;
+  if (!b) return noBudget(t("nav_merchants"), t("merchants_nobudget_sub"));
 
   const mstat = (label, ic, c, val) =>
     `<div class="stat"><div class="stat__top"><span class="stat__icon" style="--c:${c}">${icon(ic, 17)}</span><div class="stat__label">${esc(label)}</div></div><div class="stat__value">${val}</div></div>`;
@@ -2754,17 +2777,7 @@ function viewMerchants() {
         ${mstat(t("m_stat_enabled"), "check", "var(--success)", fmt(b.whitelist.length))}
         ${mstat(t("m_stat_pending"), "clock", "var(--warn)", "0")}
       </div>
-      <div class="card">
-        <div class="card__head"><h3>${esc(t("wl_merchants"))}</h3><span class="sub">${fmt(b.whitelist.length)}</span></div>
-        <div class="card__body">
-          <form id="merch-form" class="addrow" novalidate>
-            <input class="input" id="g-merchant" placeholder="${esc(t("add_merchant_placeholder"))}" autocomplete="off"/>
-            <button type="submit" class="btn btn--primary" id="g-add">${icon("plus", 16)} ${esc(t("add"))}</button>
-          </form>
-          <div class="field__hint mt-12">${esc(t("gov_wl_hint"))}${b.revoked ? t("gov_wl_hint_revoked") : ""}</div>
-          <div class="merch-list mt-16">${rows}</div>
-        </div>
-      </div>
+      ${whitelistCard(b)}
       <div class="callout">${icon("info", 18)}
         <div>${t("overview_callout")}</div>
       </div>
@@ -3336,7 +3349,7 @@ function wire() {
   wireLangToggle(app);
 
   if (S.view === "manage" && !S.data.budget) wireCreate();
-  if (S.view === "manage" && S.data.budget) wireManage();
+  if (S.view === "manage" && S.data.budget) { wireManage(); wireMerchants(); }
   if (S.view === "pay" && S.data.budget) wirePay();
   if (S.view === "merchants" && S.data.budget) wireMerchants();
   if (S.view === "settings") wireSettings();
@@ -3937,14 +3950,15 @@ function wirePay() {
     // approval, signs, and the chain enforces the caps — the dashboard's custodial walletd path is never
     // touched. (The wallet pays its OWN whitelisted merchant; the banner says so. Phase 2 adds owner ops.)
     if (S.wallet.connected && walletProvider()) {
-      const payee = (S.data && S.data._walletBacked && S.data._walletBacked.merchant) || vals.merchant;
+      const payee = vals.merchant;
       await withPending(el("p-pay"), t("p_submitting"), async () => {
         try {
           const r = await walletProvider().request({
             method: "tari_signAndSubmitTransaction",
             // amount as a NUMBER: the wallet's own cap self-check does arithmetic (spent + amount), so a
             // string would concat and mis-flag it. The chain enforcement is unaffected either way.
-            params: { pay: { amount: Number(vals.amount), memo: vals.memo || undefined } },
+            // merchant = the whitelisted payee picked here; the budget no longer bakes in a single merchant.
+            params: { pay: { amount: Number(vals.amount), memo: vals.memo || undefined, merchant: vals.merchant } },
           });
           if (r && r.committed) {
             toast("success", t("t_payment_sent"), t("t_payment_sent_msg", { amount: fmt(r.amount != null ? r.amount : vals.amount), unit: UNIT, merchant: esc(payee) }));

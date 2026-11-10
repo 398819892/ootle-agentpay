@@ -171,17 +171,15 @@
           <div class="card">
             <div class="sectitle">预算(供仪表盘驱动)</div>
             <section id="w-budNone">
-              <p class="note">开一个链上预算,连接仪表盘后即可按额度付款(链上强制)。</p>
+              <p class="note">开预算 = 把消费授权委托给代理并设定额度(链上强制)。白名单开成空的 —— 商户由 AgentPay 之后在「管理」里增删。</p>
               <label style="margin-top:6px">初始注资 / 单笔上限 / 每日上限</label>
               <div class="row"><input id="w-bFund" inputmode="numeric" placeholder="注资 50000" /><input id="w-bPerTx" inputmode="numeric" placeholder="单笔 1000" /><input id="w-bDaily" inputmode="numeric" placeholder="每日 1500" /></div>
-              <label>商户(白名单,component_…)</label>
-              <input id="w-bMerchant" class="mono" placeholder="component_…" spellcheck="false" />
               <div class="bad" id="w-budErr"></div>
               <button id="w-btnOpenBudget" class="btn block">开预算</button>
             </section>
             <section id="w-budHas" hidden>
               <div class="kv"><span>预算组件</span><b id="w-bComp">—</b></div>
-              <div class="kv"><span>商户</span><b id="w-bMerch">—</b></div>
+              <div class="kv"><span>白名单商户</span><b id="w-bMerch">—</b></div>
               <div class="kv"><span>额度(单笔/每日)</span><b id="w-bCaps">—</b></div>
               <div class="kv"><span>本窗口已花</span><b id="w-bSpent">—</b></div>
             </section>

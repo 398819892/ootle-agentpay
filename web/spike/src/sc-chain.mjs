@@ -202,7 +202,10 @@ export async function accountHistory(provider, account, { limit = 25, perVault =
 /**
  * Open + fund a new AgentBudget, owner-signed in the browser. Returns { budget, state } where `state`
  * is the parsed substate (vault id, owner/agent badge resources, caps, whitelist). `fund`/caps are XTR
- * base-unit numbers; `epochsPerWindow` sizes the daily-cap window; `whitelist` is the initial merchants.
+ * base-unit numbers; `epochsPerWindow` sizes the daily-cap window. `merchant` is OPTIONAL: opening a
+ * budget delegates spending authority to the agent and sets the caps — the merchant whitelist starts
+ * EMPTY and is managed afterwards via setMerchant (add/remove), per the "AgentPay manages merchants"
+ * model. Pass a `merchant` only to seed the whitelist with one entry at open time.
  */
 export async function openBudget(provider, wallet, { owner, template, merchant, fund, perTxCap, dailyCap, epochsPerWindow = 10 }) {
   const unsigned = openBudgetTx({
@@ -215,11 +218,11 @@ export async function openBudget(provider, wallet, { owner, template, merchant, 
     perTxCap: BigInt(perTxCap),
     dailyCap: BigInt(dailyCap),
     epochsPerWindow: BigInt(epochsPerWindow),
-    whitelist: [merchant],
+    whitelist: merchant ? [merchant] : [],
     maxFee: 200_000,
   });
   const { txId, receipt } = await signSealSubmit(provider, [wallet], unsigned);
-  const budget = findNewComponent(receipt, [owner, merchant]);
+  const budget = findNewComponent(receipt, merchant ? [owner, merchant] : [owner]);
   if (!budget) throw new Error("开预算成功提交,但未能在回执中找到新预算组件");
   const state = parseBudgetSubstate(await provider.getSubstate(budget));
   return { txId, budget, state };

@@ -10,7 +10,6 @@ import { installInPageTari } from "./sc-provider.mjs";
 const $ = (id) => document.getElementById(id);
 const groupNum = (s) => String(s).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 const shortAddr = (a) => (a && a.length > 22 ? a.slice(0, 12) + "…" + a.slice(-6) : a || "");
-const RE_COMPONENT = /^component_[0-9a-f]{64}$/;
 
 const wallet = createInPageWallet();
 let pendingMaterial = null; // the generated/restored key material awaiting a passphrase
@@ -257,10 +256,15 @@ async function renderMain() {
   $("w-budHas").hidden = !bud;
   if (bud) {
     $("w-bComp").textContent = shortAddr(bud.component);
-    $("w-bMerch").textContent = shortAddr(bud.merchant);
     try {
       const st = await wallet.refreshBudget();
-      if (st) { $("w-bCaps").textContent = `${groupNum(st.perTx)} / ${groupNum(st.daily)}`; $("w-bSpent").textContent = groupNum(st.spent); }
+      if (st) {
+        $("w-bCaps").textContent = `${groupNum(st.perTx)} / ${groupNum(st.daily)}`;
+        $("w-bSpent").textContent = groupNum(st.spent);
+        // merchant whitelist is managed in 管理 › 商户白名单 — show how many are currently authorized
+        const n = Array.isArray(st.whitelist) ? st.whitelist.length : 0;
+        $("w-bMerch").textContent = n ? `${n} 个(在「管理」里增删)` : "空 · 在「管理」里添加";
+      }
     } catch { /* leave dashes */ }
   }
 }
@@ -275,12 +279,14 @@ $("w-btnRefresh").onclick = () => renderMain();
 
 $("w-btnOpenBudget").onclick = async () => {
   $("w-budErr").textContent = "";
-  const fund = $("w-bFund").value.trim(), perTx = $("w-bPerTx").value.trim(), daily = $("w-bDaily").value.trim(), merchant = $("w-bMerchant").value.trim();
+  // Opening a budget delegates spending authority to the agent and sets the caps; the merchant whitelist
+  // starts EMPTY (AgentPay manages merchants afterwards — add/remove them in 管理 › 商户白名单). So the
+  // only required inputs here are the amounts; no merchant is bound at open.
+  const fund = $("w-bFund").value.trim(), perTx = $("w-bPerTx").value.trim(), daily = $("w-bDaily").value.trim();
   if (![fund, perTx, daily].every((v) => /^\d+$/.test(v))) return void ($("w-budErr").textContent = "注资/额度需为整数");
-  if (!RE_COMPONENT.test(merchant)) return void ($("w-budErr").textContent = "商户地址应为 component_ 开头的 64 位十六进制");
   const btn = $("w-btnOpenBudget"); btn.disabled = true; const lab = btn.textContent; btn.textContent = "开预算中…";
   try {
-    await wallet.openBudget({ template: await templateAddr(), merchant, fund: Number(fund), perTxCap: Number(perTx), dailyCap: Number(daily), epochsPerWindow: 10 });
+    await wallet.openBudget({ template: await templateAddr(), fund: Number(fund), perTxCap: Number(perTx), dailyCap: Number(daily), epochsPerWindow: 10 });
     await renderMain();
   } catch (e) { $("w-budErr").textContent = "开预算失败: " + (e?.message || e); }
   finally { btn.disabled = false; btn.textContent = lab; }
