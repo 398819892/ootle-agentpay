@@ -61,6 +61,15 @@
       .apw2-dm .body { margin: 14px 0 4px; display: flex; flex-direction: column; gap: 7px; }
       .apw2-dm .line { font-size: 12.5px; background: #f7f8fa; border: 1px solid #e7eaed; border-radius: 9px; padding: 9px 11px; word-break: break-all; }
       .apw2-dm .line .mono { font-family: ui-monospace, Menlo, monospace; }
+      /* decoded-intent rows (escaped text only — no request-supplied HTML ever reaches innerHTML) */
+      .apw2-dm .arow { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; font-size: 12.5px; background: #f7f8fa; border: 1px solid #e7eaed; border-radius: 9px; padding: 9px 11px; }
+      .apw2-dm .arow .ak { color: #6a737d; white-space: nowrap; }
+      .apw2-dm .arow .av { font-weight: 600; text-align: right; word-break: break-all; }
+      .apw2-dm .arow .av.mono { font-family: ui-monospace, Menlo, monospace; font-weight: 400; font-size: 11.5px; }
+      .apw2-dm .achk { font-size: 12.5px; border-radius: 9px; padding: 9px 11px; }
+      .apw2-dm .achk.good { background: #e8f6ed; border: 1px solid #b6e0c4; color: #1c8234; }
+      .apw2-dm .achk.bad2 { background: #fdecec; border: 1px solid #f3b9b9; color: #c0291f; }
+      .apw2-dm .anote { font-size: 11px; color: #9099a2; line-height: 1.5; padding: 2px 2px 0; }
       .apw2-dm .nt { font-size: 11px; color: #9099a2; margin: 12px 0 16px; line-height: 1.5; text-align: center; }
       .apw2-dm .btns { display: flex; gap: 10px; } .apw2-dm .btns .btn { flex: 1; }
     </style>
@@ -76,7 +85,7 @@
     <!-- ===== in-page self-custody wallet (same origin, no relay) ===== -->
     <button id="apw2-fab" type="button" hidden><span class="dot"></span><span id="apw2-fablab">钱包</span></button>
     <aside id="apw2" class="apw2" hidden aria-label="自托管钱包">
-      <div class="hd"><div class="mark">A</div><div><h4>自托管钱包</h4><div class="s">浏览器持钥 · 同源 · Ootle Localnet</div></div><button class="x" id="apw2-close" title="关闭">✕</button></div>
+      <div class="hd"><div class="mark">A</div><div><h4>自托管钱包</h4><div class="s" id="apw2-sub">浏览器持钥 · 同源 · Ootle Localnet</div></div><button class="x" id="apw2-close" title="关闭">✕</button></div>
       <div class="bd">
         <!-- onboard: no vault yet -->
         <section id="w-onboard" hidden>
@@ -87,21 +96,29 @@
           </div>
         </section>
 
-        <!-- create: show mnemonic + derived address -->
+        <!-- create: show mnemonic + derived address, then VERIFY the backup before saving -->
         <section id="w-create" hidden>
           <div class="sectitle">备份你的恢复短语</div>
           <div class="warn">这 48 个词是恢复钱包的唯一凭证,按顺序离线抄写。任何人拿到即可动用你的资产;丢失无法找回。切勿截图或粘贴到联网处。</div>
           <div class="words" id="w-words" style="margin-top:9px"></div>
           <label>此钱包地址(由密钥派生,离线生成)</label>
           <div class="addr" id="w-createAddr">派生中…</div>
-          <label style="margin-top:10px">设置解锁口令(至少 8 位,AES-256-GCM 本机加密)</label>
-          <input id="w-newPass1" type="password" autocomplete="new-password" placeholder="口令" />
-          <input id="w-newPass2" type="password" autocomplete="new-password" placeholder="再次输入" style="margin-top:6px" />
+          <!-- backup-verification challenge: shown after "我已离线备份,继续" -->
+          <section id="w-verify" hidden>
+            <div class="sectitle" style="margin-top:4px">验证你的备份</div>
+            <p class="note" style="margin:4px 0 2px">按你抄写的助记词,填入下面指定位置的词。</p>
+            <div id="w-verifyFields"></div>
+          </section>
+          <div id="w-createPass">
+            <label style="margin-top:10px">设置解锁口令(至少 8 位,AES-256-GCM 本机加密)</label>
+            <input id="w-newPass1" type="password" autocomplete="new-password" placeholder="口令" />
+            <input id="w-newPass2" type="password" autocomplete="new-password" placeholder="再次输入" style="margin-top:6px" />
+          </div>
           <div class="bad" id="w-createErr"></div>
-          <button id="w-btnCreateDo" class="btn block">加密并保存</button>
+          <button id="w-btnCreateDo" class="btn block">我已离线备份,继续</button>
         </section>
 
-        <!-- restore: paste mnemonic -->
+        <!-- restore: paste mnemonic; derived address is shown for confirmation before saving -->
         <section id="w-restore" hidden>
           <div class="sectitle">输入恢复短语</div>
           <label>48 个词,用空格分隔</label>
@@ -109,6 +126,10 @@
           <label>设置解锁口令(至少 8 位)</label>
           <input id="w-rPass1" type="password" autocomplete="new-password" placeholder="口令" />
           <input id="w-rPass2" type="password" autocomplete="new-password" placeholder="再次输入" style="margin-top:6px" />
+          <div id="w-restoreAddrWrap" hidden>
+            <label style="margin-top:10px">将恢复到此地址 —— 请核对无误</label>
+            <div class="addr" id="w-restoreAddr"></div>
+          </div>
           <div class="bad" id="w-restoreErr"></div>
           <div class="row"><button id="w-btnRestoreDo" class="btn">恢复</button><button id="w-btnRestoreBack" class="btn sec">返回</button></div>
         </section>
@@ -158,6 +179,14 @@
           <!-- connect: expose this wallet to the dashboard over the in-page window.tari -->
           <button id="w-btnConnect" class="btn block">连接到本页仪表盘</button>
           <p class="note" id="w-connNote">连接后,仪表盘的付款将从此预算支出、由你在此批准、浏览器用你的私钥签名。</p>
+          <div class="kv" style="margin-top:6px"><span>闲置自动锁定</span>
+            <select id="w-autolock" style="width:auto;padding:6px 8px;border:1px solid #d6d9dc;border-radius:8px;background:#fff;color:#1b1d21;font:inherit;font-size:12.5px">
+              <option value="0">关闭</option>
+              <option value="5">5 分钟</option>
+              <option value="15">15 分钟</option>
+              <option value="30">30 分钟</option>
+            </select>
+          </div>
           <div class="row" style="margin-top:2px">
             <button id="w-btnLock" class="btn sec">锁定</button>
           </div>

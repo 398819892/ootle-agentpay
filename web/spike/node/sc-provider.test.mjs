@@ -53,6 +53,16 @@ function makeHost(over = {}) {
   return host;
 }
 const connected = async (over) => { const h = makeHost(over); const p = createInPageTari(h); await p.connect(); return { h, p }; };
+// Like `connected`, but records every approval SPEC the provider builds (dropping the connect one), so a
+// test can assert the DECODED intent shown to the user — the "no blind-signing" surface.
+async function connectedCapturing(over) {
+  const specs = [];
+  const h = makeHost({ approve: async (s) => { specs.push(s); return true; }, ...over });
+  const p = createInPageTari(h);
+  await p.connect();
+  specs.length = 0;
+  return { specs, h, p };
+}
 async function throws(fn, re) { await assert.rejects(fn, re); }
 
 test("request before connect is gated", async () => {
@@ -287,6 +297,46 @@ test("transfer validates recipient, blocks self-send, calls sendXtr", async () =
 test("unknown method is rejected", async () => {
   const { p } = await connected();
   await throws(() => p.request({ method: "tari_doMagic" }), /不支持的方法/);
+});
+
+// --- decoded-intent approval (Phase 5: no blind-signing) ---------------------------------------
+test("pay approval decodes the intent (amount/merchant/caps) and self-checks within caps", async () => {
+  const { specs, p } = await connectedCapturing();
+  await p.request({ method: "tari_signAndSubmitTransaction", params: { pay: { amount: 700, memo: "coffee" } } });
+  const s = specs[0];
+  assert.ok(s.rows && s.rows.length, "approval carries decoded rows");
+  const val = (label) => (s.rows.find((r) => r.label === label) || {}).value;
+  assert.equal(val("金额"), "700 XTR");
+  assert.equal(val("商户"), MERCHANT);
+  assert.equal(val("单笔上限"), "1000 XTR");
+  assert.equal(val("每日上限"), "1500 XTR");
+  assert.ok(s.rows.some((r) => r.value === "coffee"), "memo shown as a plain value");
+  assert.ok(s.rows.every((r) => typeof r.value === "string"), "every row value is a plain string, not HTML");
+  assert.equal(s.check.ok, true); // 700 ≤ 1000 and 700 + 700 ≤ 1500
+});
+
+test("pay approval flags an over-cap payment in the self-check", async () => {
+  const { specs, p } = await connectedCapturing();
+  await p.request({ method: "tari_signAndSubmitTransaction", params: { pay: { amount: 5000 } } });
+  assert.equal(specs[0].check.ok, false);
+  assert.match(specs[0].check.text, /上限|超过/);
+});
+
+test("pay approval on a revoked budget warns it will be rejected", async () => {
+  const chain = { ...makeHost().chain, readBudget: () => ({ address: BUDGET, perTx: "1000", daily: "1500", spent: "0", vault: "v", whitelist: [MERCHANT], revoked: true }) };
+  const { specs, p } = await connectedCapturing({ chain });
+  await p.request({ method: "tari_signAndSubmitTransaction", params: { pay: { amount: 100 } } });
+  assert.equal(specs[0].check.ok, false);
+  assert.match(specs[0].check.text, /停用/);
+});
+
+test("issueSession approval carries the raw session name as a plain row value (rendered as text, not HTML)", async () => {
+  const { specs, p } = await connectedCapturing();
+  const evil = '<img src=x onerror="boom()">';
+  await p.request({ method: "tari_signAndSubmitTransaction", params: { issueSession: { session: evil } } });
+  // the provider hands the host the RAW string as a value; the host renders it with textContent, so it can
+  // never inject markup into the approval surface. Asserting equality proves nothing was pre-rendered to HTML.
+  assert.ok(specs[0].rows.some((r) => r.value === evil), "session name passed through verbatim as a value");
 });
 
 test("disconnect clears connected and fires tari#disconnect", async () => {
