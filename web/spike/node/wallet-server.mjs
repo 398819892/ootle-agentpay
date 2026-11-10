@@ -26,6 +26,7 @@ import { L2Wallet } from "../src/l2-wallet.mjs";
 import { openBudgetTx, payTx, transferTx, setLimitsTx, addMerchantTx, removeMerchantTx, topUpTx, withdrawTx, issueBadgeTx, revokeSessionTx, revokeTx, templateEvents, parseBudgetSubstate, XTR } from "../src/agentpay-tx.js";
 import { connectIndexer, accountVaults } from "../src/chain.js";
 import { createDappBridge } from "../src/dapp-bridge.mjs";
+import { loadKeyFile } from "./key-vault.mjs";
 
 const PORT = parseInt(process.env.PORT) || 7777;
 // Bind loopback by default: this process holds a funded dev key and signs, so it must NOT be reachable
@@ -39,10 +40,10 @@ const MERCHANT = process.env.MERCHANT || "component_c5c2db90a8f9f02981617244b835
 // wallet did not open — e.g. a budget opened by the dashboard and shared with this agent.
 const SESSION = process.env.SESSION || "default";
 
-const KEY_FILE = new URL("../.spike-key.json", import.meta.url);
-if (!fs.existsSync(KEY_FILE)) throw new Error(`need a funded dev key at ${KEY_FILE.pathname}`);
-const key = JSON.parse(fs.readFileSync(KEY_FILE, "utf8"));
-if (!key.account) throw new Error(".spike-key.json has no account — fund one first");
+// Load the custodial dev key. If a .spike-key.enc.json is present it is decrypted with the passphrase
+// from WALLET_KEY_PASSPHRASE[_FILE]; otherwise it falls back to the plaintext .spike-key.json (dev).
+const key = loadKeyFile(import.meta.url);
+if (!key.account) throw new Error("key file has no account — fund one first");
 const ACCOUNT = key.account;
 const UI = new URL("../wallet-live.html", import.meta.url);
 
@@ -80,6 +81,9 @@ const paySign = (unsignedTransaction) => (agentW || w).request("tari_signAndSubm
 // The dApp <-> wallet relay (enqueue / poll / resolve / linkedOrigin + CORS) lives in its own module
 // so it can be regression-tested with no chain, engine or key — see src/dapp-bridge.mjs and its tests.
 const bridge = createDappBridge({ dappOrigins: process.env.DAPP_ORIGINS });
+// The custodial-signing /api writes and the dev-key export require the same per-process pairing token the
+// same-origin wallet page already fetches from GET /bridge/session (x-wallet-token header or ?token=).
+const tokenOK = (req) => (req.headers["x-wallet-token"] || new URL(req.url, "http://x").searchParams.get("token")) === bridge.sessionToken;
 const collect = (x, pfx, out = new Set()) => {
   if (!x) return out;
   if (typeof x === "string") { if (x.startsWith(pfx)) out.add(x); return out; }
@@ -345,6 +349,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/api/account") {
       return send(res, 200, { account: ACCOUNT, resource: "XTR", balance: (await ownerBalance()).toString() });
+    }
+    // Everything below signs with the custodial key (or exports it): gate on the same pairing token the
+    // same-origin wallet page holds. The read-only /api/status and /api/account above stay open.
+    if ((url.pathname === "/api/dev-key" || (req.method === "POST" && url.pathname.startsWith("/api/"))) && !tokenOK(req)) {
+      return send(res, 401, { error: "unauthorized (wallet token required)" });
     }
     // localnet dev continuity: let the in-browser self-custody wallet IMPORT this funded dev account by
     // taking its key into the browser. This server is localnet-only (status.network === "localnet");

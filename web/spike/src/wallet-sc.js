@@ -146,7 +146,7 @@ $("btnRestoreVerify").onclick = async () => {
 $("btnImportDev").onclick = async () => {
   let k;
   try {
-    const r = await fetch("/api/dev-key");
+    const r = await fetch("/api/dev-key", { headers: bridgeHeaders() });
     if (!r.ok) throw new Error("backend returned " + r.status);
     k = await r.json();
     if (!k.owner || !k.view) throw new Error("no key in response");

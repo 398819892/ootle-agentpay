@@ -364,7 +364,7 @@
 
   const logEl=$("log");
   function log(cls,msg){const tm=new Date().toLocaleTimeString("en-US",{hour12:false});const ln=document.createElement("div");ln.className="ln";const s=document.createElement("span");s.className="t";s.textContent=tm;const m=document.createElement("span");m.className=cls;m.textContent=msg;ln.append(s,m);logEl.appendChild(ln);logEl.scrollTop=logEl.scrollHeight;while(logEl.children.length>80)logEl.removeChild(logEl.firstChild);}
-  const api=async(path,method,body)=>{const r=await fetch(path,{method:method||"GET",headers:body?{"content-type":"application/json"}:undefined,body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||("HTTP "+r.status));return j;};
+  const api=async(path,method,body)=>{const r=await fetch(path,{method:method||"GET",headers:bh(body?{"content-type":"application/json"}:undefined),body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok)throw new Error(j.error||("HTTP "+r.status));return j;};
 
   // ---- activity feed ----
   const activity=[];
