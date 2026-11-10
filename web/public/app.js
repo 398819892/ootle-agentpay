@@ -120,7 +120,7 @@ const I18N = {
     brand_sub: "Agent budget console",
     conn_online: "Connected to chain",
     conn_offline: "Offline",
-    wallet_only_no_backend: "This page is self-custody — connect your wallet and approve on-chain actions there. There is no custodial backend here.",
+    wallet_only_no_backend: "This page is self-custody — connect your AgentWallet and approve on-chain actions there. There is no custodial backend here.",
     theme_group: "Theme",
     theme_light: "Light",
     theme_system: "System",
@@ -135,32 +135,32 @@ const I18N = {
     /* nav */
     nav_overview: "Overview",
     nav_start: "Get started",
-    nav_wallet: "Wallet",
+    nav_wallet: "AgentWallet",
     wallet_view_sub: "Your browser-held key — create or unlock it here, then connect it to the dashboard.",
     start_sub: "First steps for a new user — from signing in to your agent's first payment.",
     start_custodial_note: "This is a hosted (custodial) console: the wallet is held and signed server-side by walletd, and the dashboard is already connected to the chain. You do not connect a wallet in the browser.",
     /* non-custodial single-mode (S.nonCustodial) — the owner unlocks the browser-held wallet on this same page */
-    start_sub_nc: "First steps — unlock your AgentPay wallet, set your limits and whitelist, then make a payment. Every change is approved in your wallet.",
-    nco_note: "Non-custodial: your AgentPay wallet holds the keys in this browser. The dashboard reads this budget from the wallet and routes every change — payments, limits, merchants, lifecycle — through the wallet for your approval; the chain enforces the caps. The backend never signs for you.",
-    nco_s1_t: "1 · Unlock your AgentPay wallet",
-    nco_s1_b: "Unlock your AgentPay wallet in the “Wallet” view on this page and connect it here. The dashboard then reads this budget from the wallet, and every owner action is approved there — the browser never drives a custodial signer.",
-    nco_connect_cta: "Connect wallet",
-    nco_connect_hint: "Approve the connect request in the “Wallet” view — it waits there for your approval.",
-    nco_connected: "Wallet connected · {acct}",
-    nco_not_connected: "Wallet not connected",
+    start_sub_nc: "First steps — unlock your AgentWallet, set your limits and whitelist, then make a payment. Every change is approved in your AgentWallet.",
+    nco_note: "Non-custodial: your AgentWallet holds the keys in this browser. The dashboard reads this budget from AgentWallet and routes every change — payments, limits, merchants, lifecycle — through AgentWallet for your approval; the chain enforces the caps. The backend never signs for you.",
+    nco_s1_t: "1 · Unlock your AgentWallet",
+    nco_s1_b: "Unlock your AgentWallet in the “AgentWallet” view on this page and connect it here. The dashboard then reads this budget from AgentWallet, and every owner action is approved there — the browser never drives a custodial signer.",
+    nco_connect_cta: "Connect AgentWallet",
+    nco_connect_hint: "Approve the connect request in the “AgentWallet” view — it waits there for your approval.",
+    nco_connected: "AgentWallet connected · {acct}",
+    nco_not_connected: "AgentWallet not connected",
     nco_s2_t: "2 · Your budget",
-    nco_s2_b: "Once connected, the overview, balances and activity all come from your wallet's budget — not a server-side copy.",
-    nco_budget_ready: "Budget loaded from your wallet",
-    nco_budget_wait: "Connect your wallet to load the budget",
+    nco_s2_b: "Once connected, the overview, balances and activity all come from your AgentWallet's budget — not a server-side copy.",
+    nco_budget_ready: "Budget loaded from your AgentWallet",
+    nco_budget_wait: "Connect your AgentWallet to load the budget",
     nco_s3_t: "3 · Set limits & whitelist",
-    nco_s3_b: "In Manage set the per-transaction and daily caps; in Merchants add the payees the agent may pay. Each change pops a wallet approval and is enforced on-chain.",
+    nco_s3_b: "In Manage set the per-transaction and daily caps; in Merchants add the payees the agent may pay. Each change pops an AgentWallet approval and is enforced on-chain.",
     nco_s4_t: "4 · Make a payment",
-    nco_s4_b: "Send a payment from the Pay page; your wallet approves it and the chain enforces the cap and whitelist. Receipts land on the Receipts page.",
-    meta_desc_nc: "AgentPay — a non-custodial console for on-chain, validator-enforced AI-agent spending budgets on Tari Ootle. Your wallet holds the keys and approves every change.",
-    about_body_nc: "AgentPay is a non-custodial, on-chain hard-limit wallet and gateway for AI agents. Your wallet holds the keys and approves each change; the real spending limits are enforced by the on-chain validator, which never lets anyone move funds beyond them.",
+    nco_s4_b: "Send a payment from the Pay page; your AgentWallet approves it and the chain enforces the cap and whitelist. Receipts land on the Receipts page.",
+    meta_desc_nc: "AgentPay — a non-custodial console for on-chain, validator-enforced AI-agent spending budgets on Tari Ootle. Your AgentWallet holds the keys and approves every change.",
+    about_body_nc: "AgentPay is a non-custodial, on-chain hard-limit wallet and gateway for AI agents. Your AgentWallet holds the keys and approves each change; the real spending limits are enforced by the on-chain validator, which never lets anyone move funds beyond them.",
     create_trust_title_nc: "Non-custodial, enforced on-chain.",
-    create_trust_body_nc: "You approve every change in your own wallet — the backend never holds your keys. The caps and whitelist you set here are compiled into the budget's on-chain component and enforced by the validators, not by this app.",
-    login_intro_nc: "Sign in to your AgentPay console. On-chain actions are approved in your connected wallet — the console never holds your keys.",
+    create_trust_body_nc: "You approve every change in your own AgentWallet — the backend never holds your keys. The caps and whitelist you set here are compiled into the budget's on-chain component and enforced by the validators, not by this app.",
+    login_intro_nc: "Sign in to your AgentPay console. On-chain actions are approved in your connected AgentWallet — the console never holds your keys.",
     start_s1_t: "1 · Sign in",
     start_s1_b: "You reach this console with the password your provider gave you — there is no self-serve sign-up. Keep that password private.",
     start_s1_done: "Signed in",
@@ -718,7 +718,7 @@ const I18N = {
     brand_sub: "代理预算控制台",
     conn_online: "已连接到链",
     conn_offline: "未连接",
-    wallet_only_no_backend: "此页为自托管模式:链上操作请连接并通过你的钱包完成、在钱包内批准。这里没有托管后端。",
+    wallet_only_no_backend: "此页为自托管模式:链上操作请连接并通过你的 AgentWallet 完成、在 AgentWallet 内批准。这里没有托管后端。",
     theme_group: "主题",
     theme_light: "浅色",
     theme_system: "跟随系统",
@@ -733,32 +733,32 @@ const I18N = {
     /* nav */
     nav_overview: "总览",
     nav_start: "开始使用",
-    nav_wallet: "钱包",
+    nav_wallet: "AgentWallet",
     wallet_view_sub: "你的浏览器持钥 —— 在此创建或解锁,即可管理预算。",
     start_sub: "新手第一步 —— 从登录到你的 AI 完成第一笔付款。",
     start_custodial_note: "这是托管式控制台:钱包由服务端的 walletd 持有并签名,面板已经连接到链。你无需在浏览器里连接钱包。",
     /* 非托管单模式(S.nonCustodial)—— 所有者在本页解锁浏览器持钥钱包 */
-    start_sub_nc: "起步几步 —— 解锁你的 AgentPay 钱包、设好额度与白名单,然后发起一笔支付。每次变更都在你的钱包里批准。",
-    nco_note: "非托管:密钥由你的 AgentPay 钱包在本浏览器持有。仪表盘从钱包读取这个预算,并把每一次变更 —— 付款、额度、商户、生命周期 —— 都交给钱包弹窗批准;额度由链上强制。后端不再替你签名。",
-    nco_s1_t: "1 · 解锁你的 AgentPay 钱包",
-    nco_s1_b: "在本页『钱包』里解锁你的 AgentPay 钱包并在此连接。连接后仪表盘从钱包读取这个预算,所有者的每一步操作都在钱包里批准 —— 浏览器不再驱动托管签名器。",
-    nco_connect_cta: "连接钱包",
-    nco_connect_hint: "在『钱包』里批准连接请求 —— 它会在那里等你批准。",
-    nco_connected: "钱包已连接 · {acct}",
-    nco_not_connected: "钱包未连接",
+    start_sub_nc: "起步几步 —— 解锁你的 AgentWallet、设好额度与白名单,然后发起一笔支付。每次变更都在你的 AgentWallet 里批准。",
+    nco_note: "非托管:密钥由你的 AgentWallet 在本浏览器持有。仪表盘从 AgentWallet 读取这个预算,并把每一次变更 —— 付款、额度、商户、生命周期 —— 都交给 AgentWallet 弹窗批准;额度由链上强制。后端不再替你签名。",
+    nco_s1_t: "1 · 解锁你的 AgentWallet",
+    nco_s1_b: "在本页『AgentWallet』里解锁你的 AgentWallet 并在此连接。连接后仪表盘从 AgentWallet 读取这个预算,所有者的每一步操作都在 AgentWallet 里批准 —— 浏览器不再驱动托管签名器。",
+    nco_connect_cta: "连接 AgentWallet",
+    nco_connect_hint: "在『AgentWallet』里批准连接请求 —— 它会在那里等你批准。",
+    nco_connected: "AgentWallet 已连接 · {acct}",
+    nco_not_connected: "AgentWallet 未连接",
     nco_s2_t: "2 · 你的预算",
-    nco_s2_b: "连接之后,总览、余额和动态都来自你钱包里的这个预算,而不是服务端的副本。",
-    nco_budget_ready: "已从你的钱包载入预算",
-    nco_budget_wait: "连接钱包后载入预算",
+    nco_s2_b: "连接之后,总览、余额和动态都来自你 AgentWallet 里的这个预算,而不是服务端的副本。",
+    nco_budget_ready: "已从你的 AgentWallet 载入预算",
+    nco_budget_wait: "连接 AgentWallet 后载入预算",
     nco_s3_t: "3 · 设置额度与白名单",
-    nco_s3_b: "在「管理」里设置单笔与每日上限;在「商户」里添加代理可付款的收款人。每次变更都会弹出钱包批准,并由链上强制执行。",
+    nco_s3_b: "在「管理」里设置单笔与每日上限;在「商户」里添加代理可付款的收款人。每次变更都会弹出 AgentWallet 批准,并由链上强制执行。",
     nco_s4_t: "4 · 发起支付",
-    nco_s4_b: "在「支付」页发起一笔付款;你的钱包批准,链上强制额度与白名单。回执出现在「回执」页。",
-    meta_desc_nc: "AgentPay —— 一个非托管控制台,用于管理 Tari Ootle 上由验证节点强制执行的 AI 代理链上消费预算。密钥由你的钱包持有,每次变更都经钱包批准。",
-    about_body_nc: "AgentPay 是面向 AI 代理的非托管链上硬额度钱包与网关。密钥由你的钱包持有、每次变更由你批准;真正的额度由链上验证节点强制执行,任何人都无法越过额度动用资金。",
+    nco_s4_b: "在「支付」页发起一笔付款;你的 AgentWallet 批准,链上强制额度与白名单。回执出现在「回执」页。",
+    meta_desc_nc: "AgentPay —— 一个非托管控制台,用于管理 Tari Ootle 上由验证节点强制执行的 AI 代理链上消费预算。密钥由你的 AgentWallet 持有,每次变更都经 AgentWallet 批准。",
+    about_body_nc: "AgentPay 是面向 AI 代理的非托管链上硬额度钱包与网关。密钥由你的 AgentWallet 持有、每次变更由你批准;真正的额度由链上验证节点强制执行,任何人都无法越过额度动用资金。",
     create_trust_title_nc: "非托管,且由链上强制。",
-    create_trust_body_nc: "每一次变更都由你在自己的钱包里批准 —— 后端绝不持有你的密钥。你在这里设定的上限与白名单,会被编译进预算的链上组件,由验证节点强制执行,而不是靠这个应用本身。",
-    login_intro_nc: "登录你的 AgentPay 控制台。链上操作在你连接的钱包里批准 —— 控制台绝不持有你的密钥。",
+    create_trust_body_nc: "每一次变更都由你在自己的 AgentWallet 里批准 —— 后端绝不持有你的密钥。你在这里设定的上限与白名单,会被编译进预算的链上组件,由验证节点强制执行,而不是靠这个应用本身。",
+    login_intro_nc: "登录你的 AgentPay 控制台。链上操作在你连接的 AgentWallet 里批准 —— 控制台绝不持有你的密钥。",
     start_s1_t: "1 · 登录",
     start_s1_b: "用部署方发给你的口令进入本控制台——没有自助注册。请妥善保管这个口令。",
     start_s1_done: "已登录",
@@ -2805,17 +2805,17 @@ function walletBanner() {
     if (S.nonCustodial) {
       return `<div class="banner banner--warn" role="status">${icon("wallet", 20)}
         <div class="banner__text"><b>${esc(zh ? "非托管模式 " : "Non-custodial mode ")}</b>${esc(
-          zh ? "在本页『钱包』里解锁并连接你的 AgentPay 钱包来管理这个预算 —— 链上写操作都经钱包批准,后端不再代签。"
-             : "Unlock and connect your AgentPay wallet in the “Wallet” view to manage this budget — on-chain writes go through the wallet; the backend no longer co-signs.",
+          zh ? "在本页『AgentWallet』里解锁并连接你的 AgentWallet 来管理这个预算 —— 链上写操作都经 AgentWallet 批准,后端不再代签。"
+             : "Unlock and connect your AgentWallet in the “AgentWallet” view to manage this budget — on-chain writes go through AgentWallet; the backend no longer co-signs.",
         )}</div></div>`;
     }
     return "";
   }
   if (S.wallet.error) {
     return `<div class="banner banner--danger" role="alert">${icon("alert", 20)}
-      <div class="banner__text"><b>${esc(zh ? "钱包未连上 " : "Wallet unreachable ")}</b>${esc(
-        zh ? "在本页『钱包』里解锁你的 AgentPay 钱包并保持解锁;此刻显示的是后端缓存视图。"
-           : "Unlock your AgentPay wallet in the “Wallet” view and keep it unlocked; showing the backend view meanwhile.",
+      <div class="banner__text"><b>${esc(zh ? "AgentWallet 未连上 " : "AgentWallet unreachable ")}</b>${esc(
+        zh ? "在本页『AgentWallet』里解锁你的 AgentWallet 并保持解锁;此刻显示的是后端缓存视图。"
+           : "Unlock your AgentWallet in the “AgentWallet” view and keep it unlocked; showing the backend view meanwhile.",
       )}</div></div>`;
   }
   const wb = S.data && S.data._walletBacked;
@@ -2823,8 +2823,8 @@ function walletBanner() {
   const acct = (wb && wb.account) || S.wallet.account;
   const tail = (comp ? " · " + shorten(comp, 12, 6) : "") + (acct ? " · " + shorten(acct, 10, 6) : "");
   return `<div class="banner" role="status">${icon("wallet", 20)}
-    <div class="banner__text"><b>${esc(zh ? "非托管 · 由你的钱包担保" : "Non-custodial · backed by your wallet")}</b>${esc(
-      (zh ? "预算与支付来自你的钱包" : "Budget & payments come from your wallet") + tail,
+    <div class="banner__text"><b>${esc(zh ? "非托管 · 由你的 AgentWallet 担保" : "Non-custodial · backed by your AgentWallet")}</b>${esc(
+      (zh ? "预算与支付来自你的 AgentWallet" : "Budget & payments come from your AgentWallet") + tail,
     )}</div></div>`;
 }
 
@@ -4271,8 +4271,8 @@ function initWalletLink() {
     S.wallet.connected = true;
     S.wallet.account = (e && e.detail && e.detail.account) || (window.tari && window.tari.account) || null;
     S.wallet.error = null;
-    toast("success", zh() ? "钱包已连接" : "Wallet linked",
-      zh() ? "预算与支付现在都来自你的非托管钱包。" : "The budget and payments now come from your non-custodial wallet.");
+    toast("success", zh() ? "AgentWallet 已连接" : "AgentWallet linked",
+      zh() ? "预算与支付现在都来自你的 AgentWallet。" : "The budget and payments now come from your AgentWallet.");
     refreshState();
   });
   window.addEventListener("tari#disconnect", () => {

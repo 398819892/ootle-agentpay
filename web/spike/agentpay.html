@@ -94,15 +94,15 @@
     <div id="modal-root"></div>
 
     <!-- ===== in-page self-custody wallet (same origin, no relay) ===== -->
-    <button id="apw2-fab" type="button" hidden><span class="dot"></span><span id="apw2-fablab">钱包</span></button>
-    <aside id="apw2" class="apw2" aria-label="自托管钱包">
-      <div class="hd"><div class="mark">A</div><div><h4>自托管钱包</h4><div class="s" id="apw2-sub">浏览器持钥 · 同源 · Ootle Localnet</div></div><button class="x" id="apw2-close" title="关闭">✕</button></div>
+    <button id="apw2-fab" type="button" hidden><span class="dot"></span><span id="apw2-fablab">AgentWallet</span></button>
+    <aside id="apw2" class="apw2" aria-label="AgentWallet">
+      <div class="hd"><div class="mark">A</div><div><h4>AgentWallet</h4><div class="s" id="apw2-sub">浏览器持钥 · 同源 · Ootle Localnet</div></div><button class="x" id="apw2-close" title="关闭">✕</button></div>
       <div class="bd">
         <!-- onboard: no vault yet -->
         <section id="w-onboard" hidden>
           <p class="note" style="margin-bottom:9px">私钥在你的浏览器里生成与加密保管,助记词由你备份,页面与后端都接触不到。</p>
           <div class="row" style="flex-direction:column">
-            <button id="w-btnCreate" class="btn block">创建新钱包</button>
+            <button id="w-btnCreate" class="btn block">创建 AgentWallet</button>
             <button id="w-btnRestore" class="btn sec block">用 48 词助记词恢复</button>
           </div>
         </section>
@@ -110,9 +110,9 @@
         <!-- create: show mnemonic + derived address, then VERIFY the backup before saving -->
         <section id="w-create" hidden>
           <div class="sectitle">备份你的恢复短语</div>
-          <div class="warn">这 48 个词是恢复钱包的唯一凭证,按顺序离线抄写。任何人拿到即可动用你的资产;丢失无法找回。切勿截图或粘贴到联网处。</div>
+          <div class="warn">这 48 个词是恢复 AgentWallet 的唯一凭证,按顺序离线抄写。任何人拿到即可动用你的资产;丢失无法找回。切勿截图或粘贴到联网处。</div>
           <div class="words" id="w-words" style="margin-top:9px"></div>
-          <label>此钱包地址(由密钥派生,离线生成)</label>
+          <label>此 AgentWallet 地址(由密钥派生,离线生成)</label>
           <div class="addr" id="w-createAddr">派生中…</div>
           <!-- backup-verification challenge: shown after "我已离线备份,继续" -->
           <section id="w-verify" hidden>
@@ -147,12 +147,12 @@
 
         <!-- unlock: vault exists -->
         <section id="w-unlock" hidden>
-          <div class="sectitle">解锁钱包</div>
+          <div class="sectitle">解锁 AgentWallet</div>
           <label>口令</label>
           <input id="w-unlockPass" type="password" autocomplete="current-password" />
           <div class="bad" id="w-unlockErr"></div>
           <button id="w-btnUnlock" class="btn block">解锁</button>
-          <button id="w-btnForget" class="btn sec block" style="margin-top:7px">忘记此钱包(清除本机数据)</button>
+          <button id="w-btnForget" class="btn sec block" style="margin-top:7px">忘记此 AgentWallet(清除本机数据)</button>
         </section>
 
         <!-- main: unlocked -->

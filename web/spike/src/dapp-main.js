@@ -172,7 +172,7 @@ $("w-btnUnlock").onclick = async () => {
   await enterMain();
 };
 $("w-btnForget").onclick = () => {
-  if (!confirm("清除本机的钱包数据?若无助记词备份将无法找回。")) return;
+  if (!confirm("清除本机的 AgentWallet 数据?若无助记词备份将无法找回。")) return;
   wallet.forget(); provider._notifyLocked(); kickIdle(); route();
 };
 $("w-btnLock").onclick = () => { wallet.lock(); provider._notifyLocked(); kickIdle(); route(); };
@@ -242,7 +242,7 @@ async function renderMain() {
   const linked = !!provider.connected;
   $("w-btnConnect").disabled = !funded || linked;
   $("w-btnConnect").textContent = linked ? "已连接到仪表盘" : "连接到仪表盘";
-  if (linked) $("w-connNote").textContent = "仪表盘已自动连接本钱包。付款从你的预算支出、由你在此批准、浏览器签名。";
+  if (linked) $("w-connNote").textContent = "仪表盘已自动连接本 AgentWallet。付款从你的预算支出、由你在此批准、浏览器签名。";
   // balance (chain read; tolerate failure)
   if (funded) {
     const tok = ++_balToken;
@@ -303,7 +303,7 @@ async function templateAddr() {
 
 $("w-btnConnect").onclick = async () => {
   const btn = $("w-btnConnect"); btn.disabled = true; const lab = btn.textContent; btn.textContent = "连接中…";
-  try { await provider.connect(); btn.textContent = "已连接到仪表盘"; $("w-connNote").textContent = "仪表盘已连接本钱包。付款从你的预算支出、由你在此批准、浏览器签名。"; }
+  try { await provider.connect(); btn.textContent = "已连接到仪表盘"; $("w-connNote").textContent = "仪表盘已连接本 AgentWallet。付款从你的预算支出、由你在此批准、浏览器签名。"; }
   catch (e) { btn.disabled = false; btn.textContent = lab; $("w-connNote").textContent = "连接失败: " + (e?.message || e); }
 };
 
