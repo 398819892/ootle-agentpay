@@ -142,6 +142,24 @@ let openInstructions;
   eq(state.whitelist, ["component_" + h("11")], "parseBudgetSubstate reads whitelist");
 }
 
+console.log("== 2b. open dedupes inputs when a whitelisted merchant == the owner account ==");
+{
+  const { provider } = makeMock();
+  window.tari = provider;
+  const w = await TariWindowWallet.connect();
+  const unsigned = openBudgetTx({
+    network: NETWORK_ID, maxEpoch: 0, template: TEMPLATE, owner: w.account,
+    ownerVaults: [], fund: 50_000, perTxCap: 1_000, dailyCap: 1_500, epochsPerWindow: 10,
+    whitelist: [w.account], maxFee: 200_000, // merchant == owner: owner would appear as BOTH a write and a read input
+  });
+  const inputs = unsigned.inputs ?? [];
+  ok(inputs.length > 0, "open exposes its declared inputs");
+  const ids = inputs.map((i) => i.substate_id);
+  eq(ids.length, new Set(ids).size, "open declares each substate_id at most once (deduped — no TransactionInput collision)");
+  const ownerIn = inputs.find((i) => i.substate_id === w.account);
+  ok(ownerIn && ownerIn.is_write === true, "the deduped owner input stays writable");
+}
+
 console.log("== 3. pay 700: builder + signAndSubmit + event read ==");
 {
   const { provider, calls } = makeMock();

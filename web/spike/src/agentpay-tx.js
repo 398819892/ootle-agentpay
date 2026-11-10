@@ -91,7 +91,10 @@ export function openBudgetTx(p) {
     // the badge), the funding resource + native XTR (fee) + template (read), and every whitelisted
     // merchant (read) — the engine rejects an undeclared component referenced from template args with
     // "Template referenced root substate but it was not found".
-    .withInputs([
+    // dedupe: a whitelisted merchant (read input) may coincide with the owner/agent account (write input),
+    // and a single-account budget passes agent==owner; a substate declared twice fails to deserialize at
+    // submit, so collapse by substate_id (keeping write). Same treatment as issueBadgeTx.
+    .withInputs(dedupeInputs([
       asInput(p.owner),
       ...(routesToAgent ? [asInput(p.agent)] : []),
       ...p.ownerVaults.map((v) => asInput(v)),
@@ -99,7 +102,7 @@ export function openBudgetTx(p) {
       ...(resource !== XTR ? [asInput(XTR, false)] : []),
       asInput(p.template, false),
       ...p.whitelist.map((m) => asInput(m, false)),
-    ])
+    ]))
     .feeTransactionPayFromComponent(p.owner, BigInt(p.maxFee ?? 200_000))
     .callMethod({ componentAddress: p.owner, methodName: "withdraw" }, [
       resourceAddressLiteral(resource),
