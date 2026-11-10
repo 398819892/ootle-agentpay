@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { encrypt, decrypt, loadKeyFile, passphraseFromEnv } from "./key-vault.mjs";
+import { encrypt, decrypt, loadKeyFile, passphraseFromEnv, keyFilePresent } from "./key-vault.mjs";
 
 const SAMPLE = { owner: "aa".repeat(32), view: "bb".repeat(32), account: "component_" + "c".repeat(64) };
 
@@ -56,4 +56,16 @@ test("loadKeyFile prefers the encrypted file, falls back to plaintext, else thro
   fs.writeFileSync(path.join(d, ".spike-key.enc.json"), JSON.stringify(encrypt({ ...SAMPLE, account: "component_enc" }, "pw")));
   assert.throws(() => loadKeyFile(base, {}));                      // enc present but no passphrase
   assert.equal(loadKeyFile(base, { WALLET_KEY_PASSPHRASE: "pw" }).account, "component_enc"); // enc wins
+});
+
+test("loadKeyFile honors a custom stem (agent key), and keyFilePresent detects either form", () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "kv-"));
+  const base = pathToFileURL(path.join(d, "node", "x.mjs")).href;
+  assert.equal(keyFilePresent(base, ".spike-agent-key"), false);
+  assert.throws(() => loadKeyFile(base, {}, ".spike-agent-key"));                 // nothing present
+  fs.writeFileSync(path.join(d, ".spike-agent-key.enc.json"), JSON.stringify(encrypt({ ...SAMPLE, account: "component_agent" }, "pw")));
+  assert.equal(keyFilePresent(base, ".spike-agent-key"), true);
+  assert.equal(loadKeyFile(base, { WALLET_KEY_PASSPHRASE: "pw" }, ".spike-agent-key").account, "component_agent");
+  // the owner stem is independent and still absent here
+  assert.equal(keyFilePresent(base, ".spike-key"), false);
 });

@@ -47,20 +47,26 @@ export function passphraseFromEnv(env = process.env) {
 }
 
 // baseUrl is a module's import.meta.url (the key files live one level up, beside the repo's node/ dir).
-// Returns the parsed key object. Prefers the encrypted file; falls back to plaintext for dev continuity.
-export function loadKeyFile(baseUrl, env = process.env) {
-  const enc = new URL("../.spike-key.enc.json", baseUrl);
-  const plain = new URL("../.spike-key.json", baseUrl);
+// `stem` selects which key (".spike-key" = owner, ".spike-agent-key" = two-account agent). Returns the
+// parsed key object, preferring the encrypted file and falling back to plaintext for dev continuity.
+export function loadKeyFile(baseUrl, env = process.env, stem = ".spike-key") {
+  const enc = new URL(`../${stem}.enc.json`, baseUrl);
+  const plain = new URL(`../${stem}.json`, baseUrl);
   if (fs.existsSync(enc)) {
     const pass = passphraseFromEnv(env);
-    if (!pass) throw new Error("encrypted key present (.spike-key.enc.json) but WALLET_KEY_PASSPHRASE[_FILE] is not set");
+    if (!pass) throw new Error(`encrypted key present (${stem}.enc.json) but WALLET_KEY_PASSPHRASE[_FILE] is not set`);
     const obj = decrypt(JSON.parse(fs.readFileSync(enc, "utf8")), pass);
-    console.error("key-vault: loaded ENCRYPTED key at rest (.spike-key.enc.json)");
+    console.error(`key-vault: loaded ENCRYPTED key at rest (${stem}.enc.json)`);
     return obj;
   }
   if (fs.existsSync(plain)) {
-    console.warn("WARNING: the custodial key is UNENCRYPTED at rest (.spike-key.json). Migrate with node/encrypt-key.mjs and set WALLET_KEY_PASSPHRASE_FILE.");
+    console.warn(`WARNING: ${stem}.json is UNENCRYPTED at rest. Migrate with 'node node/encrypt-key.mjs ${stem}' and set WALLET_KEY_PASSPHRASE_FILE.`);
     return JSON.parse(fs.readFileSync(plain, "utf8"));
   }
-  throw new Error(`need a funded dev key at ${plain.pathname} (plaintext) or ${enc.pathname} (encrypted)`);
+  throw new Error(`need a key at ${plain.pathname} (plaintext) or ${enc.pathname} (encrypted)`);
+}
+
+// True if either the encrypted or the plaintext form of `stem` is present (gates two-account mode).
+export function keyFilePresent(baseUrl, stem = ".spike-key") {
+  return fs.existsSync(new URL(`../${stem}.enc.json`, baseUrl)) || fs.existsSync(new URL(`../${stem}.json`, baseUrl));
 }

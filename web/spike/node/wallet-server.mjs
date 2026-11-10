@@ -26,7 +26,7 @@ import { L2Wallet } from "../src/l2-wallet.mjs";
 import { openBudgetTx, payTx, transferTx, setLimitsTx, addMerchantTx, removeMerchantTx, topUpTx, withdrawTx, issueBadgeTx, revokeSessionTx, revokeTx, templateEvents, parseBudgetSubstate, XTR } from "../src/agentpay-tx.js";
 import { connectIndexer, accountVaults } from "../src/chain.js";
 import { createDappBridge } from "../src/dapp-bridge.mjs";
-import { loadKeyFile } from "./key-vault.mjs";
+import { loadKeyFile, keyFilePresent } from "./key-vault.mjs";
 
 const PORT = parseInt(process.env.PORT) || 7777;
 // Bind loopback by default: this process holds a funded dev key and signs, so it must NOT be reachable
@@ -58,11 +58,10 @@ const state = { budget: process.env.BUDGET || null, initialFund: null, template:
 // setup-agent.mjs (faucet-funded agent account + a budget opened with the agent badge routed to it).
 // If the file is absent, pay falls back to the single-account model (agent == owner).
 const TWO_FILE = new URL("../.spike-two-account.json", import.meta.url);
-const AGENT_KEY_FILE = new URL("../.spike-agent-key.json", import.meta.url);
 let two = null, agentW = null;
-if (fs.existsSync(TWO_FILE) && fs.existsSync(AGENT_KEY_FILE)) {
+if (fs.existsSync(TWO_FILE) && keyFilePresent(import.meta.url, ".spike-agent-key")) {
   two = JSON.parse(fs.readFileSync(TWO_FILE, "utf8"));
-  const ak = JSON.parse(fs.readFileSync(AGENT_KEY_FILE, "utf8"));
+  const ak = loadKeyFile(import.meta.url, process.env, ".spike-agent-key"); // encrypted at rest like the owner key
   agentW = new L2Wallet({ ownerSecretHex: ak.owner, viewSecretHex: ak.view, network: Network.LocalNet, indexerUrl: INDEXER_URL, account: ak.account });
   state.budget = two.budget; // the two-account budget (agent badge lives in the agent account)
   console.log(`two-account mode: agent=${two.agent} budget=${two.budget}`);
