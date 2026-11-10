@@ -1,0 +1,179 @@
+// sc-provider.test.mjs — unit test for the in-page window.tari provider (src/sc-provider.mjs).
+//
+// Pure, headless, no chain/indexer/WASM: the host injects stub chain ops + keystore accessors, so this
+// verifies the DISPATCH itself — method routing, connection gating, approval rejection, lock gating, and
+// argument validation — the logic that must hold regardless of what the chain does. The real chain ops
+// (sc-chain.mjs) are exercised live by node/flow-a-sc.mjs; here they are stubbed to record calls.
+//
+// Run: node --test node/sc-provider.test.mjs   (no flags, no network)
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+// --- minimal browser globals the provider touches (location.origin + window events) ---
+const events = [];
+globalThis.location = { origin: "http://localhost:8787" };
+globalThis.window = { dispatchEvent: (e) => { events.push(e.type); return true; } };
+globalThis.CustomEvent = class CustomEvent extends Event { constructor(type, init) { super(type); this.detail = init && init.detail; } };
+
+const { createInPageTari } = await import("../src/sc-provider.mjs");
+
+const ACCOUNT = "component_" + "a".repeat(64);
+const BUDGET = "component_" + "b".repeat(64);
+const MERCHANT = "component_" + "c".repeat(64);
+const OTHER = "component_" + "d".repeat(64);
+const WALLET = { __wallet: true };
+
+// A host factory: sensible unlocked defaults, each piece overridable per test; records chain calls.
+function makeHost(over = {}) {
+  const calls = [];
+  const rec = (name, ret) => (...a) => { calls.push({ name, args: a }); return ret; };
+  const host = {
+    _calls: calls,
+    getWallet: () => WALLET,
+    getAccount: () => ACCOUNT,
+    getBudget: () => ({ component: BUDGET, merchant: MERCHANT, template: "template_x", ownerBadge: "badge_owner" }),
+    getIndexer: async () => ({ __indexer: true }),
+    approve: async () => true,
+    onChange: () => calls.push({ name: "onChange", args: [] }),
+    chain: {
+      balanceOf: rec("balanceOf", 12345n),
+      readBudget: rec("readBudget", { address: BUDGET, perTx: "1000", daily: "1500", spent: "700", vault: "vault_1", whitelist: [MERCHANT], ownerBadge: "badge_owner", agentBadge: "badge_agent", vaultId: "v", revoked: false }),
+      payBudget: rec("payBudget", { committed: true, txid: "tx_pay" }),
+      setLimits: rec("setLimits", { committed: true, txid: "tx_limits" }),
+      setMerchant: rec("setMerchant", { committed: true, txid: "tx_merchant" }),
+      sendXtr: rec("sendXtr", { txId: "tx_send" }),
+    },
+    ...over,
+  };
+  return host;
+}
+const connected = async (over) => { const h = makeHost(over); const p = createInPageTari(h); await p.connect(); return { h, p }; };
+async function throws(fn, re) { await assert.rejects(fn, re); }
+
+test("request before connect is gated", async () => {
+  const p = createInPageTari(makeHost());
+  assert.equal(p.connected, false);
+  await throws(() => p.request({ method: "tari_getAccount" }), /请先连接/);
+});
+
+test("connect with no account rejects, nothing linked", async () => {
+  const p = createInPageTari(makeHost({ getAccount: () => null }));
+  await throws(() => p.connect(), /账户/);
+  assert.equal(p.connected, false);
+});
+
+test("connect returns the account, sets connected, fires tari#connect", async () => {
+  events.length = 0;
+  const { p } = await connected();
+  assert.equal(p.connected, true);
+  assert.equal(p.account, ACCOUNT);
+  assert.deepEqual(await p.request({ method: "tari_requestAccounts" }), [ACCOUNT]);
+  assert.ok(events.includes("tari#connect"));
+});
+
+test("connect is rejected when the user declines approval", async () => {
+  const p = createInPageTari(makeHost({ approve: async () => false }));
+  await throws(() => p.connect(), /用户拒绝/);
+  assert.equal(p.connected, false);
+});
+
+test("tari_getAccount returns balance from the chain", async () => {
+  const { p } = await connected();
+  const r = await p.request({ method: "tari_getAccount" });
+  assert.deepEqual(r, { account: ACCOUNT, network: "localnet", balance: "12345" });
+});
+
+test("tari_getBudget shapes the budget view", async () => {
+  const { p } = await connected();
+  const r = await p.request({ method: "tari_getBudget" });
+  assert.equal(r.account, ACCOUNT);
+  assert.equal(r.merchant, MERCHANT);
+  assert.equal(r.budget.perTx, "1000");
+  assert.equal(r.budget.spent, "700");
+  assert.deepEqual(r.budget.whitelist, [MERCHANT]);
+});
+
+test("tari_getBudget returns budget:null when none is open", async () => {
+  const { p } = await connected({ getBudget: () => null });
+  const r = await p.request({ method: "tari_getBudget" });
+  assert.equal(r.budget, null);
+});
+
+test("pay happy path calls payBudget and reports committed", async () => {
+  const { h, p } = await connected();
+  const r = await p.request({ method: "tari_signAndSubmitTransaction", params: { pay: { amount: 700, memo: "m" } } });
+  assert.equal(r.committed, true);
+  assert.equal(r.txid, "tx_pay");
+  assert.equal(r.amount, "700");
+  const pay = h._calls.find((c) => c.name === "payBudget");
+  assert.ok(pay, "payBudget called");
+  assert.equal(pay.args[2].amount, 700n);
+  assert.equal(pay.args[2].merchant, MERCHANT);
+  assert.ok(h._calls.some((c) => c.name === "onChange"), "onChange fired on commit");
+});
+
+test("pay is rejected when wallet is locked", async () => {
+  const { p } = await connected({ getWallet: () => null });
+  await throws(() => p.request({ method: "tari_signAndSubmitTransaction", params: { pay: { amount: 700 } } }), /锁定/);
+});
+
+test("pay is rejected when the user declines", async () => {
+  let n = 0;
+  const { p } = await connected({ approve: async () => (++n === 1) }); // allow connect, deny pay
+  await throws(() => p.request({ method: "tari_signAndSubmitTransaction", params: { pay: { amount: 700 } } }), /用户拒绝/);
+});
+
+test("pay rejects a non-positive amount", async () => {
+  const { p } = await connected();
+  await throws(() => p.request({ method: "tari_signAndSubmitTransaction", params: { pay: { amount: 0 } } }), /大于 0/);
+});
+
+test("setLimits happy path; non-integer caps rejected", async () => {
+  const { h, p } = await connected();
+  const r = await p.request({ method: "tari_signAndSubmitTransaction", params: { setLimits: { perTxCap: "2000", dailyCap: "5000" } } });
+  assert.equal(r.committed, true);
+  const sl = h._calls.find((c) => c.name === "setLimits");
+  assert.equal(sl.args[2].perTxCap, "2000");
+  assert.equal(sl.args[2].ownerBadge, "badge_owner");
+  await throws(() => p.request({ method: "tari_signAndSubmitTransaction", params: { setLimits: { perTxCap: "1.5", dailyCap: "5000" } } }), /整数/);
+});
+
+test("addMerchant validates the address and calls setMerchant(add=true)", async () => {
+  const { h, p } = await connected();
+  await throws(() => p.request({ method: "tari_signAndSubmitTransaction", params: { addMerchant: { merchant: "nope" } } }), /component_/);
+  const r = await p.request({ method: "tari_signAndSubmitTransaction", params: { addMerchant: { merchant: OTHER } } });
+  assert.equal(r.committed, true);
+  const sm = h._calls.find((c) => c.name === "setMerchant");
+  assert.equal(sm.args[2].add, true);
+  assert.equal(sm.args[2].merchant, OTHER);
+});
+
+test("removeMerchant calls setMerchant(add=false)", async () => {
+  const { h, p } = await connected();
+  await p.request({ method: "tari_signAndSubmitTransaction", params: { removeMerchant: { merchant: MERCHANT } } });
+  assert.equal(h._calls.find((c) => c.name === "setMerchant").args[2].add, false);
+});
+
+test("transfer validates recipient, blocks self-send, calls sendXtr", async () => {
+  const { h, p } = await connected();
+  await throws(() => p.request({ method: "tari_sendTransaction", params: { to: "bad", amount: "5" } }), /收款地址/);
+  await throws(() => p.request({ method: "tari_sendTransaction", params: { to: ACCOUNT, amount: "5" } }), /自己/);
+  const r = await p.request({ method: "tari_sendTransaction", params: { to: OTHER, amount: "5" } });
+  assert.equal(r.txId, "tx_send");
+  const sx = h._calls.find((c) => c.name === "sendXtr");
+  assert.equal(sx.args[4], 5n);
+});
+
+test("unknown method is rejected", async () => {
+  const { p } = await connected();
+  await throws(() => p.request({ method: "tari_doMagic" }), /不支持的方法/);
+});
+
+test("disconnect clears connected and fires tari#disconnect", async () => {
+  events.length = 0;
+  const { p } = await connected();
+  p.disconnect();
+  assert.equal(p.connected, false);
+  assert.ok(events.includes("tari#disconnect"));
+  await throws(() => p.request({ method: "tari_getAccount" }), /请先连接/);
+});
