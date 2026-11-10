@@ -28,6 +28,9 @@ import { connectIndexer, accountVaults } from "../src/chain.js";
 import { createDappBridge } from "../src/dapp-bridge.mjs";
 
 const PORT = parseInt(process.env.PORT) || 7777;
+// Bind loopback by default: this process holds a funded dev key and signs, so it must NOT be reachable
+// from the LAN. Set HOST=0.0.0.0 explicitly (and only behind a trusted proxy) if you truly need that.
+const HOST = process.env.HOST || "127.0.0.1";
 const INDEXER_URL = process.env.INDEXER_URL || "http://127.0.0.1:12008";
 const TEMPLATE = process.env.AGENT_TEMPLATE || "template_c4b58558181f19c17d6ccc75c93e0707e2c5b75d1ef4de96a70acd0fd2d40e47";
 const MERCHANT = process.env.MERCHANT || "component_c5c2db90a8f9f02981617244b835fd36d4830bdcb80eb7f5cb092932896924e3";
@@ -393,4 +396,4 @@ const server = http.createServer(async (req, res) => {
     send(res, 404, { error: "not found" });
   } catch (e) { send(res, 500, { error: String(e.message || e) }); }
 });
-server.listen(PORT, "0.0.0.0", () => console.log(`wallet-server on http://127.0.0.1:${PORT}  account=${ACCOUNT}  budget=${state.budget || "(open one)"}`));
+server.listen(PORT, HOST, () => console.log(`wallet-server on http://${HOST}:${PORT}  account=${ACCOUNT}  budget=${state.budget || "(open one)"}`));

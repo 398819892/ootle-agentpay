@@ -685,9 +685,14 @@ let HAS_BACKEND = false;       // the bridge + /api/status only exist when serve
 let linkedOrigin = null;       // the connected dApp site (lives on the server; survives a reload)
 let bridgeTimer = null;
 const inflight = new Set();
+let BRIDGE_TOKEN = null;        // pairing token for the wallet-only bridge routes (GET /bridge/session)
+async function fetchBridgeToken() {
+  try { const r = await fetch("/bridge/session"); if (r.ok) BRIDGE_TOKEN = (await r.json()).token || null; } catch { /* ignore */ }
+}
+const bridgeHeaders = (extra) => (BRIDGE_TOKEN ? { ...(extra || {}), "x-wallet-token": BRIDGE_TOKEN } : (extra || {}));
 
 async function resolveReq(id, result, error) {
-  try { await fetch("/bridge/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, result, error }) }); } catch { /* server gone */ }
+  try { await fetch("/bridge/resolve", { method: "POST", headers: bridgeHeaders({ "content-type": "application/json" }), body: JSON.stringify({ id, result, error }) }); } catch { /* server gone */ }
   inflight.delete(id);
 }
 const isLinked = (origin) => !!linkedOrigin && origin === linkedOrigin;
@@ -829,7 +834,8 @@ async function handleReq(q) {
 async function drainBridge() {
   if (!unlocked || !HAS_BACKEND) return; // signing needs the unlocked key
   let r;
-  try { r = await fetch("/bridge/poll"); } catch { return; }
+  try { r = await fetch("/bridge/poll", { headers: bridgeHeaders() }); } catch { return; }
+  if (r.status === 401) { await fetchBridgeToken(); return; } // server restarted / token rotated — re-pair, retry next tick
   if (!r.ok) return;
   const { reqs } = await r.json();
   for (const q of reqs) { if (inflight.has(q.id)) continue; inflight.add(q.id); handleReq(q); }
@@ -842,7 +848,7 @@ async function refreshLinked() {
   renderLinked();
 }
 async function unlinkSite() {
-  try { await fetch("/bridge/unlink", { method: "POST" }); } catch { /* ignore */ }
+  try { await fetch("/bridge/unlink", { method: "POST", headers: bridgeHeaders() }); } catch { /* ignore */ }
   linkedOrigin = null; renderLinked();
 }
 function renderLinked() {
@@ -859,9 +865,10 @@ function renderLinked() {
 
 // boot
 void TOTAL_WORDS; // 48 (owner 24 ‖ view 24)
-fetch("/api/status").then((r) => r.ok ? r.json() : null).then((s) => {
+fetch("/api/status").then((r) => r.ok ? r.json() : null).then(async (s) => {
   if (!s) return;
   HAS_BACKEND = true; // the bridge + dev-key import are available
+  await fetchBridgeToken(); // pair with the relay before draining (wallet-only routes need the token)
   $("btnImportDev").hidden = false;
   if (!loadSettings().indexer) INDEXER = s.indexer || DEFAULT_INDEXER;
   TEMPLATE = s.template || TEMPLATE;          // AgentBudget template, for opening a budget

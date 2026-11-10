@@ -137,9 +137,10 @@ function walletResponder(bridge, answer) {
   return () => { stop = true; };
 }
 
-// A fresh per-test relay server (no provider) for the raw-HTTP CORS check.
-async function withServer(fn) {
-  const bridge = createDappBridge({ dappOrigins: ["http://localhost:8787"] });
+// A fresh per-test relay server (no provider) for the raw-HTTP checks, with whatever bridge options the
+// case needs (origin allow-list, maxPending, …). withServer keeps the original single-origin default.
+async function withServerOf(opts, fn) {
+  const bridge = createDappBridge(opts);
   const server = http.createServer((req, res) => {
     if (new URL(req.url, "http://x").pathname.startsWith("/bridge/")) return void bridge.handle(req, res);
     res.writeHead(404); res.end();
@@ -148,6 +149,14 @@ async function withServer(fn) {
   const base = `http://127.0.0.1:${server.address().port}`;
   try { await fn({ bridge, base }); } finally { server.close(); }
 }
+const withServer = (fn) => withServerOf({ dappOrigins: ["http://localhost:8787"] }, fn);
+// POST /bridge/req as a browser dApp would: JSON body + an Origin header (omit `origin` for same-origin).
+const enqueueOver = (base, method, origin) =>
+  fetch(base + "/bridge/req", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(origin ? { Origin: origin } : {}) },
+    body: JSON.stringify({ method }),
+  });
 
 test("e2e: provider.connect() round-trips the account the wallet approves", async () => {
   const { bridge, tari } = await ensureShared();
@@ -203,4 +212,99 @@ test("e2e: CORS preflight is granted to a listed dApp origin and withheld from o
     assert.equal(no.status, 204);
     assert.equal(no.headers.get("access-control-allow-origin"), null);
   });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 3) origin policy + DoS bounds on the HTTP boundary (enqueue is guarded in handle(), not in the
+//    pure enqueue() primitive, so the state-machine tests above keep driving arbitrary origins).
+// ---------------------------------------------------------------------------------------------------
+test("req: a present-but-unlisted Origin is rejected (403) and nothing is enqueued", async () => {
+  await withServer(async ({ base, bridge }) => {
+    const r = await enqueueOver(base, "tari_requestAccounts", "http://evil.example");
+    assert.equal(r.status, 403);
+    assert.deepEqual(bridge.poll(), []);
+  });
+});
+
+test("req: an absent Origin (same-origin / non-browser) still enqueues", async () => {
+  await withServer(async ({ base, bridge }) => {
+    const r = await enqueueOver(base, "tari_requestAccounts");
+    assert.equal(r.status, 200);
+    assert.equal(bridge.poll().length, 1);
+  });
+});
+
+test("req: once a site is linked, only it may enqueue — but a connect may still come from elsewhere", async () => {
+  await withServerOf({ dappOrigins: ["http://a.example", "http://b.example"] }, async ({ base, bridge }) => {
+    const { id } = await (await enqueueOver(base, "tari_requestAccounts", "http://a.example")).json();
+    bridge.resolve({ id, result: ["component_a"] });          // user approves -> links a.example
+    assert.equal(bridge.linkedOrigin, "http://a.example");
+    // b is allow-listed but not the linked site: a pay from it is refused...
+    assert.equal((await enqueueOver(base, "tari_signAndSubmitTransaction", "http://b.example")).status, 403);
+    // ...while a connect from b is allowed through (the user could approve it to switch sites)
+    assert.equal((await enqueueOver(base, "tari_requestAccounts", "http://b.example")).status, 200);
+    // and the linked site itself keeps working
+    assert.equal((await enqueueOver(base, "tari_signAndSubmitTransaction", "http://a.example")).status, 200);
+  });
+});
+
+test("req: enqueuing beyond maxPending is rejected with 429 until a slot frees", async () => {
+  await withServerOf({ dappOrigins: ["http://localhost:8787"], maxPending: 2 }, async ({ base, bridge }) => {
+    const enq = () => enqueueOver(base, "tari_signAndSubmitTransaction", "http://localhost:8787");
+    assert.equal((await enq()).status, 200);
+    assert.equal((await enq()).status, 200);
+    assert.equal((await enq()).status, 429);                  // queue full
+    const [first] = bridge.poll();                            // draining doesn't free a slot...
+    assert.equal((await enq()).status, 429);
+    bridge.resolve({ id: first.id, result: { ok: 1 } });      // ...resolving does
+    assert.equal((await enq()).status, 200);
+  });
+});
+
+test("results are swept after their TTL so bridge.res can't grow without bound", async () => {
+  const b = createDappBridge({ resultTtlMs: 5 });
+  const id = b.enqueue({ method: "tari_signAndSubmitTransaction", origin: "o" });
+  b.resolve({ id, result: { ok: 1 } });
+  assert.equal(b.getResult(id).done, true);                   // readable right after resolve
+  await new Promise((r) => setTimeout(r, 25));                // let the 5ms TTL lapse
+  assert.deepEqual(b.getResult(id), { done: false });         // swept
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 4) pairing token — the same-origin wallet fetches it from /bridge/session; the wallet-only routes
+//    (poll/resolve/unlink) require it, so a cross-origin page can't forge them with a no-preflight POST.
+// ---------------------------------------------------------------------------------------------------
+test("session: a same-origin caller gets the token; a cross-origin one is refused (403)", async () => {
+  await withServerOf({ dappOrigins: ["http://localhost:8787"] }, async ({ base, bridge }) => {
+    const ok = await fetch(base + "/bridge/session");                       // no Origin -> same-origin
+    assert.equal(ok.status, 200);
+    assert.equal((await ok.json()).token, bridge.sessionToken);
+    const no = await fetch(base + "/bridge/session", { headers: { Origin: "http://evil.example" } });
+    assert.equal(no.status, 403);
+  });
+});
+
+test("wallet-only routes are rejected (401) without the pairing token and work with it", async () => {
+  await withServerOf({ dappOrigins: ["http://localhost:8787"] }, async ({ base, bridge }) => {
+    const tok = bridge.sessionToken;
+    // no token -> 401 on each wallet-only route
+    assert.equal((await fetch(base + "/bridge/poll")).status, 401);
+    assert.equal((await fetch(base + "/bridge/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status, 401);
+    assert.equal((await fetch(base + "/bridge/unlink", { method: "POST" })).status, 401);
+    // with the token -> they work; a full enqueue -> resolve -> read round-trips
+    assert.equal((await fetch(base + "/bridge/poll", { headers: { "x-wallet-token": tok } })).status, 200);
+    const { id } = await (await enqueueOver(base, "tari_requestAccounts")).json();   // same-origin enqueue
+    const rr = await fetch(base + "/bridge/resolve", {
+      method: "POST", headers: { "content-type": "application/json", "x-wallet-token": tok },
+      body: JSON.stringify({ id, result: ["component_x"] }),
+    });
+    assert.equal(rr.status, 200);
+    // over HTTP the undefined `error` key is dropped by JSON, so compare without it
+    assert.deepEqual(await (await fetch(base + "/bridge/res?id=" + id)).json(), { done: true, result: ["component_x"] });
+    assert.equal((await fetch(base + "/bridge/unlink", { method: "POST", headers: { "x-wallet-token": tok } })).status, 200);
+  });
+});
+
+test("a sessionToken can be injected for deterministic wiring", () => {
+  assert.equal(createDappBridge({ sessionToken: "fixed-token-123" }).sessionToken, "fixed-token-123");
 });

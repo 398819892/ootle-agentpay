@@ -384,6 +384,9 @@
 
   // ---- render status ----
   let ST=null, linkedOrigin=null, OWNER=0, lastRefresh=0;
+  let BRIDGE_TOKEN=null; // pairing token for the wallet-only bridge routes (GET /bridge/session)
+  async function fetchBridgeToken(){try{const r=await fetch("/bridge/session");if(r.ok)BRIDGE_TOKEN=(await r.json()).token||null;}catch(e){}}
+  const bh=(x)=>BRIDGE_TOKEN?Object.assign(x||{},{"x-wallet-token":BRIDGE_TOKEN}):(x||{});
   // Budget-available: what the AGENT (dApp) can still spend from the budget this window. Used only by the
   // dApp pay approval — NOT by the hero balance, which is the owner account's own funds (OWNER).
   function balanceOf(b){ if(!b)return 0; if(b.vault!=null)return b.vault; return Math.max(0,(Number(b.daily)||0)-(Number(b.spent)||0)); }
@@ -451,7 +454,7 @@
     $("stLang").onclick=()=>{toggleLang();renderSettings();};
     $("stLock").onclick=()=>{closeSheet("sheetSettings");lockWallet();};
     $("stRename").onclick=renameAccount;
-    const dc=$("stDisc"); if(dc)dc.onclick=async()=>{const o=linkedOrigin;try{await fetch("/bridge/unlink",{method:"POST"});}catch(e){}setLinked(null);log("res",t("disconnected")+" · "+o);renderSettings();};
+    const dc=$("stDisc"); if(dc)dc.onclick=async()=>{const o=linkedOrigin;try{await fetch("/bridge/unlink",{method:"POST",headers:bh()});}catch(e){}setLinked(null);log("res",t("disconnected")+" · "+o);renderSettings();};
   }
   function openSettings(){renderSettings();openSheet("sheetSettings");}
   function renameAccount(){
@@ -505,7 +508,7 @@
 
   // ---- relay: drain dApp requests ----
   const inflight=new Set();
-  async function resolveReq(id,result,error){try{await fetch("/bridge/resolve",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id,result,error})});}catch(e){}inflight.delete(id);}
+  async function resolveReq(id,result,error){try{await fetch("/bridge/resolve",{method:"POST",headers:bh({"content-type":"application/json"}),body:JSON.stringify({id,result,error})});}catch(e){}inflight.delete(id);}
   async function handleReq(q){
     const origin=q.origin||"(unknown)";
     if(q.method==="tari_requestAccounts"){
@@ -586,8 +589,8 @@
     }
     return resolveReq(q.id,null,"unsupported method "+q.method);
   }
-  async function drain(){let r;try{r=await fetch("/bridge/poll");}catch(e){return;}if(!r.ok)return;const {reqs}=await r.json();for(const q of reqs){if(inflight.has(q.id))continue;inflight.add(q.id);handleReq(q);}}
-  setInterval(drain,800);
+  async function drain(){let r;try{r=await fetch("/bridge/poll",{headers:bh()});}catch(e){return;}if(r.status===401){await fetchBridgeToken();return;}if(!r.ok)return;const {reqs}=await r.json();for(const q of reqs){if(inflight.has(q.id))continue;inflight.add(q.id);handleReq(q);}}
+  fetchBridgeToken(); setInterval(drain,800);
 
   // ---- send sheet (wallet-initiated) ----
   function openSheet(id){$(id).hidden=false;} function closeSheet(id){$(id).hidden=true;}
@@ -666,7 +669,7 @@
     m.style.left=Math.max(8,Math.min(r.left, (document.querySelector(".app").clientWidth)-m.offsetWidth-8))+"px";
     if(which==="netMenu"){m.querySelectorAll("[data-net]").forEach(b=>b.onclick=()=>setSelectedNet(b.dataset.net));}
     if(which==="acctMenu"){const c=$("miCopy");if(c)c.onclick=async()=>{await copyText(ST?ST.account:"");closeMenus();};
-      const si=$("miSite");if(si&&linkedOrigin)si.onclick=async()=>{const o=linkedOrigin;try{await fetch("/bridge/unlink",{method:"POST"});}catch(e){}setLinked(null);log("res",t("disconnected")+" · "+o);closeMenus();};
+      const si=$("miSite");if(si&&linkedOrigin)si.onclick=async()=>{const o=linkedOrigin;try{await fetch("/bridge/unlink",{method:"POST",headers:bh()});}catch(e){}setLinked(null);log("res",t("disconnected")+" · "+o);closeMenus();};
       const ms=$("miSettings");if(ms)ms.onclick=()=>{closeMenus();openSettings();};
       const ml=$("miLock");if(ml)ml.onclick=()=>{closeMenus();lockWallet();};}
   }
