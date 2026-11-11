@@ -44,7 +44,11 @@ function approve(spec) {
   return new Promise((resolve) => { _resolveApprove = resolve; });
 }
 function settleApprove(ok) { $("apw2-modal").hidden = true; const r = _resolveApprove; _resolveApprove = null; kickIdle(); if (r) r(ok); }
-$("apw2-mapprove").onclick = () => settleApprove(true);
+// Only a REAL user gesture may APPROVE. A synthetic click (e.isTrusted === false) — e.g. injected / XSS /
+// supply-chain script calling apw2-mapprove.click() to auto-approve a request it itself made through the
+// same-origin window.tari — is ignored, so page script cannot silently sign. Keyboard activation
+// (Enter / Space on the focused button) is a trusted event and still works. Reject needs no such gate.
+$("apw2-mapprove").onclick = (e) => { if (e && e.isTrusted === false) return; settleApprove(true); };
 $("apw2-mreject").onclick = () => settleApprove(false);
 
 // Tell the dashboard (app.js, in the same page) that the wallet's on-chain state changed, so its

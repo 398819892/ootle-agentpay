@@ -332,11 +332,34 @@ const DIST = new URL("../dist/", import.meta.url);
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".mjs": "application/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8", ".wasm": "application/wasm", ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml", ".ico": "image/x-icon", ".woff2": "font/woff2", ".map": "application/json; charset=utf-8" };
+// --- security headers --------------------------------------------------------------------------
+// The in-page wallet shares one execution context with the dApp, so a script-injection (XSS, a hostile
+// dependency, a tampered CDN) could drive window.tari + the approval modal. The built page has NO inline
+// script and loads only same-origin /assets, so a strict CSP (no inline/eval, scripts same-origin only,
+// WASM via wasm-unsafe-eval) removes the injected-script vector at its root; frame-ancestors 'none' blocks
+// clickjacking the approval surface. connect-src follows the deployment's indexer (INDEXER_URL origin).
+const INDEXER_ORIGIN = (() => { try { return new URL(INDEXER_URL).origin; } catch { return ""; } })();
+const CSP_HTML = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self' data:",
+  `connect-src 'self' ${INDEXER_ORIGIN}`.trim(),
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+].join("; ");
+const SEC_HEADERS = { "x-content-type-options": "nosniff", "x-frame-options": "DENY", "referrer-policy": "no-referrer" };
 function serveDist(res, rel) {
   const f = new URL(rel.replace(/^\/+/, ""), DIST);
   if (!fs.existsSync(f)) return false;
   const ext = rel.slice(rel.lastIndexOf("."));
-  res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream", "cache-control": ext === ".html" ? "no-store" : "max-age=86400" });
+  const headers = { "content-type": MIME[ext] || "application/octet-stream", "cache-control": ext === ".html" ? "no-store" : "max-age=86400", ...SEC_HEADERS };
+  if (ext === ".html") headers["content-security-policy"] = CSP_HTML;
+  res.writeHead(200, headers);
   res.end(fs.readFileSync(f));
   return true;
 }
