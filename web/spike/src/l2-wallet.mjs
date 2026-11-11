@@ -17,6 +17,9 @@ import { SecretKeyWallet } from "@tari-project/ootle-secret-key-wallet";
 import { connectIndexer, signSealSubmit, dryRun } from "./chain.js";
 
 export function networkName(net) {
+  if (net === Network.MainNet) return "mainnet";
+  if (net === Network.StageNet) return "stagenet";
+  if (net === Network.NextNet) return "nextnet";
   if (net === Network.Esmeralda) return "esmeralda";
   if (net === Network.Igor) return "igor";
   if (net === Network.LocalNet) return "localnet";

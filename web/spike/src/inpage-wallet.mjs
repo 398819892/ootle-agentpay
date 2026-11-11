@@ -54,8 +54,8 @@ export function createInPageWallet(opts = {}) {
   // --- lazy defaults for the WASM/chain-backed deps (skipped entirely when injected) ---
   async function network() {
     if (_network) return _network;
-    const { Network } = await import("@tari-project/ootle");
-    return (_network = Network.LocalNet);
+    const { networkEnum } = await import("./net-config.mjs");   // single source: name -> WASM Network enum
+    return (_network = networkEnum(settings().network || "localnet"));
   }
   async function makeWallet(ownerBytes, viewBytes) {
     if (_makeWallet) return _makeWallet(ownerBytes, viewBytes, await network());
@@ -74,7 +74,7 @@ export function createInPageWallet(opts = {}) {
   function loadMeta() { const m = readJSON(META_KEY, null); return m && Array.isArray(m.list) ? m : { list: [], active: null }; }
   const saveMeta = (m) => writeJSON(META_KEY, m);
   const loadBudgets = () => readJSON(BUDGET_KEY, {});
-  function settings() { return { autoLockMin: 0, indexer: "", ...readJSON(SETTINGS_KEY, {}) }; }
+  function settings() { return { autoLockMin: 0, indexer: "", network: "", ...readJSON(SETTINGS_KEY, {}) }; }
   const saveSettings = (s) => writeJSON(SETTINGS_KEY, { ...settings(), ...s });
 
   // --- budget journal ---------------------------------------------------------------------------
@@ -223,7 +223,20 @@ export function createInPageWallet(opts = {}) {
   async function provider() {
     await ensureIndexer();
     if (_provider && _providerUrl === INDEXER) return _provider;
-    _provider = await (await chain()).connect(INDEXER); _providerUrl = INDEXER; return _provider;
+    const c = await chain(); const net = await network();
+    if (c.setNetwork) c.setNetwork(net);            // scope sc-chain's TransactionBuilders to this network
+    _provider = await c.connect(INDEXER, net); _providerUrl = INDEXER; return _provider;
+  }
+
+  // Point the wallet at a network (name) + optional indexer, from /api/status at startup. Persists both in
+  // settings and resets the cached network enum + provider so the next chain op rebuilds for this network.
+  function configureNetwork(name, indexerUrl) {
+    const patch = {};
+    if (name) patch.network = String(name).toLowerCase();
+    if (indexerUrl) patch.indexer = indexerUrl;
+    if (Object.keys(patch).length) saveSettings(patch);
+    _network = null; _provider = null; _providerUrl = null;
+    if (indexerUrl) INDEXER = indexerUrl;
   }
 
   // --- chain ops (thin; persist their result into the state above) ------------------------------
@@ -253,7 +266,7 @@ export function createInPageWallet(opts = {}) {
   // --- the host object sc-provider consumes (inject approve + onChange from the page) -----------
   function providerHost({ approve, onChange } = {}) {
     return {
-      network: "localnet",
+      get network() { return settings().network || "localnet"; },
       getWallet: () => activeSigner(),       // the cached active SecretKeyWallet, or null when locked
       getAccount: () => account(),
       getBudget: () => budget(),
@@ -280,7 +293,7 @@ export function createInPageWallet(opts = {}) {
     // crypto
     walletFor, addressFor, activeSigner,
     // chain
-    ensureIndexer, provider, fund, balance, send, openBudget, refreshBudget,
+    ensureIndexer, provider, configureNetwork, fund, balance, send, openBudget, refreshBudget,
     // budget history (browser journal)
     journalFor,
     // integration

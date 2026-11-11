@@ -1,0 +1,37 @@
+# agentpay-wallet mainnet drop-in — EXAMPLE.
+#
+# Install as a systemd drop-in to flip the live non-custodial site from localnet to the Ootle MainNet:
+#   sudo install -D -m0644 agentpay-wallet-mainnet.conf.example \
+#        /etc/systemd/system/agentpay-wallet.service.d/zz-mainnet.conf
+#   # fill AGENT_TEMPLATE first (see deploy/MAINNET.md — publish the AgentBudget template on mainnet)
+#   sudo systemctl daemon-reload && sudo systemctl restart agentpay-wallet
+#
+# The server reads NO key in non-custodial mode (AGENTPAY_CUSTODIAL=0); the in-page self-custody wallet
+# holds the key and signs. /api/status serves these values to the client, which scopes every browser-signed
+# transaction to this network and submits to this indexer. The CSP connect-src follows INDEXER_URL
+# automatically, so no separate CSP change is needed. Sorts after the base unit (zz-*) so it wins.
+#
+# To roll back: remove this file + `systemctl daemon-reload && systemctl restart agentpay-wallet`
+# (the base unit is localnet). Keep the previous dist.bak as the code-level rollback.
+
+[Service]
+# Non-custodial: no key in this process, no server signing surface (see commit e2361c7 / deploy/MAINNET.md).
+Environment=AGENTPAY_CUSTODIAL=0
+
+# Ootle MainNet. Name is resolved in src/net-config.mjs (network enum + default indexer).
+Environment=AGENTPAY_NETWORK=mainnet
+
+# Public Tari mainnet indexer (verified 2026-11-11: GET /network -> {"network":"mainnet","network_byte":0}).
+# indexer-b.ootle.tari.com is its peer; switch if -a is unreachable.
+Environment=INDEXER_URL=https://indexer-a.ootle.tari.com
+
+# The AgentBudget template address ON MAINNET. REQUIRED — the client refuses to open a budget against the
+# localnet dev default on a real network. Publish the template first (deploy/MAINNET.md), then paste it here.
+Environment=AGENT_TEMPLATE=template_REPLACE_WITH_MAINNET_AGENTBUDGET_TEMPLATE
+
+# Optional: a default merchant the dashboard pre-fills. The whitelist is managed in-app, so this may be left
+# unset on mainnet. (Localnet used a seeded merchant component.)
+# Environment=MERCHANT=component_REPLACE_OR_LEAVE_UNSET
+
+# The dashboard proxy stays off — the merged dApp is wallet-only and talks to the indexer directly.
+Environment=DASHBOARD_PROXY=0

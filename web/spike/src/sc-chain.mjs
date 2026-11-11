@@ -22,13 +22,22 @@ import { connectIndexer, accountVaults, maxEpoch, signSealSubmit } from "./chain
 
 const XTR_HEX = XTR.replace(/^resource_/, "");
 
+// The Ootle network these transactions are built and addressed for. Defaults to LocalNet so the localnet
+// dev path is byte-for-byte unchanged; the in-page wallet calls setNetwork() with the configured network
+// (resolved from /api/status) BEFORE it connects, so on mainnet every TransactionBuilder below is scoped
+// to MainNet. One network per session (one wallet, one indexer), so a module-level value is the right scope.
+let _net = Network.LocalNet;
+export function setNetwork(net) { if (net != null) _net = net; }
+export function currentNetwork() { return _net; }
+
 /** Owner public key (hex) for createAccount, derived from the owner secret bytes. */
 export function ownerPublicHex(ownerSecretBytes) {
   return toHexStr(publicKeyFromSecretKey(ownerSecretBytes));
 }
 
-export function connect(indexerUrl) {
-  return connectIndexer(indexerUrl, Network.LocalNet);
+export function connect(indexerUrl, net) {
+  if (net != null) _net = net;
+  return connectIndexer(indexerUrl, _net);
 }
 
 /**
@@ -36,7 +45,7 @@ export function connect(indexerUrl) {
  * Returns { txId, account } where account is the new component address.
  */
 export async function fundViaFaucet(provider, wallet, ownerPubHex) {
-  const unsigned = new TransactionBuilder(Network.LocalNet, await maxEpoch(provider))
+  const unsigned = new TransactionBuilder(_net, await maxEpoch(provider))
     .withFeeInstructionsBuilder((b) =>
       b
         .createAccount(ownerPubHex)
@@ -66,7 +75,7 @@ export async function sendXtr(provider, wallet, fromAccount, toAccount, amount) 
   let recipientVaults = [];
   try { recipientVaults = await accountVaults(provider, toAccount); } catch { /* fresh recipient: no vault yet */ }
   const unsigned = transferTx({
-    network: Network.LocalNet,
+    network: _net,
     maxEpoch: await maxEpoch(provider),
     owner: fromAccount,
     ownerVaults,
@@ -209,7 +218,7 @@ export async function accountHistory(provider, account, { limit = 25, perVault =
  */
 export async function openBudget(provider, wallet, { owner, template, merchant, fund, perTxCap, dailyCap, epochsPerWindow = 10 }) {
   const unsigned = openBudgetTx({
-    network: Network.LocalNet,
+    network: _net,
     maxEpoch: await maxEpoch(provider),
     template,
     owner,
@@ -265,7 +274,7 @@ export async function payBudget(provider, wallet, { account, budget, state, merc
   // whether spent actually moved, not by the absence of an exception (the silent-no-op trap).
   const before = (() => { try { return BigInt(state.spent); } catch { return null; } })();
   const unsigned = payTx({
-    network: Network.LocalNet,
+    network: _net,
     maxEpoch: await maxEpoch(provider),
     agent: account,
     agentVaults: await accountVaults(provider, account), // re-fetched: must include the agent-badge vault
@@ -300,7 +309,7 @@ export async function payBudget(provider, wallet, { account, budget, state, merc
 // so each op VERIFIES its effect by re-reading the budget and reports committed:false if it didn't take.
 async function ownerOpCommon(provider, owner, budget, ownerBadge) {
   return {
-    network: Network.LocalNet,
+    network: _net,
     maxEpoch: await maxEpoch(provider),
     owner,
     ownerVaults: await accountVaults(provider, owner), // hold the owner badge the proof needs + the fee XTR
@@ -344,7 +353,7 @@ export async function topUp(provider, wallet, { owner, budget, amount }) {
   const state = await readBudget(provider, budget);
   const before = (() => { try { return BigInt(state.vault); } catch { return null; } })();
   const tx = topUpTx({
-    network: Network.LocalNet, maxEpoch: await maxEpoch(provider),
+    network: _net, maxEpoch: await maxEpoch(provider),
     owner, ownerVaults: await accountVaults(provider, owner),
     budget, budgetVault: state.vaultId, amount: BigInt(amount), maxFee: 200_000,
   });
@@ -362,7 +371,7 @@ export async function withdraw(provider, wallet, { owner, budget, amount }) {
   const state = await readBudget(provider, budget);
   const before = (() => { try { return BigInt(state.vault); } catch { return null; } })();
   const tx = withdrawTx({
-    network: Network.LocalNet, maxEpoch: await maxEpoch(provider),
+    network: _net, maxEpoch: await maxEpoch(provider),
     owner, ownerVaults: await accountVaults(provider, owner),
     budget, budgetVault: state.vaultId, ownerBadge: state.ownerBadge,
     amount: BigInt(amount), maxFee: 200_000,
@@ -382,7 +391,7 @@ export async function issueSession(provider, wallet, { owner, agent, budget, ses
   const recv = agent || owner; // single-account model: owner is the agent/session account
   const state = await readBudget(provider, budget);
   const tx = issueBadgeTx({
-    network: Network.LocalNet, maxEpoch: await maxEpoch(provider),
+    network: _net, maxEpoch: await maxEpoch(provider),
     owner, ownerVaults: await accountVaults(provider, owner),
     budget, agent: recv, agentVaults: await accountVaults(provider, recv),
     agentBadge: state.agentBadge, ownerBadge: state.ownerBadge, session, maxFee: 200_000,

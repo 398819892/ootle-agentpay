@@ -226,6 +226,10 @@ async function loadStatus() {
   _netNonLocal = net !== "localnet";
   const sub = $("apw2-sub"); if (sub) sub.textContent = `浏览器持钥 · 同源 · Ootle ${net}`;
   if (_netNonLocal) { const f = $("w-btnFund"); if (f) f.hidden = true; } // no dev faucet off localnet
+  // Point the in-page wallet at this network + indexer so every browser-signed tx is scoped correctly
+  // (mainnet vs localnet) and submitted to the right indexer. On localnet these equal the built-in
+  // defaults, so it's a no-op there.
+  try { wallet.configureNetwork(net, _status.indexer); } catch { /* standalone */ }
   return _status;
 }
 
@@ -237,10 +241,26 @@ function initAutoLockUI() {
   sel.value = String(v);
   sel.onchange = () => { wallet.saveSettings({ autoLockMin: Number(sel.value) || 0 }); kickIdle(); };
 }
+// On a faucet-less network (mainnet/stagenet/nextnet) there's no built-in faucet to create+fund the
+// account, so there's nothing to click. The account component address is DETERMINISTIC from the key
+// (addressFor), and the first real deposit to it creates it on-chain — so expose it now as the account, so
+// the user can receive (copy/QR), see balance, and open a budget once funded (e.g. from a Tari Universe
+// burn payout). Localnet/esmeralda keep the faucet flow (account recorded after the faucet tx) unchanged.
+async function ensureReceiveAccount() {
+  try {
+    const net = (_status && _status.network) || "localnet";
+    const { hasFaucet } = await import("./net-config.mjs");   // single source: faucet nets create+fund via the faucet flow
+    if (hasFaucet(net)) return;
+    if (wallet.account()) return;
+    const addr = await wallet.addressFor();
+    if (addr) wallet.recordAccountComponent(wallet.activeId(), addr);
+  } catch { /* best-effort; the receive address is still derivable on demand */ }
+}
 async function enterMain() {
   gate(true);
   show("w-main");
   await loadStatus();
+  await ensureReceiveAccount();
   initAutoLockUI();
   kickIdle();
   await renderMain();

@@ -30,7 +30,7 @@ const err = (m) => { throw new Error(m); };
  */
 export function createInPageTari(host) {
   const chain = host.chain || scChain;
-  const network = host.network || "localnet";
+  const netOf = () => host.network || "localnet";   // read live: host.network is a getter that reflects the configured network
   const approve = host.approve || (async () => true);
   const changed = () => { try { host.onChange && host.onChange(); } catch { /* host UI hook is best-effort */ } };
   let connected = false;
@@ -75,7 +75,7 @@ export function createInPageTari(host) {
       const account = requireAccount();
       let balance = null;
       try { balance = (await chain.balanceOf(await host.getIndexer(), account)).toString(); } catch { /* leave null */ }
-      return { account, network, balance };
+      return { account, network: netOf(), balance };
     }
 
     // READ — the dashboard's budget view. No signing, no approval. budget:null when none is open.
@@ -83,14 +83,14 @@ export function createInPageTari(host) {
       requireConnected();
       const account = requireAccount();
       const b = host.getBudget();
-      if (!b) return { account, network, merchant: null, template: (b && b.template) || null, agentAccount: account, twoAccount: false, linkedOrigin: origin, budget: null };
+      if (!b) return { account, network: netOf(), merchant: null, template: (b && b.template) || null, agentAccount: account, twoAccount: false, linkedOrigin: origin, budget: null };
       const wb = await chain.readBudget(await host.getIndexer(), b.component);
       // caps / spent / treasury / whitelist are live chain facts (readBudget). The history the chain can't
       // rebuild — lifetime funded/withdrawn, the pay feed, the issued-session set — comes from the wallet's
       // own browser journal (host.getJournal), so the dashboard view is whole with NO backend.
       const j = (host.getJournal && host.getJournal(b.component)) || { funded: null, withdrawn: null, ledger: [], sessions: [] };
       return {
-        account, network, merchant: b.merchant, template: b.template || null, agentAccount: account, twoAccount: false, linkedOrigin: origin,
+        account, network: netOf(), merchant: b.merchant, template: b.template || null, agentAccount: account, twoAccount: false, linkedOrigin: origin,
         budget: {
           address: wb.address, perTx: wb.perTx, daily: wb.daily, spent: wb.spent, vault: wb.vault,
           whitelist: wb.whitelist, revoked: wb.revoked,
