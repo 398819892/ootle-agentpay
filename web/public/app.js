@@ -4278,6 +4278,9 @@ function initWalletLink() {
     S.wallet.connected = false; S.wallet.account = null; S.wallet.error = null;
     refreshState();
   });
+  // The in-page wallet committed a state change (open budget / fund / pay / top-up / session / revoke).
+  // Re-read the budget from window.tari so the dashboard (管理/总览) reflects it in real time.
+  window.addEventListener("tari#change", () => { refreshState(); });
   if (window.tari && window.tari.connected) {
     S.wallet.connected = true;
     S.wallet.account = window.tari.account || null;

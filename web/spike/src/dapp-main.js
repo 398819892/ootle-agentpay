@@ -47,8 +47,15 @@ function settleApprove(ok) { $("apw2-modal").hidden = true; const r = _resolveAp
 $("apw2-mapprove").onclick = () => settleApprove(true);
 $("apw2-mreject").onclick = () => settleApprove(false);
 
+// Tell the dashboard (app.js, in the same page) that the wallet's on-chain state changed, so its
+// 管理/总览 views re-read the budget via window.tari and stay in sync in real time. Fired for every
+// committed write — provider-routed (via onChange below) and the drawer's own open-budget / fund.
+function notifyDashboard() {
+  try { if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tari#change")); } catch { /* best effort */ }
+}
+
 // --- install the same-origin window.tari (connected=false until the user connects in the drawer) ---
-const provider = installInPageTari(wallet.providerHost({ approve, onChange: () => { renderMain(); } }));
+const provider = installInPageTari(wallet.providerHost({ approve, onChange: () => { renderMain(); notifyDashboard(); } }));
 
 // --- view routing -------------------------------------------------------------------------------
 // The wallet is no longer a floating drawer — it's a first-class dashboard nav view ("钱包"). app.js owns the
@@ -276,7 +283,7 @@ async function renderMain() {
 
 $("w-btnFund").onclick = async () => {
   const btn = $("w-btnFund"); btn.disabled = true; const lab = btn.textContent; btn.textContent = "充值中…"; $("w-mainErr").textContent = "";
-  try { await wallet.fund(); await renderMain(); }
+  try { await wallet.fund(); await renderMain(); notifyDashboard(); }
   catch (e) { $("w-mainErr").textContent = "充值失败: " + (e?.message || e); }
   finally { btn.disabled = false; btn.textContent = lab; }
 };
@@ -292,7 +299,7 @@ $("w-btnOpenBudget").onclick = async () => {
   const btn = $("w-btnOpenBudget"); btn.disabled = true; const lab = btn.textContent; btn.textContent = "开预算中…";
   try {
     await wallet.openBudget({ template: await templateAddr(), fund: Number(fund), perTxCap: Number(perTx), dailyCap: Number(daily), epochsPerWindow: 10 });
-    await renderMain();
+    await renderMain(); notifyDashboard();
   } catch (e) { $("w-budErr").textContent = "开预算失败: " + (e?.message || e); }
   finally { btn.disabled = false; btn.textContent = lab; }
 };
