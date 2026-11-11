@@ -2,8 +2,8 @@
 //
 // RUN THIS ONLY AFTER you have a FUNDED account on the target network. On mainnet that means: burn XTM in
 // Tari Universe, wait ~24h for the TARI to arrive, fund this account, THEN run this. It pays a real
-// on-chain publish fee. It is dry-run-first and will NOT submit unless you pass PUBLISH_CONFIRM=1, so you
-// can validate the shape on localnet/stagenet (free) before spending on mainnet.
+// on-chain publish fee. It is PREVIEW-first: it builds the tx and prints a summary, and will NOT submit
+// unless you pass PUBLISH_CONFIRM=1 — so you can rehearse the whole flow on localnet (free) first.
 //
 // Inputs (env):
 //   AGENTPAY_NETWORK   network name (default: mainnet). Resolved in src/net-config.mjs.
@@ -13,7 +13,8 @@
 //   PUBLISH_ACCOUNT    the funded source account component (component_…) that pays the publish fee.
 //   PUBLISH_OWNER_HEX  32-byte hex owner secret of that account (signs the publish tx).
 //   PUBLISH_VIEW_HEX   32-byte hex view secret.
-//   PUBLISH_FEE        max fee in XTR base units (default 2_000_000).
+//   PUBLISH_FEE        max fee in XTR base units (default 10_000_000; a ~300 KiB template costs ~5M, and
+//                      any unused reserve is refunded — raise it if the chain reports InsufficientFeesPaid).
 //   PUBLISH_CONFIRM=1  actually submit (otherwise: dry-run only, prints the result and exits).
 //
 // On success it prints the published template_ address — paste it into AGENT_TEMPLATE
@@ -24,10 +25,9 @@
 import fs from "node:fs";
 import { webcrypto } from "node:crypto";
 if (!globalThis.crypto) globalThis.crypto = webcrypto; // Node 18 shim; browsers have globalThis.crypto
-import { TransactionBuilder, amountLiteral } from "@tari-project/ootle";
+import { TransactionBuilder, fromHexStr } from "@tari-project/ootle";
 import { SecretKeyWallet } from "@tari-project/ootle-secret-key-wallet";
-import { fromHexStr } from "@tari-project/ootle";
-import { connectIndexer, maxEpoch, signSealSubmit, dryRun } from "../src/chain.js";
+import { connectIndexer, maxEpoch, signSealSubmit, accountVaults, decodeExecResult } from "../src/chain.js";
 import { netByName } from "../src/net-config.mjs";
 
 const NETNAME = (process.env.AGENTPAY_NETWORK || "mainnet").toLowerCase();
@@ -36,7 +36,7 @@ const INDEXER = process.env.INDEXER_URL || net.indexerUrl;
 const WASM = process.env.TEMPLATE_WASM;
 const ACCOUNT = process.env.PUBLISH_ACCOUNT;
 const OWNER = process.env.PUBLISH_OWNER_HEX, VIEW = process.env.PUBLISH_VIEW_HEX;
-const FEE = BigInt(process.env.PUBLISH_FEE || "2000000");
+const FEE = BigInt(process.env.PUBLISH_FEE || "10000000");
 const CONFIRM = process.env.PUBLISH_CONFIRM === "1";
 
 const die = (m) => { console.error("error: " + m); process.exit(1); };
@@ -50,27 +50,34 @@ const provider = await connectIndexer(INDEXER, net.network);
 console.log(`[publish] network=${NETNAME} indexer=${INDEXER}`);
 console.log(`[publish] account=${ACCOUNT} wasm=${WASM} (${b64.length} base64 chars) fee<=${FEE} confirm=${CONFIRM}`);
 
-// Pay the publish fee from the funded account, then publish the template blob.
-const unsigned = new TransactionBuilder(net.network, await maxEpoch(provider))
-  .withFeeInstructionsBuilder((b) =>
-    b.callMethod({ componentAddress: ACCOUNT, methodName: "pay_fee" }, [amountLiteral(FEE)]),
-  )
+// Declare the funded account + its current vaults as inputs (the bare indexer can't auto-detect them),
+// pay the publish fee from the account, then publish the template blob. Mirrors agentpay-tx.js's fee+input
+// idiom (feeTransactionPayFromComponent + asInput with is_write). Verified on localnet 2026-11-11.
+const asInput = (id, is_write = true) => ({ substate_id: id, version: null, is_write });
+const ownerVaults = await accountVaults(provider, ACCOUNT);
+const unsigned = TransactionBuilder.new(net.network, await maxEpoch(provider))
+  .withInputs([asInput(ACCOUNT), ...ownerVaults.map((v) => asInput(v))])
+  .feeTransactionPayFromComponent(ACCOUNT, FEE)
   .publishTemplate(b64)
-  .withInputs([{ substate_id: ACCOUNT, version: null }])
   .buildUnsignedTransaction();
 
-// Pull any template_ address out of a receipt's up-substates (the published template's new substate id).
+// The published template's substate id lives in the DECODED (CBOR) execution_result, not the raw receipt.
+// Decode it, then take the real template_<64hex> id — skipping the all-zeros template_address the
+// std.vault.pay_fee event carries. Verified on localnet 2026-11-11.
 function templateAddrOf(receipt) {
-  const s = JSON.stringify(receipt ?? "");
-  const m = s.match(/template_[0-9a-f]{64}/i);
-  return m ? m[0] : null;
+  const scan = (s) => (s.match(/template_[0-9a-f]{64}/gi) || []).filter((t) => !/^template_0+$/i.test(t));
+  try {
+    const enc = receipt?.result?.Finalized?.execution_result;
+    const hits = enc ? scan(JSON.stringify(decodeExecResult(enc))) : [];
+    if (hits.length) return hits[hits.length - 1];
+  } catch { /* fall through to raw */ }
+  const raw = scan(JSON.stringify(receipt ?? ""));
+  return raw.length ? raw[raw.length - 1] : null;
 }
 
 if (!CONFIRM) {
-  console.log("[dry-run] PUBLISH_CONFIRM!=1 — simulating only, NOT submitting.");
-  const r = await dryRun(provider, [wallet], unsigned);
-  console.log("[dry-run] result:\n" + JSON.stringify(r, null, 2).slice(0, 4000));
-  console.log("\n[dry-run] looks right? re-run with PUBLISH_CONFIRM=1 to publish for real.");
+  console.log(`[preview] built publish tx: ${1 + ownerVaults.length} input(s), fee<=${FEE}, wasm ~${Math.round(b64.length / 1365)} KiB. Not submitting.`);
+  console.log("[preview] PUBLISH_CONFIRM!=1 — re-run with PUBLISH_CONFIRM=1 to publish for real.");
   process.exit(0);
 }
 
