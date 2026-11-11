@@ -53,18 +53,29 @@ const SESSION = process.env.SESSION || "default";
 // are gated to localnet: on any other AGENTPAY_NETWORK the dev-key export is refused. Defaults to localnet
 // (the live service sets nothing), so this is a no-op there and a safety net for any real-network reuse.
 const NETWORK = process.env.AGENTPAY_NETWORK || "localnet";
+// Non-custodial deployment switch. When AGENTPAY_CUSTODIAL=0 this process loads NO key and performs NO
+// custodial signing: the /api writes, /api/dev-key, /api/account and the /bridge relay are all disabled,
+// and only the static dist + a config-only /api/status are served. Default (unset) = custodial, so any
+// existing deployment is unchanged; the non-custodial :16666 site sets it via a systemd drop-in.
+const CUSTODIAL = process.env.AGENTPAY_CUSTODIAL !== "0";
 
-// Load the custodial dev key. If a .spike-key.enc.json is present it is decrypted with the passphrase
-// from WALLET_KEY_PASSPHRASE[_FILE]; otherwise it falls back to the plaintext .spike-key.json (dev).
-const key = loadKeyFile(import.meta.url);
-if (!key.account) throw new Error("key file has no account — fund one first");
-const ACCOUNT = key.account;
 const UI = new URL("../wallet-live.html", import.meta.url);
-
-const w = new L2Wallet({ ownerSecretHex: key.owner, viewSecretHex: key.view, network: Network.LocalNet, indexerUrl: INDEXER_URL, account: ACCOUNT });
-const provider = await connectIndexer(INDEXER_URL, Network.LocalNet);
-
 const state = { budget: process.env.BUDGET || null, initialFund: null, template: TEMPLATE, merchant: MERCHANT };
+
+// The custodial owner key, its signer and the indexer connection exist ONLY in custodial mode. In the
+// non-custodial deployment (AGENTPAY_CUSTODIAL=0) none of these are created, so this process holds no
+// key in memory and has nothing to sign with. If a .spike-key.enc.json is present it is decrypted with
+// the passphrase from WALLET_KEY_PASSPHRASE[_FILE]; otherwise it falls back to the plaintext key (dev).
+let key = null, ACCOUNT = null, w = null, provider = null;
+if (CUSTODIAL) {
+  key = loadKeyFile(import.meta.url);
+  if (!key.account) throw new Error("key file has no account — fund one first");
+  ACCOUNT = key.account;
+  w = new L2Wallet({ ownerSecretHex: key.owner, viewSecretHex: key.view, network: Network.LocalNet, indexerUrl: INDEXER_URL, account: ACCOUNT });
+  provider = await connectIndexer(INDEXER_URL, Network.LocalNet);
+} else {
+  console.log("non-custodial mode (AGENTPAY_CUSTODIAL=0): no key loaded; /api writes, /api/dev-key and /bridge disabled");
+}
 
 // --- two-account decoupling --------------------------------------------------------------------
 // A SEPARATE agent account (its own key) holds the budget's agent badge and pays its OWN gas, so the
@@ -73,7 +84,7 @@ const state = { budget: process.env.BUDGET || null, initialFund: null, template:
 // If the file is absent, pay falls back to the single-account model (agent == owner).
 const TWO_FILE = new URL("../.spike-two-account.json", import.meta.url);
 let two = null, agentW = null;
-if (fs.existsSync(TWO_FILE) && keyFilePresent(import.meta.url, ".spike-agent-key")) {
+if (CUSTODIAL && fs.existsSync(TWO_FILE) && keyFilePresent(import.meta.url, ".spike-agent-key")) {
   two = JSON.parse(fs.readFileSync(TWO_FILE, "utf8"));
   const ak = loadKeyFile(import.meta.url, process.env, ".spike-agent-key"); // encrypted at rest like the owner key
   agentW = new L2Wallet({ ownerSecretHex: ak.owner, viewSecretHex: ak.view, network: Network.LocalNet, indexerUrl: INDEXER_URL, account: ak.account });
@@ -93,10 +104,10 @@ const paySign = (unsignedTransaction) => (agentW || w).request("tari_signAndSubm
 // /bridge/* queue ONLY — /api/pay gets NO CORS, so a cross-origin dApp physically cannot call it.
 // The dApp <-> wallet relay (enqueue / poll / resolve / linkedOrigin + CORS) lives in its own module
 // so it can be regression-tested with no chain, engine or key — see src/dapp-bridge.mjs and its tests.
-const bridge = createDappBridge({ dappOrigins: process.env.DAPP_ORIGINS });
+const bridge = CUSTODIAL ? createDappBridge({ dappOrigins: process.env.DAPP_ORIGINS }) : null;
 // The custodial-signing /api writes and the dev-key export require the same per-process pairing token the
 // same-origin wallet page already fetches from GET /bridge/session (x-wallet-token header or ?token=).
-const tokenOK = (req) => (req.headers["x-wallet-token"] || new URL(req.url, "http://x").searchParams.get("token")) === bridge.sessionToken;
+const tokenOK = (req) => !!bridge && (req.headers["x-wallet-token"] || new URL(req.url, "http://x").searchParams.get("token")) === bridge.sessionToken;
 const collect = (x, pfx, out = new Set()) => {
   if (!x) return out;
   if (typeof x === "string") { if (x.startsWith(pfx)) out.add(x); return out; }
@@ -401,6 +412,17 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && STATIC[url.pathname]) {
       const f = new URL("../" + STATIC[url.pathname], import.meta.url);
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }); return res.end(fs.readFileSync(f));
+    }
+    // Non-custodial deployment: the static dist/pages are served above; here /api/status answers config
+    // only (what the in-page wallet needs: network + indexer + template + merchant) and every other /api
+    // or /bridge path is closed, so there is no server-side signing surface left to reach.
+    if (!CUSTODIAL) {
+      if (url.pathname === "/api/status")
+        return send(res, 200, { connected: false, custodial: false, nonCustodial: true, account: null,
+          network: NETWORK, indexer: INDEXER_URL, template: TEMPLATE, merchant: MERCHANT,
+          agentAccount: null, twoAccount: false, linkedOrigin: null, budget: null });
+      if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/bridge/"))
+        return send(res, 404, { error: "custodial endpoints disabled (non-custodial deployment)" });
     }
     if (url.pathname === "/api/status") {
       return send(res, 200, { connected: true, account: ACCOUNT, network: NETWORK, indexer: INDEXER_URL,
