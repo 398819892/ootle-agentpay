@@ -164,13 +164,18 @@ $("w-btnRestoreDo").onclick = async () => {
 };
 
 // --- unlock -------------------------------------------------------------------------------------
-$("w-btnUnlock").onclick = async () => {
+const doUnlock = async () => {
   $("w-unlockErr").textContent = "";
   try { await wallet.unlock($("w-unlockPass").value); }
   catch (e) { return void ($("w-unlockErr").textContent = e?.message || "口令错误"); }
   $("w-unlockPass").value = "";
   await enterMain();
 };
+$("w-btnUnlock").onclick = doUnlock;
+// Enter in the passphrase field unlocks (same as clicking 解锁).
+$("w-unlockPass").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); doUnlock(); }
+});
 $("w-btnForget").onclick = () => {
   if (!confirm("清除本机的 AgentWallet 数据?若无助记词备份将无法找回。")) return;
   wallet.forget(); provider._notifyLocked(); kickIdle(); route();
