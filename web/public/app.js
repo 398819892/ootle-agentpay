@@ -1677,7 +1677,6 @@ async function withPending(btn, label, fn) {
 
 /* ---- navigation ----------------------------------------------------------- */
 const NAV = [
-  { id: "start", key: "nav_start", icon: "zap" },
   { id: "overview", key: "nav_overview", icon: "grid" },
   { id: "manage", key: "nav_manage", icon: "shield" },
   { id: "pay", key: "nav_pay", icon: "send" },
