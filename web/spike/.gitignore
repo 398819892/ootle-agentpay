@@ -1,4 +1,6 @@
 node_modules/
 dist/
 .vite/
-.spike-key.json
+# Local custodial dev key material — NEVER commit, plaintext OR encrypted
+# (.spike-key[.enc].json owner, .spike-agent-key[.enc].json agent, .spike-two-account.json budget cfg).
+.spike-*

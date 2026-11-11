@@ -5,8 +5,10 @@
 // moves. wallet-server.mjs picks the result up from .spike-two-account.json and signs /api/pay with
 // the agent key, leaving /api/account + /api/send on the owner key.
 //
-//   owner key (.spike-key.json, funded)  -- funds the budget, signs `open`
-//   agent key (.spike-agent-key.json)    -- faucet-created account, holds the agent badge, pays `pay` gas
+//   owner key (.spike-key[.enc].json, funded)  -- funds the budget, signs `open`
+//   agent key (.spike-agent-key[.enc].json)     -- faucet-created account, holds the agent badge, pays `pay` gas
+// Keys are encrypted at rest (AES-256-GCM) when WALLET_KEY_PASSPHRASE[_FILE] is set; plaintext is a
+// localnet-dev fallback only. See key-vault.mjs.
 //
 // Idempotent: reuses the agent key, account and budget if the files already exist.
 // Run from the spike root in WSL ext4 against the local swarm:
@@ -23,14 +25,31 @@ import { SecretKeyWallet } from "@tari-project/ootle-secret-key-wallet";
 import { decodeSubstateValue } from "@tari-project/ootle-wasm-bor";
 import { openBudgetTx, parseBudgetSubstate, findNewComponent, XTR } from "../src/agentpay-tx.js";
 import { connectIndexer, accountVaults, maxEpoch, signSealSubmit } from "../src/chain.js";
+import { encrypt, passphraseFromEnv, loadKeyFile, keyFilePresent } from "./key-vault.mjs";
 
 const INDEXER = process.env.INDEXER_URL || "http://127.0.0.1:12008";
 const NET = Network.LocalNet;
 const TEMPLATE = process.env.AGENT_TEMPLATE || "template_c4b58558181f19c17d6ccc75c93e0707e2c5b75d1ef4de96a70acd0fd2d40e47";
 const MERCHANT = process.env.MERCHANT || "component_c5c2db90a8f9f02981617244b835fd36d4830bdcb80eb7f5cb092932896924e3";
-const OWNER_KEY_FILE = new URL("../.spike-key.json", import.meta.url);
-const AGENT_KEY_FILE = new URL("../.spike-agent-key.json", import.meta.url);
+const AGENT_STEM = ".spike-agent-key";
 const CFG_FILE = new URL("../.spike-two-account.json", import.meta.url);
+
+// Persist the agent key encrypted at rest when a passphrase is configured (WALLET_KEY_PASSPHRASE[_FILE]),
+// matching how wallet-server.mjs loads it; plaintext only as a localnet-dev fallback (0600 + loud warning).
+const KEY_PASS = passphraseFromEnv();
+function saveAgentKey(obj) {
+  if (KEY_PASS) {
+    const out = new URL(`../${AGENT_STEM}.enc.json`, import.meta.url);
+    fs.writeFileSync(out, JSON.stringify(encrypt(obj, KEY_PASS)));
+    try { fs.chmodSync(out, 0o600); } catch { /* best effort */ }
+    log(`saved ENCRYPTED agent key at rest (${AGENT_STEM}.enc.json)`);
+  } else {
+    const out = new URL(`../${AGENT_STEM}.json`, import.meta.url);
+    fs.writeFileSync(out, JSON.stringify(obj, null, 2));
+    try { fs.chmodSync(out, 0o600); } catch { /* best effort */ }
+    console.warn(`WARNING: wrote UNENCRYPTED ${AGENT_STEM}.json (no WALLET_KEY_PASSPHRASE[_FILE]). Localnet dev only — migrate with 'node node/encrypt-key.mjs ${AGENT_STEM}'.`);
+  }
+}
 const XTR_HEX = XTR.replace(/^resource_/, "");
 
 const provider = await connectIndexer(INDEXER, NET);
@@ -50,22 +69,22 @@ async function xtrBalance(account) {
 }
 
 // --- owner key (funds the budget) ---
-const ownerKey = JSON.parse(fs.readFileSync(OWNER_KEY_FILE, "utf8"));
+const ownerKey = loadKeyFile(import.meta.url, process.env, ".spike-key"); // encrypted-at-rest aware (falls back to plaintext)
 const ownerW = SecretKeyWallet.fromSecretKey(fromHexStr(ownerKey.owner), NET, fromHexStr(ownerKey.view));
 const OWNER = ownerKey.account;
 log("owner account:", OWNER);
 
 // --- 1. agent key + faucet-funded account (the builtin localnet faucet creates the account in-tx) ---
 let agentKey;
-if (fs.existsSync(AGENT_KEY_FILE)) {
-  agentKey = JSON.parse(fs.readFileSync(AGENT_KEY_FILE, "utf8"));
+if (keyFilePresent(import.meta.url, AGENT_STEM)) {
+  agentKey = loadKeyFile(import.meta.url, process.env, AGENT_STEM);
   log("reusing agent key, account:", agentKey.account);
 } else {
   const { generateOotleSecretKey, ootlePublicKeyFromSecretKey } = await import("@tari-project/ootle-wasm");
   const sk = generateOotleSecretKey();
   const pk = ootlePublicKeyFromSecretKey(sk.owner_key, sk.view_key);
   agentKey = { owner: toHexStr(sk.owner_key), view: toHexStr(sk.view_key), ownerPublic: toHexStr(pk.owner_key), account: null };
-  fs.writeFileSync(AGENT_KEY_FILE, JSON.stringify(agentKey, null, 2));
+  saveAgentKey(agentKey);
   log("generated agent key pk", agentKey.ownerPublic);
 }
 const agentW = SecretKeyWallet.fromSecretKey(fromHexStr(agentKey.owner), NET, fromHexStr(agentKey.view));
@@ -84,7 +103,7 @@ if (!agentKey.account) {
     .buildUnsignedTransaction();
   const { txId, receipt } = await signSealSubmit(provider, [agentW], unsigned);
   agentKey.account = findNewComponent(receipt);
-  fs.writeFileSync(AGENT_KEY_FILE, JSON.stringify(agentKey, null, 2));
+  saveAgentKey(agentKey);
   log(`[faucet] tx ${txId} -> agent account ${agentKey.account}`);
 }
 const AGENT = agentKey.account;
